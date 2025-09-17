@@ -322,7 +322,9 @@ wss.on('connection', (ws, req) => {
             
             // Configure the session with restaurant context
             const instructions = `You are an AI assistant for ${restaurant.name}. 
-            
+
+IMPORTANT: As soon as the session starts, immediately greet the caller with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
+
 RESTAURANT INFORMATION:
 - Name: ${restaurant.name}
 - Description: ${restaurant.description || ''}
@@ -332,7 +334,7 @@ RESTAURANT INFORMATION:
 ${menuText}
 
 INSTRUCTIONS:
-1. Greet customers warmly and mention the restaurant name
+1. Start EVERY call with the greeting above mentioning the restaurant name
 2. Help customers browse the menu and answer questions about items
 3. Take orders clearly - ask for quantities and any special requests
 4. Confirm orders back to the customer including prices
@@ -431,6 +433,17 @@ Keep responses conversational and brief for phone calls.`;
                         
                     case 'session.updated':
                         console.log('⚙️ OpenAI session configured for', restaurant.name);
+                        
+                        // Immediately send a greeting to break the silence
+                        const greetingMessage = {
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio'],
+                                instructions: `Immediately say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                            }
+                        };
+                        openaiWs.send(JSON.stringify(greetingMessage));
+                        console.log('👋 Sending immediate greeting...');
                         break;
                 }
             } catch (error) {
