@@ -356,13 +356,24 @@ Keep responses conversational and brief for phone calls.`;
                     
                 case 'start':
                     streamSid = data.start.streamSid;
-                    const calledNumber = data.start.customParameters?.Called || data.start.customParameters?.To;
-                    const fromNumber = data.start.customParameters?.From;
-                    const callId = data.start.customParameters?.CallSid;
+                    
+                    // Debug: Log the entire start data to see what's available
+                    console.log('📋 Start data:', JSON.stringify(data.start, null, 2));
+                    
+                    // Try multiple ways to get the phone numbers
+                    const calledNumber = data.start.customParameters?.Called || 
+                                       data.start.customParameters?.To ||
+                                       data.start.callSid?.split('CA')[0]; // Extract from callSid if needed
+                    
+                    const fromNumber = data.start.customParameters?.From ||
+                                      data.start.customParameters?.Caller;
+                    
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
                     
                     console.log('🎙️ Stream started:', streamSid);
                     console.log('📞 Called number:', calledNumber);
                     console.log('📞 From number:', fromNumber);
+                    console.log('📞 Call ID:', callId);
                     
                     // Initialize OpenAI with restaurant context
                     initializeOpenAI(calledNumber, fromNumber, callId);
