@@ -467,7 +467,7 @@ Keep responses conversational and brief for phone calls.`;
                         const greetingMessage = {
                             type: 'response.create',
                             response: {
-                                modalities: ['audio'],
+                                modalities: ['audio', 'text'],
                                 instructions: `Immediately say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
                             }
                         };
