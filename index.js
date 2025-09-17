@@ -31,6 +31,25 @@ const wss = new WebSocket.Server({
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// Twilio webhook endpoint for incoming calls
+app.post('/voice', (req, res) => {
+    console.log('📞 Incoming call webhook:', req.body);
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="wss://${req.get('host')}/media-stream">
+            <Parameter name="Called" value="${req.body.Called || req.body.To}" />
+            <Parameter name="From" value="${req.body.From || req.body.Caller}" />
+            <Parameter name="CallSid" value="${req.body.CallSid}" />
+        </Stream>
+    </Connect>
+</Response>`;
+    
+    res.type('text/xml');
+    res.send(twiml);
+});
+
 app.get('/', (req, res) => {
     res.json({ 
         message: 'Restaurant AI Ordering System',
@@ -180,8 +199,12 @@ wss.on('connection', (ws, req) => {
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('🍽️ Loading restaurant data for:', calledNumber);
         
+        // Fallback to a test number if calledNumber is undefined/null
+        const phoneToLookup = calledNumber || '+14108880091'; // Your Twilio number
+        console.log('📞 Using phone number for lookup:', phoneToLookup);
+        
         // Get restaurant data
-        restaurant = await getRestaurantByPhone(calledNumber);
+        restaurant = await getRestaurantByPhone(phoneToLookup);
         
         if (!restaurant) {
             console.error('❌ Restaurant not found for phone:', calledNumber);
