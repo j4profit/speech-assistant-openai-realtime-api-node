@@ -65,8 +65,8 @@ wss.on('connection', (ws, req) => {
                     modalities: ['text', 'audio'],
                     instructions: 'You are a helpful voice assistant. Keep responses brief and conversational. Speak naturally as if having a phone conversation.',
                     voice: 'alloy',
-                    input_audio_format: 'mulaw',
-                    output_audio_format: 'mulaw',
+                    input_audio_format: 'g711_ulaw',
+                    output_audio_format: 'g711_ulaw',
                     input_audio_transcription: {
                         model: 'whisper-1'
                     },
