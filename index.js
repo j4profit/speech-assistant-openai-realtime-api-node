@@ -96,6 +96,53 @@ app.get('/health', (req, res) => {
     });
 });
 
+// API endpoint to get recent orders
+app.get('/orders', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                restaurants(name),
+                call_logs(call_duration, from_number)
+            `)
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ orders: data });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API endpoint to get orders for a specific restaurant
+app.get('/orders/:restaurantId', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                restaurants(name),
+                call_logs(call_duration, from_number),
+                order_items(quantity, price, special_requests, menu_items(name))
+            `)
+            .eq('restaurant_id', req.params.restaurantId)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ orders: data });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Function to get restaurant data by phone number
 async function getRestaurantByPhone(phoneNumber) {
     try {
@@ -343,7 +390,17 @@ INSTRUCTIONS:
 7. Be helpful, friendly, and efficient
 8. If asked about items not on the menu, politely explain they're not available
 
-When an order is confirmed, format it clearly for processing.
+IMPORTANT ORDER PROCESSING:
+When an order is confirmed, you MUST format it exactly like this:
+ORDER_CONFIRMED:
+- Customer Name: [name if provided]
+- Items: [list each item with quantity and price]
+- Special Instructions: [any special requests]
+- Total: $[total amount]
+- Pickup Time: [if specified]
+ORDER_END
+
+This format is critical for our system to process the order correctly.
 Keep responses conversational and brief for phone calls.`;
 
             const sessionUpdate = {
@@ -460,35 +517,390 @@ Keep responses conversational and brief for phone calls.`;
         });
     }
 
-    // Process order from AI transcript (simple pattern matching)
+    // Improved order processing from AI transcript
     async function processOrderFromTranscript(transcript) {
         try {
-            console.log('📝 Processing potential order from transcript...');
+            console.log('📝 Processing order from transcript...');
             
-            // This is a simplified order extraction
-            // In production, you'd want more sophisticated parsing
-            const orderData = {
-                restaurant_id: restaurant.id,
-                customer_phone: customerPhone,
-                total_amount: 0, // You'd calculate this based on items
-                order_details: transcript,
-                special_instructions: '',
-                call_sid: callSid,
-                items: [] // You'd parse items from the transcript
-            };
-
-            const order = await createOrder(orderData);
-            if (order) {
-                console.log('🎉 Order saved successfully!');
+            // Look for the structured order format
+            if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
+                const orderSection = transcript.substring(
+                    transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
+                    transcript.indexOf('ORDER_END')
+                ).trim();
                 
-                // Link the order to the call log
-                if (callSid) {
-                    await updateCallLog(callSid, { order_id: order.id });
+                console.log('📋 Found structured order:', orderSection);
+                
+                // Parse the structured order
+                const orderData = parseStructuredOrder(orderSection);
+                
+                if (orderData) {
+                    orderData.restaurant_id = restaurant.id;
+                    orderData.customer_phone = customerPhone;
+                    orderData.call_sid = callSid;
+                    orderData.order_details = transcript;
+                    
+                    const order = await createOrder(orderData);
+                    if (order) {
+                        console.log('🎉 Structured order saved successfully!');
+                        
+                        // Link the order to the call log
+                        if (callSid) {
+                            await updateCallLog(callSid, { order_id: order.id });
+                        }
+                        return order;
+                    }
                 }
             }
+            
+            // Fallback: Check for order-like keywords
+            if (transcript.toLowerCase().includes('your order') || 
+                transcript.toLowerCase().includes('total') ||
+                transcript.toLowerCase().includes('
+    
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            
+            switch (data.event) {
+                case 'connected':
+                    console.log('📞 Twilio connected');
+                    break;
+                    
+                case 'start':
+                    streamSid = data.start.streamSid;
+                    
+                    // Debug: Log the entire start data to see what's available
+                    console.log('📋 Start data:', JSON.stringify(data.start, null, 2));
+                    
+                    // Try multiple ways to get the phone numbers
+                    const calledNumber = data.start.customParameters?.Called || 
+                                       data.start.customParameters?.To ||
+                                       data.start.callSid?.split('CA')[0]; // Extract from callSid if needed
+                    
+                    const fromNumber = data.start.customParameters?.From ||
+                                      data.start.customParameters?.Caller;
+                    
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
+                    
+                    console.log('🎙️ Stream started:', streamSid);
+                    console.log('📞 Called number:', calledNumber);
+                    console.log('📞 From number:', fromNumber);
+                    console.log('📞 Call ID:', callId);
+                    
+                    // Initialize OpenAI with restaurant context
+                    initializeOpenAI(calledNumber, fromNumber, callId);
+                    break;
+                    
+                case 'media':
+                    // Forward audio to OpenAI
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const audioData = {
+                            type: 'input_audio_buffer.append',
+                            audio: data.media.payload
+                        };
+                        openaiWs.send(JSON.stringify(audioData));
+                    }
+                    break;
+                    
+                case 'stop':
+                    console.log('🛑 Stream stopped');
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.close();
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('❌ Error processing Twilio message:', error);
+        }
+    });
+    
+    ws.on('close', async () => {
+        console.log('📞 Twilio connection closed');
+        
+        // Calculate call duration and update call log
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000); // in seconds
+        
+        // Process any orders from the conversation before closing
+        console.log('🔍 Checking for orders before call ends...');
+        await processCallEndOrder();
+        
+        if (callSid) {
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration,
+                conversation_transcript: JSON.stringify(conversationTranscript)
+            };
+            
+            await updateCallLog(callSid, updateData);
+            console.log(`📞 Call completed. Duration: ${callDuration} seconds`);
+        }
+        
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('❌ Twilio WebSocket error:', error);
+    });
+});
+
+wss.on('error', (error) => {
+    console.error('❌ WebSocket Server error:', error);
+});
+
+server.listen(port, '0.0.0.0', () => {
+    console.log(`🚀 Restaurant AI System running on port ${port}`);
+    console.log(`🍽️ Ready to take orders via phone calls`);
+    console.log(`📡 WebSocket ready for Twilio Media Streams`);
+    console.log(`🤖 OpenAI configured: ${!!OPENAI_API_KEY}`);
+    console.log(`🗄️ Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+});
+)) {
+                
+                console.log('📝 Found potential order in transcript');
+                
+                const orderData = {
+                    restaurant_id: restaurant.id,
+                    customer_phone: customerPhone,
+                    total_amount: extractTotal(transcript) || 0,
+                    order_details: transcript,
+                    special_instructions: '',
+                    call_sid: callSid,
+                    items: []
+                };
+
+                const order = await createOrder(orderData);
+                if (order) {
+                    console.log('🎉 Basic order saved successfully!');
+                    
+                    if (callSid) {
+                        await updateCallLog(callSid, { order_id: order.id });
+                    }
+                    return order;
+                }
+            }
+            
         } catch (error) {
             console.error('❌ Error processing order:', error);
         }
+        return null;
+    }
+
+    // Parse structured order format
+    function parseStructuredOrder(orderText) {
+        try {
+            const lines = orderText.split('\n').map(line => line.trim()).filter(line => line);
+            
+            const orderData = {
+                customer_name: '',
+                total_amount: 0,
+                special_instructions: '',
+                pickup_time: null,
+                items: []
+            };
+            
+            for (const line of lines) {
+                if (line.includes('Customer Name:')) {
+                    orderData.customer_name = line.split('Customer Name:')[1].trim();
+                } else if (line.includes('Total:')) {
+                    const totalMatch = line.match(/\$(\d+\.?\d*)/);
+                    if (totalMatch) {
+                        orderData.total_amount = parseFloat(totalMatch[1]);
+                    }
+                } else if (line.includes('Special Instructions:')) {
+                    orderData.special_instructions = line.split('Special Instructions:')[1].trim();
+                } else if (line.includes('Pickup Time:')) {
+                    orderData.pickup_time = line.split('Pickup Time:')[1].trim();
+                } else if (line.includes('Items:')) {
+                    // Items are on the same line or following lines
+                    const itemsText = line.split('Items:')[1].trim();
+                    if (itemsText) {
+                        // Simple parsing - you could make this more sophisticated
+                        orderData.items = parseItems(itemsText);
+                    }
+                }
+            }
+            
+            return orderData;
+        } catch (error) {
+            console.error('❌ Error parsing structured order:', error);
+            return null;
+        }
+    }
+
+    // Simple item parsing (can be enhanced)
+    function parseItems(itemsText) {
+        // This is a simple implementation - you could make it more sophisticated
+        return [{
+            menu_item_id: null, // Would need to match against menu
+            quantity: 1,
+            price: 0,
+            special_requests: itemsText
+        }];
+    }
+
+    // Extract total amount from transcript
+    function extractTotal(text) {
+        const totalMatch = text.match(/(?:total|amount).*?\$(\d+\.?\d*)/i);
+        return totalMatch ? parseFloat(totalMatch[1]) : null;
+    }
+
+    // Function to manually process order at call end
+    async function processCallEndOrder() {
+        try {
+            // Look through the entire conversation for order information
+            const fullConversation = conversationTranscript.map(msg => 
+                `${msg.speaker}: ${msg.text}`
+            ).join('\n');
+            
+            console.log('🔍 Analyzing full conversation for orders...');
+            
+            // Check if any AI response contained order confirmation
+            const aiResponses = conversationTranscript
+                .filter(msg => msg.speaker === 'AI')
+                .map(msg => msg.text);
+            
+            for (const response of aiResponses) {
+                const order = await processOrderFromTranscript(response);
+                if (order) {
+                    console.log('✅ Order found and processed from conversation!');
+                    return order;
+                }
+            }
+            
+            // Check if conversation contains order-like content
+            if (fullConversation.toLowerCase().includes('pizza') || 
+                fullConversation.toLowerCase().includes('order') ||
+                fullConversation.toLowerCase().includes('
+    
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            
+            switch (data.event) {
+                case 'connected':
+                    console.log('📞 Twilio connected');
+                    break;
+                    
+                case 'start':
+                    streamSid = data.start.streamSid;
+                    
+                    // Debug: Log the entire start data to see what's available
+                    console.log('📋 Start data:', JSON.stringify(data.start, null, 2));
+                    
+                    // Try multiple ways to get the phone numbers
+                    const calledNumber = data.start.customParameters?.Called || 
+                                       data.start.customParameters?.To ||
+                                       data.start.callSid?.split('CA')[0]; // Extract from callSid if needed
+                    
+                    const fromNumber = data.start.customParameters?.From ||
+                                      data.start.customParameters?.Caller;
+                    
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
+                    
+                    console.log('🎙️ Stream started:', streamSid);
+                    console.log('📞 Called number:', calledNumber);
+                    console.log('📞 From number:', fromNumber);
+                    console.log('📞 Call ID:', callId);
+                    
+                    // Initialize OpenAI with restaurant context
+                    initializeOpenAI(calledNumber, fromNumber, callId);
+                    break;
+                    
+                case 'media':
+                    // Forward audio to OpenAI
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const audioData = {
+                            type: 'input_audio_buffer.append',
+                            audio: data.media.payload
+                        };
+                        openaiWs.send(JSON.stringify(audioData));
+                    }
+                    break;
+                    
+                case 'stop':
+                    console.log('🛑 Stream stopped');
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.close();
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('❌ Error processing Twilio message:', error);
+        }
+    });
+    
+    ws.on('close', async () => {
+        console.log('📞 Twilio connection closed');
+        
+        // Calculate call duration and update call log
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000); // in seconds
+        
+        if (callSid) {
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration,
+                conversation_transcript: JSON.stringify(conversationTranscript)
+            };
+            
+            await updateCallLog(callSid, updateData);
+            console.log(`📞 Call completed. Duration: ${callDuration} seconds`);
+        }
+        
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('❌ Twilio WebSocket error:', error);
+    });
+});
+
+wss.on('error', (error) => {
+    console.error('❌ WebSocket Server error:', error);
+});
+
+server.listen(port, '0.0.0.0', () => {
+    console.log(`🚀 Restaurant AI System running on port ${port}`);
+    console.log(`🍽️ Ready to take orders via phone calls`);
+    console.log(`📡 WebSocket ready for Twilio Media Streams`);
+    console.log(`🤖 OpenAI configured: ${!!OPENAI_API_KEY}`);
+    console.log(`🗄️ Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+});
+)) {
+                
+                console.log('📝 Potential order detected in conversation');
+                
+                const orderData = {
+                    restaurant_id: restaurant.id,
+                    customer_phone: customerPhone,
+                    total_amount: 0,
+                    order_details: fullConversation,
+                    special_instructions: 'Order extracted from conversation',
+                    call_sid: callSid,
+                    items: []
+                };
+
+                const order = await createOrder(orderData);
+                if (order) {
+                    console.log('🎉 Conversation order saved!');
+                    
+                    if (callSid) {
+                        await updateCallLog(callSid, { order_id: order.id });
+                    }
+                    return order;
+                }
+            }
+            
+        } catch (error) {
+            console.error('❌ Error processing call end order:', error);
+        }
+        return null;
     }
     
     ws.on('message', (message) => {
