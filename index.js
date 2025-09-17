@@ -7,8 +7,11 @@ const port = process.env.PORT || 3000;
 // Create HTTP server
 const server = require('http').createServer(app);
 
-// Create WebSocket server WITHOUT path restriction
-const wss = new WebSocket.Server({ server });
+// Create WebSocket server with explicit path
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/media-stream'
+});
 
 app.get('/', (req, res) => {
     res.json({ 
@@ -24,21 +27,6 @@ app.get('/health', (req, res) => {
         websocket_ready: true,
         timestamp: new Date().toISOString() 
     });
-});
-
-// Handle WebSocket upgrade manually
-server.on('upgrade', (request, socket, head) => {
-    console.log('🔄 WebSocket upgrade request to:', request.url);
-    
-    if (request.url === '/media-stream') {
-        wss.handleUpgrade(request, socket, head, (ws) => {
-            console.log('✅ WebSocket upgraded successfully');
-            wss.emit('connection', ws, request);
-        });
-    } else {
-        console.log('❌ Invalid WebSocket path:', request.url);
-        socket.destroy();
-    }
 });
 
 // WebSocket connection handler
