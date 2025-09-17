@@ -119,7 +119,77 @@ app.get('/orders', async (req, res) => {
     }
 });
 
-// Function to get restaurant data by phone number
+// Function to get recent orders for a phone number
+async function getRecentOrders(phoneNumber, restaurantId, daysBack = 1) {
+    try {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        
+        const { data, error } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                order_items (
+                    id,
+                    quantity,
+                    price,
+                    special_requests,
+                    menu_items (name, description, price)
+                )
+            `)
+            .eq('customer_phone', phoneNumber)
+            .eq('restaurant_id', restaurantId)
+            .gte('created_at', cutoffDate.toISOString())
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+        if (error) {
+            console.error('Error fetching recent orders:', error);
+            return [];
+        }
+
+        return data || [];
+    } catch (error) {
+        console.error('Error fetching recent orders:', error);
+        return [];
+    }
+}
+
+// Function to format recent order for AI
+function formatRecentOrderForAI(orders) {
+    if (!orders || orders.length === 0) {
+        return null;
+    }
+
+    const mostRecent = orders[0];
+    const orderDate = new Date(mostRecent.created_at).toLocaleDateString();
+    
+    let orderSummary = `RECENT ORDER FROM ${orderDate}:\n`;
+    orderSummary += `Order ID: ${mostRecent.id}\n`;
+    orderSummary += `Total: ${mostRecent.total_amount}\n`;
+    
+    if (mostRecent.order_items && mostRecent.order_items.length > 0) {
+        orderSummary += `Items:\n`;
+        mostRecent.order_items.forEach(item => {
+            const menuItem = item.menu_items;
+            orderSummary += `- ${item.quantity}x ${menuItem?.name || 'Item'} (${item.price})`;
+            if (item.special_requests) {
+                orderSummary += ` - Special: ${item.special_requests}`;
+            }
+            orderSummary += `\n`;
+        });
+    }
+    
+    if (mostRecent.special_instructions) {
+        orderSummary += `Special Instructions: ${mostRecent.special_instructions}\n`;
+    }
+    
+    return {
+        summary: orderSummary,
+        orderId: mostRecent.id,
+        orderData: mostRecent
+    };
+}
 async function getRestaurantByPhone(phoneNumber) {
     try {
         const { data, error } = await supabase
@@ -494,6 +564,12 @@ Keep responses conversational and brief for phone calls.`;
         try {
             console.log('Processing order from transcript...');
             
+            // Check for modified order format first
+            if (transcript.includes('MODIFIED_ORDER_CONFIRMED:') && transcript.includes('MODIFIED_ORDER_END')) {
+                return await processModifiedOrder(transcript);
+            }
+            
+            // Check for regular order format
             if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
                 const orderSection = transcript.substring(
                     transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
@@ -524,6 +600,62 @@ Keep responses conversational and brief for phone calls.`;
         } catch (error) {
             console.error('Error processing order:', error);
         }
+    }
+
+    // Process modified order
+    async function processModifiedOrder(transcript) {
+        try {
+            console.log('Processing modified order...');
+            
+            const orderSection = transcript.substring(
+                transcript.indexOf('MODIFIED_ORDER_CONFIRMED:') + 'MODIFIED_ORDER_CONFIRMED:'.length,
+                transcript.indexOf('MODIFIED_ORDER_END')
+            ).trim();
+            
+            // Extract original order ID
+            const originalOrderIdMatch = orderSection.match(/Original Order ID:\s*([^\n]+)/);
+            const originalOrderId = originalOrderIdMatch ? originalOrderIdMatch[1].trim() : null;
+            
+            console.log('Modifying order ID:', originalOrderId);
+            
+            // Create new order with reference to original
+            const orderData = {
+                restaurant_id: restaurant.id,
+                customer_phone: customerPhone,
+                total_amount: extractTotal(orderSection) || 0,
+                order_details: transcript,
+                special_instructions: `Modified from order ${originalOrderId}`,
+                call_sid: callSid,
+                items: []
+            };
+
+            const newOrder = await createOrder(orderData);
+            if (newOrder) {
+                console.log('Modified order saved successfully!');
+                
+                // Update the original order status to indicate it was modified
+                if (originalOrderId) {
+                    await supabase
+                        .from('orders')
+                        .update({ 
+                            status: 'modified',
+                            special_instructions: `Modified by new order ${newOrder.id}`
+                        })
+                        .eq('id', originalOrderId);
+                    
+                    console.log('Original order marked as modified');
+                }
+                
+                if (callSid) {
+                    await updateCallLog(callSid, { order_id: newOrder.id });
+                }
+                
+                return newOrder;
+            }
+        } catch (error) {
+            console.error('Error processing modified order:', error);
+        }
+        return null;
     }
 
     // Extract total amount from text
