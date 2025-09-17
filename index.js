@@ -1,3 +1,4 @@
+// Simple WebSocket test for Twilio Media Streams
 const express = require('express');
 const WebSocket = require('ws');
 const app = express();
@@ -67,6 +68,7 @@ wss.on('connection', (ws, req) => {
                     
                 case 'media':
                     console.log('🔊 Audio data received, length:', data.media?.payload?.length || 'unknown');
+                    // Just log the audio data, don't process it yet
                     break;
                     
                 case 'stop':
