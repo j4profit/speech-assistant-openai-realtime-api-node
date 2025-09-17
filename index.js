@@ -32,8 +32,37 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // Twilio webhook endpoint for incoming calls
-app.post('/voice', (req, res) => {
+app.post('/voice', async (req, res) => {
     console.log('📞 Incoming call webhook:', req.body);
+    
+    // Extract call data from Twilio webhook
+    const callData = {
+        call_sid: req.body.CallSid,
+        from_number: req.body.From || req.body.Caller,
+        to_number: req.body.Called || req.body.To,
+        call_status: req.body.CallStatus,
+        call_direction: req.body.Direction,
+        caller_country: req.body.CallerCountry,
+        caller_state: req.body.CallerState,
+        caller_city: req.body.CallerCity,
+        caller_zip: req.body.CallerZip,
+        to_country: req.body.ToCountry || req.body.CalledCountry,
+        to_state: req.body.ToState || req.body.CalledState,
+        to_city: req.body.ToCity || req.body.CalledCity,
+        to_zip: req.body.ToZip || req.body.CalledZip,
+        call_started_at: new Date().toISOString(),
+        twilio_data: req.body, // Store complete Twilio data
+        restaurant_id: null // Will be populated after restaurant lookup
+    };
+    
+    // Look up restaurant to get restaurant_id for the call log
+    const restaurant = await getRestaurantByPhone(callData.to_number);
+    if (restaurant) {
+        callData.restaurant_id = restaurant.id;
+    }
+    
+    // Create initial call log
+    await createCallLog(callData);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -98,7 +127,67 @@ async function getRestaurantByPhone(phoneNumber) {
     }
 }
 
-// Function to create order in database
+// Function to create call log in database
+async function createCallLog(callData) {
+    try {
+        const { data, error } = await supabase
+            .from('call_logs')
+            .insert([{
+                call_sid: callData.call_sid,
+                restaurant_id: callData.restaurant_id,
+                from_number: callData.from_number,
+                to_number: callData.to_number,
+                call_status: callData.call_status,
+                call_direction: callData.call_direction,
+                caller_country: callData.caller_country,
+                caller_state: callData.caller_state,
+                caller_city: callData.caller_city,
+                caller_zip: callData.caller_zip,
+                to_country: callData.to_country,
+                to_state: callData.to_state,
+                to_city: callData.to_city,
+                to_zip: callData.to_zip,
+                call_started_at: callData.call_started_at,
+                twilio_data: callData.twilio_data
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Error creating call log:', error);
+            return null;
+        }
+
+        console.log('📞 Call log created:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error creating call log:', error);
+        return null;
+    }
+}
+
+// Function to update call log when call ends
+async function updateCallLog(callSid, updateData) {
+    try {
+        const { data, error } = await supabase
+            .from('call_logs')
+            .update(updateData)
+            .eq('call_sid', callSid)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Error updating call log:', error);
+            return null;
+        }
+
+        console.log('📞 Call log updated for:', callSid);
+        return data;
+    } catch (error) {
+        console.error('❌ Error updating call log:', error);
+        return null;
+    }
+}
 async function createOrder(orderData) {
     try {
         // Insert order
@@ -189,6 +278,8 @@ wss.on('connection', (ws, req) => {
     let callSid = null;
     let customerPhone = null;
     let restaurant = null;
+    let callStartTime = new Date();
+    let conversationTranscript = [];
     let currentOrder = {
         items: [],
         total: 0,
@@ -297,6 +388,13 @@ Keep responses conversational and brief for phone calls.`;
                     case 'response.audio_transcript.done':
                         console.log('🤖 AI said:', response.transcript);
                         
+                        // Add to conversation transcript
+                        conversationTranscript.push({
+                            timestamp: new Date().toISOString(),
+                            speaker: 'AI',
+                            text: response.transcript
+                        });
+                        
                         // Check if this looks like a confirmed order
                         if (response.transcript.toLowerCase().includes('your order') && 
                             response.transcript.toLowerCase().includes('total')) {
@@ -306,6 +404,13 @@ Keep responses conversational and brief for phone calls.`;
                         
                     case 'conversation.item.input_audio_transcription.completed':
                         console.log('👤 Customer said:', response.transcript);
+                        
+                        // Add to conversation transcript
+                        conversationTranscript.push({
+                            timestamp: new Date().toISOString(),
+                            speaker: 'Customer',
+                            text: response.transcript
+                        });
                         break;
                         
                     case 'input_audio_buffer.speech_started':
@@ -362,6 +467,11 @@ Keep responses conversational and brief for phone calls.`;
             const order = await createOrder(orderData);
             if (order) {
                 console.log('🎉 Order saved successfully!');
+                
+                // Link the order to the call log
+                if (callSid) {
+                    await updateCallLog(callSid, { order_id: order.id });
+                }
             }
         } catch (error) {
             console.error('❌ Error processing order:', error);
@@ -425,8 +535,24 @@ Keep responses conversational and brief for phone calls.`;
         }
     });
     
-    ws.on('close', () => {
+    ws.on('close', async () => {
         console.log('📞 Twilio connection closed');
+        
+        // Calculate call duration and update call log
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000); // in seconds
+        
+        if (callSid) {
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration,
+                conversation_transcript: JSON.stringify(conversationTranscript)
+            };
+            
+            await updateCallLog(callSid, updateData);
+            console.log(`📞 Call completed. Duration: ${callDuration} seconds`);
+        }
+        
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }
