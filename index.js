@@ -344,17 +344,151 @@ async function updateOrder(orderId, updateData) {
         
         console.log(`Updating order ${orderId} with:`, updateData);
         
-        // Build the complete updated order details
-        const updatedOrderDetails = updateData.order_details || updateData.modifications || '';
-        const updatedInstructions = updateData.special_instructions || `MODIFIED: ${updatedOrderDetails}`;
-        const updatedTotal = updateData.total_amount || updateData.new_total || 0;
+        // First, fetch the existing order to preserve and update its details
+        const { data: existingOrder, error: fetchError } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                order_items (
+                    id,
+                    quantity,
+                    price,
+                    special_requests,
+                    menu_items (
+                        id,
+                        name,
+                        description,
+                        price
+                    )
+                )
+            `)
+            .eq('id', orderId)
+            .single();
+
+        if (fetchError || !existingOrder) {
+            console.error('Error fetching existing order:', fetchError);
+            return null;
+        }
+
+        console.log('Existing order found:', existingOrder);
+
+        // Parse the modifications to understand what's being changed
+        const modifications = updateData.modifications || '';
+        const modLower = modifications.toLowerCase();
         
+        // Build the complete updated order details
+        let updatedOrderDetails = existingOrder.order_details || '';
+        let newTotal = existingOrder.total_amount || 0;
+        
+        // If modifications include adding items, append to order details
+        if (modLower.includes('add')) {
+            // Extract what's being added from the modifications string
+            const addedItems = modifications;
+            
+            // Parse existing order details to rebuild them
+            const existingLines = updatedOrderDetails.split('\n');
+            let customerInfo = [];
+            let itemsSection = [];
+            let otherInfo = [];
+            let currentSection = 'info';
+            
+            for (const line of existingLines) {
+                if (line.toLowerCase().includes('items:')) {
+                    currentSection = 'items';
+                    itemsSection.push(line);
+                } else if (line.toLowerCase().includes('special instructions:') || 
+                          line.toLowerCase().includes('pickup time:') ||
+                          line.toLowerCase().includes('order taken via')) {
+                    currentSection = 'other';
+                    otherInfo.push(line);
+                } else if (currentSection === 'info') {
+                    customerInfo.push(line);
+                } else if (currentSection === 'items') {
+                    itemsSection.push(line);
+                } else {
+                    otherInfo.push(line);
+                }
+            }
+            
+            // Add the new items to the items section
+            if (itemsSection.length === 0) {
+                itemsSection.push('Items:');
+            }
+            itemsSection.push(`- ${addedItems}`);
+            
+            // If a new total was provided, use it; otherwise try to calculate
+            if (updateData.new_total && updateData.new_total > 0) {
+                newTotal = updateData.new_total;
+            } else {
+                // Add the price from modifications if we can extract it
+                const priceMatch = modifications.match(/\$(\d+\.?\d*)/);
+                if (priceMatch) {
+                    const addedPrice = parseFloat(priceMatch[1]);
+                    newTotal = (existingOrder.total_amount || 0) + addedPrice;
+                }
+            }
+            
+            // Rebuild the order details
+            updatedOrderDetails = [
+                ...customerInfo,
+                ...itemsSection,
+                ...otherInfo.filter(line => !line.toLowerCase().includes('special instructions:'))
+            ].join('\n');
+            
+            // Add modification note to special instructions
+            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
+            if (!updatedOrderDetails.includes('Special Instructions:')) {
+                updatedOrderDetails += `\nSpecial Instructions: ${modificationNote}`;
+            } else {
+                updatedOrderDetails = updatedOrderDetails.replace(
+                    /Special Instructions:.*$/m,
+                    `Special Instructions: ${modificationNote}`
+                );
+            }
+            
+        } else if (modLower.includes('change') || modLower.includes('replace')) {
+            // For changes/replacements, update the items section
+            updatedOrderDetails = updatedOrderDetails.replace(/Items:[\s\S]*?(?=\n[A-Z]|\n$)/m, 
+                `Items:\n- ${modifications}`);
+            
+            // Use provided total for replacements
+            if (updateData.new_total && updateData.new_total > 0) {
+                newTotal = updateData.new_total;
+            }
+            
+            // Add modification note
+            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
+            updatedOrderDetails = updatedOrderDetails.replace(
+                /Special Instructions:.*$/m,
+                `Special Instructions: ${modificationNote}`
+            );
+        } else {
+            // For other modifications, append to special instructions
+            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
+            if (updatedOrderDetails.includes('Special Instructions:')) {
+                updatedOrderDetails = updatedOrderDetails.replace(
+                    /Special Instructions:.*$/m,
+                    `Special Instructions: ${modificationNote}`
+                );
+            } else {
+                updatedOrderDetails += `\nSpecial Instructions: ${modificationNote}`;
+            }
+            
+            if (updateData.new_total && updateData.new_total > 0) {
+                newTotal = updateData.new_total;
+            }
+        }
+        
+        console.log('Updated order details:', updatedOrderDetails);
+        console.log('New total:', newTotal);
+        
+        // Update the order in the database
         const { data, error } = await supabase
             .from('orders')
             .update({
                 order_details: updatedOrderDetails,
-                special_instructions: updatedInstructions,
-                total_amount: updatedTotal,
+                special_instructions: `${modifications} - Modified at ${new Date().toLocaleString()}`,
+                total_amount: newTotal,
                 status: 'modified',
                 updated_at: new Date().toISOString()
             })
@@ -364,15 +498,15 @@ async function updateOrder(orderId, updateData) {
             .single();
 
         if (error) {
-            console.error('Error updating order:', error);
+            console.error('Error updating order in database:', error);
             return null;
         }
 
         console.log('Order updated successfully in database:', orderId);
-        console.log('Updated order data:', data);
+        console.log('Final updated order:', data);
         return data;
     } catch (error) {
-        console.error('Error updating order:', error);
+        console.error('Error in updateOrder function:', error);
         return null;
     }
 }
@@ -592,12 +726,13 @@ INSTRUCTIONS:
        ]
      }
    Step 3: Ask what changes they want
-   Step 4: MUST use update_order with the EXACT order ID and changes
+   Step 4: MUST use update_order with the EXACT order ID, changes, AND new total
    
    ABSOLUTE RULE: If search_recent_orders finds an order and customer wants to add/change items:
    - YOU MUST USE update_order function
    - NEVER NEVER NEVER use ORDER_CONFIRMED format
-   - Extract the order ID: {"order_id": "12345678-abcd-efgh-ijkl-123456789012", "modifications": "Add 1 large pepperoni pizza", "new_total": 44.98}
+   - Extract the order ID AND calculate new total
+   - Example: {"order_id": "12345678-abcd-efgh-ijkl-123456789012", "modifications": "Add 1 large pepperoni pizza ($18.99)", "new_total": 44.98}
    - After update_order succeeds, say something like "I've updated your existing order with [changes]. Your new total is $[amount]."
    
    IF NO ORDERS ARE FOUND:
@@ -986,6 +1121,7 @@ Keep responses conversational and brief for phone calls.`;
                     isModificationCall = true; // Mark as modification to prevent new order creation
                     let orderId = parsedArgs.order_id;
                     let modifications = parsedArgs.modifications || 'Order modification requested';
+                    let newTotal = parsedArgs.new_total || 0;
                     
                     // If no order ID provided but we have recent orders from search, use the first one
                     if (!orderId && recentOrders && recentOrders.length > 0) {
@@ -1001,23 +1137,31 @@ Keep responses conversational and brief for phone calls.`;
                         
                         // Still attempt the update with the found ID
                         if (orderId) {
+                            // Build complete update data
                             const updateData = {
-                                order_details: modifications,
-                                special_instructions: `MODIFIED: ${modifications}`,
-                                total_amount: parsedArgs.new_total || 0
+                                modifications: modifications,
+                                new_total: newTotal,
+                                restaurant_menu: restaurant.menu_items // Pass menu for price lookups
                             };
                             
                             const updateResult = await updateOrder(orderId, updateData);
+                            
+                            if (updateResult) {
+                                // Mark the update as successful in our tracking
+                                console.log('ORDER MODIFICATION SUCCESSFUL - Database updated');
+                            }
                             
                             result = {
                                 ...result,
                                 success: !!updateResult,
                                 message: updateResult 
-                                    ? 'Order modified successfully despite missing order_id parameter. Please always include order_id.' 
+                                    ? `Order modified successfully. ${modifications}. New total: ${updateResult.total_amount}` 
                                     : 'Failed to modify order',
                                 order_id: orderId,
                                 modifications: modifications,
-                                status: updateResult ? 'modified' : 'failed'
+                                new_total: updateResult ? updateResult.total_amount : newTotal,
+                                status: updateResult ? 'modified' : 'failed',
+                                database_updated: !!updateResult
                             };
                             console.log(`Order modification result for ${orderId}:`, result.success);
                             break;
@@ -1028,7 +1172,7 @@ Keep responses conversational and brief for phone calls.`;
                         result = { 
                             error: 'No order ID provided and no recent orders found. You must first use search_recent_orders, then extract the order ID from the results.',
                             instruction: 'Call search_recent_orders first, then use the "id" field from the results when calling update_order.',
-                            example: 'If search returns {"orders": [{"id": "abc123"}]}, call update_order with {"order_id": "abc123", "modifications": "changes"}'
+                            example: 'If search returns {"orders": [{"id": "abc123"}]}, call update_order with {"order_id": "abc123", "modifications": "changes", "new_total": 25.99}'
                         };
                         console.error('Update order called without order ID and no recent orders available');
                         break;
@@ -1036,14 +1180,13 @@ Keep responses conversational and brief for phone calls.`;
                     
                     console.log(`Attempting to update order: ${orderId}`);
                     console.log(`Modifications requested: ${modifications}`);
+                    console.log(`New total provided: ${newTotal}`);
                     
                     // Build complete update data
                     const updateData = {
-                        order_details: modifications,
                         modifications: modifications,
-                        special_instructions: `MODIFIED: ${modifications}`,
-                        total_amount: parsedArgs.new_total || 0,
-                        new_total: parsedArgs.new_total || 0
+                        new_total: newTotal,
+                        restaurant_menu: restaurant.menu_items // Pass menu for price lookups
                     };
                     
                     const updateResult = await updateOrder(orderId, updateData);
@@ -1056,10 +1199,11 @@ Keep responses conversational and brief for phone calls.`;
                     result = {
                         success: !!updateResult,
                         message: updateResult 
-                            ? 'Order modified successfully. The changes have been applied to your existing order.' 
+                            ? `Order modified successfully. ${modifications}. New total: ${updateResult.total_amount}` 
                             : 'Failed to modify order - order may not be pending or may not exist',
                         order_id: orderId,
                         modifications: modifications,
+                        new_total: updateResult ? updateResult.total_amount : newTotal,
                         status: updateResult ? 'modified' : 'failed',
                         database_updated: !!updateResult
                     };
