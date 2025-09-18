@@ -514,31 +514,48 @@ async function updateOrder(orderId, updateData) {
 // Function to create customer message in database
 async function createCustomerMessage(messageData) {
     try {
+        console.log('Attempting to create customer message with data:', messageData);
+        
+        // Validate required fields
+        if (!messageData.restaurant_id) {
+            console.error('Missing restaurant_id for customer message');
+            return null;
+        }
+        
+        if (!messageData.customer_phone) {
+            console.error('Missing customer_phone for customer message');
+            return null;
+        }
+        
         const { data, error } = await supabase
             .from('customer_messages')
             .insert([{
                 restaurant_id: messageData.restaurant_id,
                 customer_phone: messageData.customer_phone,
-                customer_name: messageData.customer_name,
-                message_type: messageData.message_type,
-                subject: messageData.subject,
-                message_content: messageData.message_content,
+                customer_name: messageData.customer_name || 'Unknown',
+                message_type: messageData.message_type || 'general',
+                subject: messageData.subject || 'Customer Inquiry',
+                message_content: messageData.message_content || 'No message content provided',
                 call_sid: messageData.call_sid,
                 order_reference: messageData.order_reference,
-                priority: messageData.priority || 'normal'
+                priority: messageData.priority || 'normal',
+                status: 'pending'
             }])
             .select()
             .single();
 
         if (error) {
-            console.error('Error creating customer message:', error);
+            console.error('Database error creating customer message:', error);
+            console.error('Error details:', JSON.stringify(error, null, 2));
             return null;
         }
 
-        console.log('Customer message created:', data.id);
+        console.log('Customer message created successfully:', data.id);
+        console.log('Message details:', data);
         return data;
     } catch (error) {
         console.error('Error creating customer message:', error);
+        console.error('Stack trace:', error.stack);
         return null;
     }
 }
@@ -817,6 +834,7 @@ You: [Call update_order with {"order_id": "abc-123", "modifications": "Add 1 lar
 You: "I've updated your existing order to include a large pepperoni pizza. Your total is now $18.99."
 
 IMPORTANT MESSAGE FORMAT (for messages to restaurant):
+When taking a message, you MUST use this EXACT format with no modifications:
 MESSAGE_CONFIRMED:
 - Customer Name: [name if provided]
 - Phone: ${customerPhone || '[provided phone]'}
@@ -825,6 +843,8 @@ MESSAGE_CONFIRMED:
 - Message: [detailed customer message]
 - Priority: [normal/high based on urgency]
 MESSAGE_END
+
+CRITICAL: Do NOT use markdown formatting (no ** or bold). Use exactly the format above with plain text.
 
 IMPORTANT ORDER FORMAT (ONLY for NEW orders, NEVER for modifications):
 ORDER_CONFIRMED:
@@ -946,8 +966,9 @@ Keep responses conversational and brief for phone calls.`;
                             text: response.transcript
                         });
                         
-                        // Check for message or order confirmation
-                        if (response.transcript.includes('MESSAGE_CONFIRMED:')) {
+                        // Check for message or order confirmation (handle both formats)
+                        if (response.transcript.includes('MESSAGE_CONFIRMED')) {
+                            console.log('MESSAGE_CONFIRMED detected in transcript');
                             processMessageFromTranscript(response.transcript);
                         } else if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall) {
                             // Only process ORDER_CONFIRMED if this is NOT a modification call
@@ -1312,22 +1333,49 @@ Keep responses conversational and brief for phone calls.`;
             
             console.log('Processing customer message from transcript...');
             
-            const messageSection = transcript.substring(
-                transcript.indexOf('MESSAGE_CONFIRMED:') + 'MESSAGE_CONFIRMED:'.length,
-                transcript.indexOf('MESSAGE_END')
-            ).trim();
+            // Check if message format exists in transcript
+            if (!transcript.includes('MESSAGE_CONFIRMED') || !transcript.includes('MESSAGE_END')) {
+                console.log('Message format not found in transcript, skipping');
+                return;
+            }
             
-            console.log('Found customer message:', messageSection);
+            // Extract message section - handle both MESSAGE_CONFIRMED: and MESSAGE_CONFIRMED formats
+            let messageSection = '';
+            if (transcript.includes('MESSAGE_CONFIRMED:')) {
+                messageSection = transcript.substring(
+                    transcript.indexOf('MESSAGE_CONFIRMED:') + 'MESSAGE_CONFIRMED:'.length,
+                    transcript.indexOf('MESSAGE_END')
+                ).trim();
+            } else if (transcript.includes('MESSAGE_CONFIRMED')) {
+                // Handle case where AI outputs without colon
+                const startIdx = transcript.indexOf('MESSAGE_CONFIRMED');
+                const endIdx = transcript.indexOf('MESSAGE_END');
+                if (startIdx !== -1 && endIdx !== -1) {
+                    messageSection = transcript.substring(
+                        startIdx + 'MESSAGE_CONFIRMED'.length,
+                        endIdx
+                    ).trim();
+                }
+            }
             
-            // Parse the message data
+            if (!messageSection) {
+                console.log('Could not extract message section from transcript');
+                return;
+            }
+            
+            console.log('Found customer message section:', messageSection);
+            
+            // Parse the message data (handle both plain and markdown formatted)
             const messageData = parseMessageData(messageSection);
             messageData.restaurant_id = restaurant.id;
             messageData.customer_phone = customerPhone;
             messageData.call_sid = callSid;
             
+            console.log('Parsed message data:', messageData);
+            
             const message = await createCustomerMessage(messageData);
             if (message) {
-                console.log('Customer message saved successfully!');
+                console.log('Customer message saved successfully with ID:', message.id);
                 messageProcessed = true; // Mark message as processed
                 
                 if (callSid) {
@@ -1335,6 +1383,8 @@ Keep responses conversational and brief for phone calls.`;
                         conversation_transcript: JSON.stringify(conversationTranscript)
                     });
                 }
+            } else {
+                console.error('Failed to save customer message to database');
             }
         } catch (error) {
             console.error('Error processing customer message:', error);
@@ -1354,19 +1404,30 @@ Keep responses conversational and brief for phone calls.`;
         };
         
         for (const line of lines) {
-            if (line.includes('Customer Name:')) {
-                messageData.customer_name = line.split('Customer Name:')[1].trim();
-            } else if (line.includes('Message Type:')) {
-                messageData.message_type = line.split('Message Type:')[1].trim();
-            } else if (line.includes('Subject:')) {
-                messageData.subject = line.split('Subject:')[1].trim();
-            } else if (line.includes('Message:')) {
-                messageData.message_content = line.split('Message:')[1].trim();
-            } else if (line.includes('Priority:')) {
-                messageData.priority = line.split('Priority:')[1].trim();
+            // Remove markdown formatting if present (** bold **)
+            const cleanLine = line.replace(/\*\*/g, '').replace(/^-\s*/, '');
+            
+            if (cleanLine.toLowerCase().includes('customer name:')) {
+                messageData.customer_name = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('message type:')) {
+                messageData.message_type = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('subject:')) {
+                messageData.subject = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('message:') && !cleanLine.toLowerCase().includes('message type:')) {
+                messageData.message_content = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('priority:')) {
+                messageData.priority = cleanLine.split(':').slice(1).join(':').trim();
             }
         }
         
+        // Clean up any remaining formatting
+        Object.keys(messageData).forEach(key => {
+            if (typeof messageData[key] === 'string') {
+                messageData[key] = messageData[key].replace(/\*\*/g, '').trim();
+            }
+        });
+        
+        console.log('Parsed message data:', messageData);
         return messageData;
     }
 
