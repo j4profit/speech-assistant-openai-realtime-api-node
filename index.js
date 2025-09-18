@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System with Customer Messaging
+// Restaurant AI Ordering System with Customer Messaging - FIXED VERSION
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -304,6 +304,11 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
 // Function to cancel an existing order
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
+        if (!orderId) {
+            console.error('No order ID provided for cancellation');
+            return null;
+        }
+        
         const { data, error } = await supabase
             .from('orders')
             .update({
@@ -332,6 +337,11 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
 // Function to update an existing order with modifications
 async function updateOrder(orderId, updateData) {
     try {
+        if (!orderId) {
+            console.error('No order ID provided for update');
+            return null;
+        }
+        
         const { data, error } = await supabase
             .from('orders')
             .update({
@@ -485,6 +495,7 @@ wss.on('connection', (ws, req) => {
     let conversationTranscript = [];
     let orderProcessed = false; // Track if order was already processed
     let messageProcessed = false; // Track if message was already processed
+    let recentOrders = []; // Store recent orders for reference
 
     // Initialize OpenAI connection with restaurant context
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -552,11 +563,12 @@ INSTRUCTIONS:
 
 4. For CHANGING EXISTING ORDERS:
    - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool with their phone number: ${customerPhone}
-   - IMPORTANT: You can only modify or cancel PENDING orders. If no pending orders are found, explain: "I can only help you modify orders that are still pending. For orders that are already being prepared or completed, I'd be happy to take a message for our staff to address your concern."
+   - IMPORTANT: After searching for orders, when the customer asks to cancel "the first order" or refers to an order by position (first, second, etc.), you MUST use the actual order ID from the search results
+   - You can only modify or cancel PENDING orders. If no pending orders are found, explain that you can only help with pending orders
    - Once you find their pending orders, read back the details and ask what they'd like to change
-   - For CANCELLATIONS: Use the cancel_order tool and confirm "Your order has been successfully cancelled"
-   - For MODIFICATIONS: Use the update_order tool to make changes and confirm the new details
-   - Let them know their order status has been updated
+   - For CANCELLATIONS: Use the cancel_order tool with the ACTUAL ORDER ID (not a position number) and confirm "Your order has been successfully cancelled"
+   - For MODIFICATIONS: Use the update_order tool with the ACTUAL ORDER ID to make changes and confirm the new details
+   - CRITICAL: Always pass the actual order ID (like "e6d909fb-264a-4366-9bc8-f648331dafdd") to the cancel_order or update_order functions, never pass empty arguments
 
 5. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
@@ -569,7 +581,8 @@ INSTRUCTIONS:
 
 TOOL USAGE:
 - Use search_recent_orders whenever customer mentions wanting to change, modify, cancel, or asks about their recent order
-- Use update_order after confirming what changes they want to make to an existing order
+- ALWAYS pass the actual order_id parameter to cancel_order and update_order functions - these functions REQUIRE an order ID to work
+- If you receive multiple orders from search_recent_orders, refer to them by their actual IDs when calling functions
 
 IMPORTANT MESSAGE FORMAT:
 When taking a message (not an order), format it like this:
@@ -622,22 +635,22 @@ Keep responses conversational and brief for phone calls.`;
                                 properties: {
                                     phone_number: {
                                         type: "string",
-                                        description: "Customer's phone number"
+                                        description: "Customer's phone number (defaults to caller's number if not provided)"
                                     }
                                 },
-                                required: ["phone_number"]
+                                required: []
                             }
                         },
                         {
                             type: "function", 
                             name: "cancel_order",
-                            description: "Cancel a pending order completely. Use when customer wants to cancel their order.",
+                            description: "Cancel a pending order completely. Use when customer wants to cancel their order. REQUIRES the actual order ID from the search results.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     order_id: {
                                         type: "string",
-                                        description: "ID of the order to cancel"
+                                        description: "The actual order ID (UUID) from the search results - REQUIRED"
                                     },
                                     reason: {
                                         type: "string",
@@ -650,13 +663,13 @@ Keep responses conversational and brief for phone calls.`;
                         {
                             type: "function", 
                             name: "update_order",
-                            description: "Update an existing pending order with modifications. Use when customer wants to change items, quantities, or details.",
+                            description: "Update an existing pending order with modifications. Use when customer wants to change items, quantities, or details. REQUIRES the actual order ID from the search results.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     order_id: {
                                         type: "string",
-                                        description: "ID of the order to update"
+                                        description: "The actual order ID (UUID) from the search results - REQUIRED"
                                     },
                                     modifications: {
                                         type: "string",
@@ -820,6 +833,8 @@ Keep responses conversational and brief for phone calls.`;
                     }
                     
                     const orders = await searchRecentOrders(phoneNumber, restaurant.id);
+                    recentOrders = orders; // Store for reference
+                    
                     result = {
                         orders: orders.map(order => ({
                             id: order.id,
@@ -847,15 +862,19 @@ Keep responses conversational and brief for phone calls.`;
                     const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
                     
                     if (!cancelOrderId) {
-                        result = { error: 'No order ID provided for cancellation' };
+                        result = { 
+                            error: 'No order ID provided for cancellation. Please specify which order to cancel using its ID from the search results.' 
+                        };
+                        console.error('Cancel order called without order ID');
                         break;
                     }
                     
+                    console.log(`Attempting to cancel order: ${cancelOrderId}`);
                     const cancelResult = await cancelOrder(cancelOrderId, cancelReason);
                     
                     result = {
                         success: !!cancelResult,
-                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order - order may not be pending',
+                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order - order may not be pending or may not exist',
                         order_id: cancelOrderId,
                         status: cancelResult ? 'cancelled' : 'failed'
                     };
@@ -867,10 +886,14 @@ Keep responses conversational and brief for phone calls.`;
                     const modifications = parsedArgs.modifications || 'Order modification requested';
                     
                     if (!orderId) {
-                        result = { error: 'No order ID provided for update' };
+                        result = { 
+                            error: 'No order ID provided for update. Please specify which order to modify using its ID from the search results.' 
+                        };
+                        console.error('Update order called without order ID');
                         break;
                     }
                     
+                    console.log(`Attempting to update order: ${orderId}`);
                     const updateResult = await updateOrder(orderId, {
                         order_details: modifications,
                         special_instructions: modifications,
@@ -879,7 +902,7 @@ Keep responses conversational and brief for phone calls.`;
                     
                     result = {
                         success: !!updateResult,
-                        message: updateResult ? 'Order modified successfully' : 'Failed to modify order - order may not be pending',
+                        message: updateResult ? 'Order modified successfully' : 'Failed to modify order - order may not be pending or may not exist',
                         order_id: orderId,
                         modifications: modifications,
                         status: updateResult ? 'modified' : 'failed'
@@ -936,6 +959,11 @@ Keep responses conversational and brief for phone calls.`;
     // Process message from AI transcript
     async function processMessageFromTranscript(transcript) {
         try {
+            if (messageProcessed) {
+                console.log('Message already processed, skipping duplicate');
+                return;
+            }
+            
             console.log('Processing customer message from transcript...');
             
             const messageSection = transcript.substring(
@@ -999,6 +1027,11 @@ Keep responses conversational and brief for phone calls.`;
     // Process order from AI transcript
     async function processOrderFromTranscript(transcript) {
         try {
+            if (orderProcessed) {
+                console.log('Order already processed, skipping duplicate');
+                return;
+            }
+            
             console.log('Processing order from transcript...');
             
             if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
@@ -1052,7 +1085,7 @@ Keep responses conversational and brief for phone calls.`;
         return dollarMatch ? parseFloat(dollarMatch[1]) : null;
     }
 
-    // Process call end
+    // Process call end - FIXED VERSION
     async function processCallEnd() {
         try {
             console.log('Processing call end...');
@@ -1064,27 +1097,32 @@ Keep responses conversational and brief for phone calls.`;
             console.log('Order already processed:', orderProcessed);
             console.log('Message already processed:', messageProcessed);
             
+            // Always update call log with conversation
+            if (callSid) {
+                await updateCallLog(callSid, { 
+                    conversation_transcript: JSON.stringify(conversationTranscript)
+                });
+            }
+            
             // Skip creating duplicate orders if one was already properly processed
             if (orderProcessed) {
                 console.log('Skipping order creation - order already processed during call');
-                
-                // Still update the call log with the conversation transcript
-                if (callSid) {
-                    await updateCallLog(callSid, { 
-                        conversation_transcript: JSON.stringify(conversationTranscript)
-                    });
-                }
                 return null;
             }
             
             // Only create a fallback order if NO order was processed during the call
             // AND there's evidence of an order attempt in the conversation
-            if (!orderProcessed && (
-                fullConversation.toLowerCase().includes('pizza') || 
-                fullConversation.toLowerCase().includes('order') ||
-                fullConversation.includes('$'))) {
-                
-                console.log('Potential order detected in conversation - creating fallback order');
+            // BUT NOT if they were just modifying/canceling existing orders
+            const hasOrderKeywords = fullConversation.toLowerCase().includes('pizza') || 
+                                    fullConversation.toLowerCase().includes('pasta') ||
+                                    fullConversation.toLowerCase().includes('order');
+            
+            const isModifyingExisting = fullConversation.toLowerCase().includes('cancel') ||
+                                       fullConversation.toLowerCase().includes('change my order') ||
+                                       fullConversation.toLowerCase().includes('modify');
+            
+            if (!orderProcessed && hasOrderKeywords && !isModifyingExisting) {
+                console.log('Potential new order detected in conversation - creating fallback order');
                 
                 const orderData = {
                     restaurant_id: restaurant.id,
@@ -1103,19 +1141,13 @@ Keep responses conversational and brief for phone calls.`;
                     
                     if (callSid) {
                         await updateCallLog(callSid, { 
-                            order_id: order.id,
-                            conversation_transcript: JSON.stringify(conversationTranscript)
+                            order_id: order.id
                         });
                     }
                     return order;
                 }
-            }
-            
-            // If no order was created, still update the call log with conversation
-            if (callSid) {
-                await updateCallLog(callSid, { 
-                    conversation_transcript: JSON.stringify(conversationTranscript)
-                });
+            } else {
+                console.log('No new order needed - call was for order modification/cancellation or no order detected');
             }
             
         } catch (error) {
@@ -1181,14 +1213,12 @@ Keep responses conversational and brief for phone calls.`;
         const callEndTime = new Date();
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
         
-        console.log('Processing call end...');
         await processCallEnd();
         
         if (callSid) {
             const updateData = {
                 call_ended_at: callEndTime.toISOString(),
-                call_duration: callDuration,
-                conversation_transcript: JSON.stringify(conversationTranscript)
+                call_duration: callDuration
             };
             
             await updateCallLog(callSid, updateData);
