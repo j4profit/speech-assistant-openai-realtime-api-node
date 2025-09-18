@@ -547,7 +547,7 @@ RESTAURANT INFORMATION:
 ${menuText}
 
 INSTRUCTIONS:
-1. Start EVERY call with the greeting above mentioning the restaurant name and asking how you can help
+1. Start EVERY call with the greeting above mentioning the restaurant name
 2. Help customers with THREE main things:
    a) PLACING NEW ORDERS - Take orders clearly with quantities and special requests
    b) CHANGING EXISTING ORDERS - Use the search_recent_orders tool to find and modify orders
@@ -565,12 +565,24 @@ INSTRUCTIONS:
 
 4. For CHANGING EXISTING ORDERS:
    - If customer says they want to "change my order", "modify my order", "add another", "add to my order", or mentions wanting to update their existing order, immediately use the search_recent_orders tool
-   - After search_recent_orders returns results, you will see order IDs in the format "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   - After search_recent_orders returns results, you will see orders in the format:
+     {
+       "orders": [
+         {
+           "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+           "items": [...],
+           "total": XX.XX
+         }
+       ]
+     }
    
    CRITICAL MODIFICATION RULES:
-   - When modifying orders, use the update_order function with the order ID and the modifications
+   - IMPORTANT: When calling update_order, you MUST extract the actual order ID from the search results
+   - The order ID is in the "id" field of each order in the search results
+   - Example: If search returns {"orders": [{"id": "abc123-def456"}]}, you MUST call update_order with {"order_id": "abc123-def456", "modifications": "what to change"}
+   - NEVER call update_order without an order_id parameter
    - NEVER EVER create a new order when modifying - DO NOT use ORDER_CONFIRMED format
-   - After successful update_order, just say something like "I've updated your order with [the changes]. Is there anything else you need?"
+   - After successful update_order, just confirm the changes verbally
    - DO NOT output ORDER_CONFIRMED after using update_order
    
    IF NO ORDERS ARE FOUND:
@@ -581,7 +593,8 @@ INSTRUCTIONS:
    - If yes, take a detailed message using MESSAGE_CONFIRMED format
 
 5. For CANCELLATIONS:
-   - Use the cancel_order tool with the ACTUAL ORDER ID
+   - Use the cancel_order tool with the ACTUAL ORDER ID from search results
+   - Example: {"order_id": "abc123-def456", "reason": "Customer requested"}
    - Confirm "Your order has been successfully cancelled"
    - DO NOT use ORDER_CONFIRMED format for cancellations
 
@@ -593,8 +606,9 @@ INSTRUCTIONS:
 
 CRITICAL TOOL USAGE RULES:
 - search_recent_orders: Can be called with no arguments (will use customer's phone)
-- cancel_order: MUST be called with {"order_id": "actual-uuid-from-search-results"}
-- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change", "new_total": number}
+- cancel_order: REQUIRES {"order_id": "actual-uuid-from-search-results"} - NEVER call with empty arguments
+- update_order: REQUIRES {"order_id": "actual-uuid-from-search-results", "modifications": "what to change"} - NEVER call with empty arguments
+- When you receive search results, ALWAYS extract the order ID before calling update_order or cancel_order
 - NEVER use ORDER_CONFIRMED format after update_order or cancel_order functions
 - Only use ORDER_CONFIRMED for brand new orders
 
@@ -896,11 +910,25 @@ Keep responses conversational and brief for phone calls.`;
                     let cancelOrderId = parsedArgs.order_id;
                     const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
                     
+                    // If no order ID provided but we have recent orders from search, use the first one
+                    if (!cancelOrderId && recentOrders && recentOrders.length > 0) {
+                        console.log('WARNING: No order ID provided, attempting to use most recent order from search');
+                        cancelOrderId = recentOrders[0].id;
+                        
+                        // Send a warning message back to AI
+                        result = {
+                            warning: 'No order ID was provided. Using the most recent order from search results.',
+                            retry_instruction: 'Please always extract and pass the order ID from search results when calling cancel_order.'
+                        };
+                    }
+                    
                     if (!cancelOrderId) {
                         result = { 
-                            error: 'No order ID provided for cancellation. Please search for orders first.' 
+                            error: 'No order ID provided and no recent orders found. You must first use search_recent_orders, then extract the order ID from the results.',
+                            instruction: 'Call search_recent_orders first, then use the "id" field from the results when calling cancel_order.',
+                            example: 'If search returns {"orders": [{"id": "abc123"}]}, call cancel_order with {"order_id": "abc123"}'
                         };
-                        console.error('Cancel order called without order ID');
+                        console.error('Cancel order called without order ID and no recent orders available');
                         break;
                     }
                     
@@ -921,11 +949,50 @@ Keep responses conversational and brief for phone calls.`;
                     let orderId = parsedArgs.order_id;
                     let modifications = parsedArgs.modifications || 'Order modification requested';
                     
+                    // If no order ID provided but we have recent orders from search, use the first one
+                    if (!orderId && recentOrders && recentOrders.length > 0) {
+                        console.log('WARNING: No order ID provided, attempting to use most recent order from search');
+                        orderId = recentOrders[0].id;
+                        
+                        // Send a warning message back to AI
+                        result = {
+                            warning: 'No order ID was provided. Using the most recent order from search results.',
+                            retry_instruction: 'Please always extract and pass the order ID from search results when calling update_order.',
+                            attempting_with_id: orderId
+                        };
+                        
+                        // Still attempt the update with the found ID
+                        if (orderId) {
+                            const updateData = {
+                                order_details: modifications,
+                                special_instructions: `MODIFIED: ${modifications}`,
+                                total_amount: parsedArgs.new_total || 0
+                            };
+                            
+                            const updateResult = await updateOrder(orderId, updateData);
+                            
+                            result = {
+                                ...result,
+                                success: !!updateResult,
+                                message: updateResult 
+                                    ? 'Order modified successfully despite missing order_id parameter. Please always include order_id.' 
+                                    : 'Failed to modify order',
+                                order_id: orderId,
+                                modifications: modifications,
+                                status: updateResult ? 'modified' : 'failed'
+                            };
+                            console.log(`Order modification result for ${orderId}:`, result.success);
+                            break;
+                        }
+                    }
+                    
                     if (!orderId) {
                         result = { 
-                            error: 'No order ID provided for update. Please search for orders first.' 
+                            error: 'No order ID provided and no recent orders found. You must first use search_recent_orders, then extract the order ID from the results.',
+                            instruction: 'Call search_recent_orders first, then use the "id" field from the results when calling update_order.',
+                            example: 'If search returns {"orders": [{"id": "abc123"}]}, call update_order with {"order_id": "abc123", "modifications": "changes"}'
                         };
-                        console.error('Update order called without order ID');
+                        console.error('Update order called without order ID and no recent orders available');
                         break;
                     }
                     
@@ -970,14 +1037,17 @@ Keep responses conversational and brief for phone calls.`;
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify(functionResponse));
                 console.log('Function result sent back to OpenAI');
-            }
-
-            // Trigger response generation
-            const responseMessage = {
-                type: 'response.create'
-            };
-            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                openaiWs.send(JSON.stringify(responseMessage));
+                
+                // Add a small delay before triggering response to avoid race conditions
+                setTimeout(() => {
+                    // Trigger response generation
+                    const responseMessage = {
+                        type: 'response.create'
+                    };
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.send(JSON.stringify(responseMessage));
+                    }
+                }, 100);
             }
 
         } catch (error) {
