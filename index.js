@@ -1061,13 +1061,13 @@ Keep responses conversational and brief for phone calls.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate if a delivery address is within the restaurant's delivery area and during delivery hours.",
+                            description: "Validate if a delivery address is within the restaurant's delivery area. MUST pass the complete address as a parameter.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "Complete delivery address including street number, street name, city, state, and zip code"
+                                        description: "Complete delivery address including street number, street name, city, state, and zip code (e.g., '7800 Main Street, Buffalo, NY 14219')"
                                     }
                                 },
                                 required: ["address"]
@@ -1334,13 +1334,32 @@ Keep responses conversational and brief for phone calls.`;
                     break;
 
                 case 'validate_delivery_address':
-                    const address = parsedArgs.address;
+                    // Handle both direct arguments and fallback to recent conversation
+                    let address = parsedArgs.address;
+                    
+                    if (!address) {
+                        // Try to extract address from recent conversation
+                        console.log('No address in arguments, searching conversation for address...');
+                        const recentAI = conversationTranscript
+                            .filter(m => m.speaker === 'Customer')
+                            .slice(-3)
+                            .map(m => m.text)
+                            .join(' ');
+                        
+                        // Look for address patterns
+                        const addressMatch = recentAI.match(/\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
+                        if (addressMatch) {
+                            address = recentAI; // Use the full recent customer text as address
+                            console.log('Found address in recent conversation:', address);
+                        }
+                    }
+                    
                     console.log('Validating delivery address:', address);
                     
                     if (!address) {
                         result = { 
                             valid: false,
-                            message: 'No address provided. Please provide a complete delivery address.' 
+                            message: 'No address provided. Please provide a complete delivery address including street number, street name, city, state, and zip code.' 
                         };
                         break;
                     }
@@ -1601,8 +1620,7 @@ Keep responses conversational and brief for phone calls.`;
                 
                 if (callSid) {
                     await updateCallLog(callSid, { 
-                        conversation_transcript: JSON.stringify(conversationTranscript),
-                        message_id: message.id
+                        conversation_transcript: JSON.stringify(conversationTranscript)
                     });
                 }
             } else {
