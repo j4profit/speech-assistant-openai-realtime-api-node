@@ -416,6 +416,10 @@ wss.on('connection', (ws, req) => {
 
 IMPORTANT: As soon as the session starts, immediately greet the caller with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
 
+CALLER INFORMATION:
+- Caller's phone number: ${customerPhone}
+- Last 4 digits of caller's number: ${customerPhone ? customerPhone.slice(-4) : 'unknown'}
+
 RESTAURANT INFORMATION:
 - Name: ${restaurant.name}
 - Description: ${restaurant.description || ''}
@@ -433,13 +437,17 @@ INSTRUCTIONS:
 3. For ORDERING:
    - Help them browse the menu and answer questions about items
    - Take orders clearly - ask for quantities and any special requests
+   - When you need their phone number, say: "For your order, I see you're calling from a number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is this the number you'd like me to use for your order?"
+   - If they say yes, use ${customerPhone} as their phone number
+   - If they say no, ask them to provide the correct phone number
    - Confirm orders back to the customer including prices and totals
-   - Ask for customer information (name, pickup time, etc.)
+   - Ask for customer name and pickup time
 
 4. For MESSAGES/INQUIRIES:
    - If they ask about previous orders, explain that you can't access past orders directly
    - Offer to take a message for the restaurant staff about their previous order
    - For complaints, compliments, or questions - offer to send a message to management
+   - When taking a message, confirm their phone number the same way: "I'll send this message and have someone follow up with you at the number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is that correct?"
    - Ask for their name and specific details about their inquiry
    - Reassure them that staff will review their message and follow up if needed
 
@@ -450,7 +458,7 @@ IMPORTANT MESSAGE FORMAT:
 When taking a message (not an order), format it like this:
 MESSAGE_CONFIRMED:
 - Customer Name: [name if provided]
-- Phone: [customer phone]
+- Phone: ${customerPhone || '[provided phone]'}
 - Message Type: [order_inquiry/complaint/compliment/question/general]
 - Subject: [brief subject]
 - Message: [detailed customer message]
@@ -461,6 +469,7 @@ IMPORTANT ORDER FORMAT:
 When an order is confirmed, format it like this:
 ORDER_CONFIRMED:
 - Customer Name: [name if provided]
+- Phone: ${customerPhone || '[provided phone]'}
 - Items: [list each item with quantity and price]
 - Special Instructions: [any special requests]
 - Total: $[total amount]
