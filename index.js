@@ -962,18 +962,20 @@ ${menuText}
 
 INSTRUCTIONS FOR NEW ORDERS:
 1. ALWAYS START by asking for the customer's name FIRST before taking any order details
+   - CRITICAL: Remember and use the EXACT name the customer provides (don't confuse Eric with Alex!)
 2. For DELIVERY orders:
    - After getting their name, ask for items they want to order
    - Once items are confirmed, ask for the complete delivery address
    - Use validate_delivery_address function with the full address
-   - If address is valid, proceed with order confirmation
+   - If address is VALID: IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
    - If address is invalid, explain the issue and offer pickup instead
    - NEVER switch to pickup without customer's explicit agreement
 3. For PICKUP orders:
    - After getting their name, take the order items
    - Confirm pickup time preferences
+   - IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
 4. Always include all captured information in the ORDER_CONFIRMED format:
-   - Customer Name (REQUIRED - ask if not provided)
+   - Customer Name (REQUIRED - use the exact name they gave you)
    - Phone number (use the caller's number)
    - Order Type (delivery or pickup - maintain original choice)
    - Delivery Address (REQUIRED for delivery, "N/A" for pickup)
@@ -983,17 +985,18 @@ INSTRUCTIONS FOR NEW ORDERS:
    - Ready Time
 
 ORDER TAKING WORKFLOW:
-Step 1: "May I have your name for the order?"
+Step 1: "May I have your name for the order?" [REMEMBER the name they give you - use THIS exact name throughout]
 Step 2: "What would you like to order today?"
 Step 3a: If delivery: "What's your complete delivery address including zip code?"
 Step 3b: If pickup: "When would you like to pick this up?"
-Step 4: Confirm the complete order with all details
+Step 4: After successful validation, IMMEDIATELY output ORDER_CONFIRMED format
+Step 5: THEN provide verbal confirmation to customer
 
-IMPORTANT ORDER FORMAT (for NEW orders only):
-When you have ALL information, output this EXACT format:
+CRITICAL ORDER SAVING REQUIREMENT:
+After validating delivery address (for delivery) or confirming items (for pickup), you MUST output this EXACT format to save the order - WITHOUT THIS THE ORDER WILL NOT BE SAVED:
 
 ORDER_CONFIRMED:
-- Customer Name: [MUST have actual name, never leave empty]
+- Customer Name: [MUST use the actual name the customer provided]
 - Phone: ${customerPhone || '[provided phone]'}
 - Order Type: [delivery or pickup]
 - Delivery Address: [FULL address for delivery, or "N/A" for pickup]
@@ -1002,6 +1005,8 @@ ORDER_CONFIRMED:
 - Total: $[calculated total]
 - Ready Time: [estimated time]
 ORDER_END
+
+THEN provide a verbal confirmation to the customer. The ORDER_CONFIRMED format MUST come FIRST before any verbal confirmation or the order will be lost!
 
 CRITICAL RULES FOR ORDERS:
 - NEVER create an order without the customer's name
@@ -1363,6 +1368,9 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     if (validationResult.valid) {
                         capturedDeliveryAddress = validationResult.address;
                         console.log('DELIVERY ADDRESS CAPTURED:', capturedDeliveryAddress);
+                        
+                        // Add instruction to output ORDER_CONFIRMED format
+                        validationResult.instruction = 'CRITICAL: Address is valid! You MUST now output the ORDER_CONFIRMED format immediately with all the order details, THEN provide verbal confirmation to the customer. Without the ORDER_CONFIRMED format, the order will NOT be saved!';
                     }
                     
                     result = validationResult;
