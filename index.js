@@ -562,13 +562,15 @@ INSTRUCTIONS:
    - Ask for customer name and pickup time
 
 4. For CHANGING EXISTING ORDERS:
-   - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool with their phone number: ${customerPhone}
-   - IMPORTANT: After searching for orders, when the customer asks to cancel "the first order" or refers to an order by position (first, second, etc.), you MUST use the actual order ID from the search results
+   - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool
+   - After search_recent_orders returns results, you will see order IDs in the format "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   - CRITICAL FOR CANCELLATIONS: When the customer confirms they want to cancel an order (like "yes", "cancel the pizza", "the first one", etc.), you MUST:
+     a) Take the ACTUAL order ID from the search results (the UUID string)
+     b) Call cancel_order with {"order_id": "THE-ACTUAL-UUID-FROM-SEARCH"}
+     c) NEVER call cancel_order without arguments or with empty arguments
+     d) Example: If search shows order id "e6d909fb-264a-4366-9bc8-f648331dafdd", call cancel_order with {"order_id": "e6d909fb-264a-4366-9bc8-f648331dafdd"}
+   - For MODIFICATIONS: Same rule - always use the actual order ID from search results when calling update_order
    - You can only modify or cancel PENDING orders. If no pending orders are found, explain that you can only help with pending orders
-   - Once you find their pending orders, read back the details and ask what they'd like to change
-   - For CANCELLATIONS: Use the cancel_order tool with the ACTUAL ORDER ID (not a position number) and confirm "Your order has been successfully cancelled"
-   - For MODIFICATIONS: Use the update_order tool with the ACTUAL ORDER ID to make changes and confirm the new details
-   - CRITICAL: Always pass the actual order ID (like "e6d909fb-264a-4366-9bc8-f648331dafdd") to the cancel_order or update_order functions, never pass empty arguments
 
 5. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
@@ -579,10 +581,11 @@ INSTRUCTIONS:
 6. Be helpful, friendly, and efficient
 7. If asked about items not on the menu, politely explain they're not available
 
-TOOL USAGE:
-- Use search_recent_orders whenever customer mentions wanting to change, modify, cancel, or asks about their recent order
-- ALWAYS pass the actual order_id parameter to cancel_order and update_order functions - these functions REQUIRE an order ID to work
-- If you receive multiple orders from search_recent_orders, refer to them by their actual IDs when calling functions
+CRITICAL TOOL USAGE RULES:
+- search_recent_orders: Can be called with no arguments (will use customer's phone)
+- cancel_order: MUST be called with {"order_id": "actual-uuid-from-search-results"}. NEVER call with empty arguments.
+- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change"}. NEVER call with empty arguments.
+- When you get search results showing orders like [{"id": "abc123", ...}, {"id": "def456", ...}], and customer says "cancel the first one", you MUST use {"order_id": "abc123"} when calling cancel_order
 
 IMPORTANT MESSAGE FORMAT:
 When taking a message (not an order), format it like this:
@@ -858,14 +861,20 @@ Keep responses conversational and brief for phone calls.`;
                     break;
 
                 case 'cancel_order':
-                    const cancelOrderId = parsedArgs.order_id;
+                    let cancelOrderId = parsedArgs.order_id;
                     const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
+                    
+                    // Fallback: If no order ID provided but we have recent orders, use the first one
+                    if (!cancelOrderId && recentOrders && recentOrders.length > 0) {
+                        console.log('No order ID provided, using first pending order from recent search');
+                        cancelOrderId = recentOrders[0].id;
+                    }
                     
                     if (!cancelOrderId) {
                         result = { 
-                            error: 'No order ID provided for cancellation. Please specify which order to cancel using its ID from the search results.' 
+                            error: 'No order ID provided for cancellation. Please search for orders first.' 
                         };
-                        console.error('Cancel order called without order ID');
+                        console.error('Cancel order called without order ID and no recent orders available');
                         break;
                     }
                     
@@ -882,14 +891,20 @@ Keep responses conversational and brief for phone calls.`;
                     break;
 
                 case 'update_order':
-                    const orderId = parsedArgs.order_id;
+                    let orderId = parsedArgs.order_id;
                     const modifications = parsedArgs.modifications || 'Order modification requested';
+                    
+                    // Fallback: If no order ID provided but we have recent orders, use the first one
+                    if (!orderId && recentOrders && recentOrders.length > 0) {
+                        console.log('No order ID provided for update, using first pending order from recent search');
+                        orderId = recentOrders[0].id;
+                    }
                     
                     if (!orderId) {
                         result = { 
-                            error: 'No order ID provided for update. Please specify which order to modify using its ID from the search results.' 
+                            error: 'No order ID provided for update. Please search for orders first.' 
                         };
-                        console.error('Update order called without order ID');
+                        console.error('Update order called without order ID and no recent orders available');
                         break;
                     }
                     
