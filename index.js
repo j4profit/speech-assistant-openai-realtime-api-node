@@ -656,6 +656,7 @@ wss.on('connection', (ws, req) => {
     let messageProcessed = false; // Track if message was already processed
     let recentOrders = []; // Store recent orders for reference
     let isModificationCall = false; // Track if this is a modification call
+    let accumulatedMessageText = ''; // Accumulate message text across multiple responses
 
     // Initialize OpenAI connection with restaurant context
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -813,6 +814,30 @@ INSTRUCTIONS:
    - When taking a message, confirm their phone number the same way
    - Ask for their name and specific details about their inquiry
    - If it's about an order issue and no order is found, mention the restaurant is busy and may respond later or next day
+   
+   CRITICAL MESSAGE TAKING INSTRUCTIONS:
+   1. First, collect ALL information from the customer (name and message details)
+   2. ONLY after you have ALL information, output the COMPLETE message format IN ONE RESPONSE
+   3. Do NOT start outputting MESSAGE_CONFIRMED until you have everything ready
+   4. The ENTIRE message from MESSAGE_CONFIRMED: to MESSAGE_END must be in a SINGLE response
+   
+   Example flow:
+   Customer: "Yes, send a message"
+   You: "Could you provide your name and details about the issue?"
+   Customer: "John Smith, I wanted to cancel my order"
+   You: [NOW output the COMPLETE format in ONE response]:
+   "I'll send this message to the restaurant for you.
+   
+   MESSAGE_CONFIRMED:
+   - Customer Name: John Smith
+   - Phone: +14435061908
+   - Message Type: order_inquiry
+   - Subject: Order cancellation request
+   - Message: Customer wanted to cancel their last order but no pending order was found in the system
+   - Priority: normal
+   MESSAGE_END
+   
+   The restaurant has received your message and will follow up when they can."
 
 CRITICAL TOOL USAGE RULES:
 - search_recent_orders: Returns orders with format {"orders": [{"id": "uuid-here", "items": [...]}]}
@@ -834,7 +859,8 @@ You: [Call update_order with {"order_id": "abc-123", "modifications": "Add 1 lar
 You: "I've updated your existing order to include a large pepperoni pizza. Your total is now $18.99."
 
 IMPORTANT MESSAGE FORMAT (for messages to restaurant):
-When taking a message, you MUST use this EXACT format with no modifications:
+When taking a message, you MUST use this EXACT format with no modifications, ALL IN ONE RESPONSE:
+
 MESSAGE_CONFIRMED:
 - Customer Name: [name if provided]
 - Phone: ${customerPhone || '[provided phone]'}
@@ -844,7 +870,11 @@ MESSAGE_CONFIRMED:
 - Priority: [normal/high based on urgency]
 MESSAGE_END
 
-CRITICAL: Do NOT use markdown formatting (no ** or bold). Use exactly the format above with plain text.
+CRITICAL RULES:
+1. Do NOT use markdown formatting (no ** or bold)
+2. Output the ENTIRE format from MESSAGE_CONFIRMED: to MESSAGE_END in ONE SINGLE RESPONSE
+3. NEVER split the message across multiple responses
+4. Include a confirmation statement before and/or after the format
 
 IMPORTANT ORDER FORMAT (ONLY for NEW orders, NEVER for modifications):
 ORDER_CONFIRMED:
@@ -966,10 +996,19 @@ Keep responses conversational and brief for phone calls.`;
                             text: response.transcript
                         });
                         
-                        // Check for message or order confirmation (handle both formats)
-                        if (response.transcript.includes('MESSAGE_CONFIRMED')) {
-                            console.log('MESSAGE_CONFIRMED detected in transcript');
-                            processMessageFromTranscript(response.transcript);
+                        // Accumulate message text if it contains MESSAGE_CONFIRMED or is part of an ongoing message
+                        if (response.transcript.includes('MESSAGE_CONFIRMED') || 
+                            (accumulatedMessageText && !messageProcessed)) {
+                            console.log('Accumulating message text...');
+                            accumulatedMessageText += response.transcript + '\n';
+                            
+                            // Check if we have a complete message now
+                            if (accumulatedMessageText.includes('MESSAGE_CONFIRMED') && 
+                                accumulatedMessageText.includes('MESSAGE_END')) {
+                                console.log('Complete MESSAGE detected, processing...');
+                                processMessageFromTranscript(accumulatedMessageText);
+                                accumulatedMessageText = ''; // Reset after processing
+                            }
                         } else if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall) {
                             // Only process ORDER_CONFIRMED if this is NOT a modification call
                             processOrderFromTranscript(response.transcript);
@@ -1332,46 +1371,59 @@ Keep responses conversational and brief for phone calls.`;
             }
             
             console.log('Processing customer message from transcript...');
+            console.log('Full transcript:', transcript);
             
             // Check if message format exists in transcript
-            if (!transcript.includes('MESSAGE_CONFIRMED') || !transcript.includes('MESSAGE_END')) {
-                console.log('Message format not found in transcript, skipping');
+            if (!transcript.includes('MESSAGE_CONFIRMED')) {
+                console.log('MESSAGE_CONFIRMED not found in transcript');
+                return;
+            }
+            
+            if (!transcript.includes('MESSAGE_END')) {
+                console.log('MESSAGE_END not found in transcript - message may be incomplete');
                 return;
             }
             
             // Extract message section - handle both MESSAGE_CONFIRMED: and MESSAGE_CONFIRMED formats
             let messageSection = '';
-            if (transcript.includes('MESSAGE_CONFIRMED:')) {
-                messageSection = transcript.substring(
-                    transcript.indexOf('MESSAGE_CONFIRMED:') + 'MESSAGE_CONFIRMED:'.length,
-                    transcript.indexOf('MESSAGE_END')
-                ).trim();
-            } else if (transcript.includes('MESSAGE_CONFIRMED')) {
-                // Handle case where AI outputs without colon
-                const startIdx = transcript.indexOf('MESSAGE_CONFIRMED');
-                const endIdx = transcript.indexOf('MESSAGE_END');
-                if (startIdx !== -1 && endIdx !== -1) {
-                    messageSection = transcript.substring(
-                        startIdx + 'MESSAGE_CONFIRMED'.length,
-                        endIdx
-                    ).trim();
+            
+            // Find the start position
+            let startIdx = transcript.indexOf('MESSAGE_CONFIRMED:');
+            if (startIdx === -1) {
+                startIdx = transcript.indexOf('MESSAGE_CONFIRMED');
+                if (startIdx !== -1) {
+                    startIdx += 'MESSAGE_CONFIRMED'.length;
                 }
+            } else {
+                startIdx += 'MESSAGE_CONFIRMED:'.length;
             }
             
-            if (!messageSection) {
-                console.log('Could not extract message section from transcript');
+            // Find the end position
+            const endIdx = transcript.indexOf('MESSAGE_END');
+            
+            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+                messageSection = transcript.substring(startIdx, endIdx).trim();
+                console.log('Extracted message section:', messageSection);
+            } else {
+                console.log('Could not extract valid message section');
+                console.log('Start index:', startIdx, 'End index:', endIdx);
                 return;
             }
             
-            console.log('Found customer message section:', messageSection);
-            
             // Parse the message data (handle both plain and markdown formatted)
             const messageData = parseMessageData(messageSection);
+            
+            // Validate we have minimum required data
+            if (!messageData.customer_name && !messageData.message_content) {
+                console.log('Message lacks required data (name or content), skipping');
+                return;
+            }
+            
             messageData.restaurant_id = restaurant.id;
             messageData.customer_phone = customerPhone;
             messageData.call_sid = callSid;
             
-            console.log('Parsed message data:', messageData);
+            console.log('Final message data to save:', messageData);
             
             const message = await createCustomerMessage(messageData);
             if (message) {
@@ -1380,7 +1432,8 @@ Keep responses conversational and brief for phone calls.`;
                 
                 if (callSid) {
                     await updateCallLog(callSid, { 
-                        conversation_transcript: JSON.stringify(conversationTranscript)
+                        conversation_transcript: JSON.stringify(conversationTranscript),
+                        message_id: message.id
                     });
                 }
             } else {
@@ -1388,6 +1441,7 @@ Keep responses conversational and brief for phone calls.`;
             }
         } catch (error) {
             console.error('Error processing customer message:', error);
+            console.error('Stack trace:', error.stack);
         }
     }
 
