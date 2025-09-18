@@ -1049,8 +1049,7 @@ Ask for ONE thing at a time and wait for response.`;
                         type: 'server_vad',
                         threshold: 0.7,              // Higher threshold - less sensitive to background noise
                         prefix_padding_ms: 300,      // Audio before speech starts
-                        silence_duration_ms: 1800,   // Wait 1.8 seconds of silence before responding
-                        create_response_ms: 500      // Additional delay before generating response
+                        silence_duration_ms: 1800    // Wait 1.8 seconds of silence before responding
                     },
                     tools: [
                         {
