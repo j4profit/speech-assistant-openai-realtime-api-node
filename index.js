@@ -256,7 +256,7 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// Function to search for recent orders by phone number
+// Function to search for recent orders by phone number (only pending orders)
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
         const cutoffDate = new Date();
@@ -283,16 +283,17 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
             `)
             .eq('customer_phone', phoneNumber)
             .eq('restaurant_id', restaurantId)
+            .eq('status', 'pending') // Only show pending orders
             .gte('created_at', cutoffDate.toISOString())
-            .in('status', ['pending', 'confirmed', 'preparing'])
             .order('created_at', { ascending: false })
-            .limit(5);
+            .limit(3);
 
         if (error) {
             console.error('Error searching orders:', error);
             return [];
         }
 
+        console.log(`Found ${data?.length || 0} pending orders for phone: ${phoneNumber}`);
         return data || [];
     } catch (error) {
         console.error('Error searching orders:', error);
@@ -300,7 +301,35 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     }
 }
 
-// Function to update an existing order
+// Function to cancel an existing order
+async function cancelOrder(orderId, reason = 'Customer cancellation') {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .update({
+                status: 'cancelled',
+                special_instructions: reason,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', orderId)
+            .eq('status', 'pending') // Only allow cancelling pending orders
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error cancelling order:', error);
+            return null;
+        }
+
+        console.log('Order cancelled successfully:', orderId);
+        return data;
+    } catch (error) {
+        console.error('Error cancelling order:', error);
+        return null;
+    }
+}
+
+// Function to update an existing order with modifications
 async function updateOrder(orderId, updateData) {
     try {
         const { data, error } = await supabase
@@ -313,6 +342,7 @@ async function updateOrder(orderId, updateData) {
                 updated_at: new Date().toISOString()
             })
             .eq('id', orderId)
+            .eq('status', 'pending') // Only allow modifying pending orders
             .select()
             .single();
 
@@ -517,10 +547,11 @@ INSTRUCTIONS:
 
 4. For CHANGING EXISTING ORDERS:
    - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool with their phone number: ${customerPhone}
-   - Once you find their recent orders, read back the details and ask what they'd like to change
-   - Use the update_order tool to make the changes they request
-   - Confirm the changes and new total if applicable
-   - Let them know their order has been successfully updated
+   - IMPORTANT: You can only modify or cancel PENDING orders. If no pending orders are found, explain: "I can only help you modify orders that are still pending. For orders that are already being prepared or completed, I'd be happy to take a message for our staff to address your concern."
+   - Once you find their pending orders, read back the details and ask what they'd like to change
+   - For CANCELLATIONS: Use the cancel_order tool and confirm "Your order has been successfully cancelled"
+   - For MODIFICATIONS: Use the update_order tool to make changes and confirm the new details
+   - Let them know their order status has been updated
 
 5. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
@@ -580,7 +611,7 @@ Keep responses conversational and brief for phone calls.`;
                         {
                             type: "function",
                             name: "search_recent_orders",
-                            description: "Search for recent orders by the customer's phone number. Use this when customer mentions wanting to change, modify, or asks about their recent order.",
+                            description: "Search for recent PENDING orders by the customer's phone number. Only returns orders with 'pending' status that can be modified or cancelled.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -594,8 +625,27 @@ Keep responses conversational and brief for phone calls.`;
                         },
                         {
                             type: "function", 
+                            name: "cancel_order",
+                            description: "Cancel a pending order completely. Use when customer wants to cancel their order.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    order_id: {
+                                        type: "string",
+                                        description: "ID of the order to cancel"
+                                    },
+                                    reason: {
+                                        type: "string",
+                                        description: "Reason for cancellation (optional)"
+                                    }
+                                },
+                                required: ["order_id"]
+                            }
+                        },
+                        {
+                            type: "function", 
                             name: "update_order",
-                            description: "Update an existing order with modifications. Use after finding an order the customer wants to change.",
+                            description: "Update an existing pending order with modifications. Use when customer wants to change items, quantities, or details.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -759,7 +809,7 @@ Keep responses conversational and brief for phone calls.`;
                 case 'search_recent_orders':
                     // Use the customer's phone from the call context if not provided
                     const phoneNumber = parsedArgs.phone_number || customerPhone;
-                    console.log('Searching orders for phone:', phoneNumber);
+                    console.log('Searching PENDING orders for phone:', phoneNumber);
                     
                     if (!phoneNumber) {
                         result = { error: 'No phone number available to search orders' };
@@ -783,9 +833,30 @@ Keep responses conversational and brief for phone calls.`;
                             order_details: order.order_details
                         })),
                         count: orders.length,
-                        phone_searched: phoneNumber
+                        phone_searched: phoneNumber,
+                        message: orders.length === 0 ? 'No pending orders found. Only pending orders can be modified or cancelled.' : `Found ${orders.length} pending order(s)`
                     };
-                    console.log(`Found ${orders.length} recent orders for ${phoneNumber}`);
+                    console.log(`Found ${orders.length} pending orders for ${phoneNumber}`);
+                    break;
+
+                case 'cancel_order':
+                    const cancelOrderId = parsedArgs.order_id;
+                    const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
+                    
+                    if (!cancelOrderId) {
+                        result = { error: 'No order ID provided for cancellation' };
+                        break;
+                    }
+                    
+                    const cancelResult = await cancelOrder(cancelOrderId, cancelReason);
+                    
+                    result = {
+                        success: !!cancelResult,
+                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order - order may not be pending',
+                        order_id: cancelOrderId,
+                        status: cancelResult ? 'cancelled' : 'failed'
+                    };
+                    console.log(`Order cancellation result for ${cancelOrderId}:`, result.success);
                     break;
 
                 case 'update_order':
@@ -805,11 +876,12 @@ Keep responses conversational and brief for phone calls.`;
                     
                     result = {
                         success: !!updateResult,
-                        message: updateResult ? 'Order updated successfully' : 'Failed to update order',
+                        message: updateResult ? 'Order modified successfully' : 'Failed to modify order - order may not be pending',
                         order_id: orderId,
-                        modifications: modifications
+                        modifications: modifications,
+                        status: updateResult ? 'modified' : 'failed'
                     };
-                    console.log(`Order update result for ${orderId}:`, result.success);
+                    console.log(`Order modification result for ${orderId}:`, result.success);
                     break;
 
                 default:
