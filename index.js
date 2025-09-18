@@ -829,6 +829,13 @@ wss.on('connection', (ws, req) => {
 
 IMPORTANT: As soon as the session starts, immediately greet the caller with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
 
+CRITICAL CONVERSATION RULES:
+1. KEEP RESPONSES SHORT AND CONCISE - no more than 2-3 sentences at a time
+2. WAIT for customers to finish speaking completely before responding
+3. If unclear what customer wants, ask ONE clarifying question at a time
+4. Don't repeat information unless asked
+5. Let the customer lead the conversation pace
+
 CALLER INFORMATION:
 - Caller's phone number: ${customerPhone}
 - Last 4 digits of caller's number: ${customerPhone ? customerPhone.slice(-4) : 'unknown'}
@@ -1023,7 +1030,9 @@ ORDER_CONFIRMED:
 - Ready Time: [calculated time based on preparation_time]
 ORDER_END
 
-Keep responses conversational and brief for phone calls.`;
+Keep responses conversational and VERY BRIEF for phone calls. 
+NEVER give long explanations or multiple options at once.
+Ask for ONE thing at a time and wait for response.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1038,9 +1047,10 @@ Keep responses conversational and brief for phone calls.`;
                     },
                     turn_detection: {
                         type: 'server_vad',
-                        threshold: 0.5,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: 500
+                        threshold: 0.7,              // Higher threshold - less sensitive to background noise
+                        prefix_padding_ms: 300,      // Audio before speech starts
+                        silence_duration_ms: 1800,   // Wait 1.8 seconds of silence before responding
+                        create_response_ms: 500      // Additional delay before generating response
                     },
                     tools: [
                         {
