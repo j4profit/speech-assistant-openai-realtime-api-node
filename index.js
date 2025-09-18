@@ -652,8 +652,8 @@ async function validateDeliveryAddress(address, restaurant) {
 function calculateOrderReadyTime(restaurant, isDelivery = false) {
     try {
         const now = new Date();
-        const preparationMinutes = restaurant.preparation_time || 20; // Default 20 minutes if not set
-        const deliveryAddedMinutes = isDelivery ? (restaurant.delivery_time || 15) : 0; // Add delivery time if delivery
+        const preparationMinutes = restaurant?.preparation_time || 20; // Default 20 minutes if not set or restaurant is null
+        const deliveryAddedMinutes = isDelivery ? (restaurant?.delivery_time || 15) : 0; // Add delivery time if delivery
         
         const totalMinutes = preparationMinutes + deliveryAddedMinutes;
         const readyTime = new Date(now.getTime() + totalMinutes * 60000);
@@ -673,9 +673,16 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         };
     } catch (error) {
         console.error('Error calculating ready time:', error);
+        const defaultTime = new Date(Date.now() + 30 * 60000);
+        const hours = defaultTime.getHours();
+        const minutes = defaultTime.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const displayHours = hours % 12 || 12;
+        const displayMinutes = minutes.toString().padStart(2, '0');
+        
         return {
-            readyTime: new Date(Date.now() + 30 * 60000), // Default 30 minutes
-            readyTimeString: 'in about 30 minutes',
+            readyTime: defaultTime,
+            readyTimeString: `${displayHours}:${displayMinutes} ${ampm}`,
             preparationMinutes: 30,
             estimatedTime: 'approximately 30 minutes'
         };
@@ -685,10 +692,24 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
 // Function to create order in database
 async function createOrder(orderData) {
     try {
+        // Try to get restaurant if not already in orderData
+        let restaurantForTiming = null;
+        if (orderData.restaurant_id) {
+            // Try to look up restaurant by ID
+            const { data, error } = await supabase
+                .from('restaurants')
+                .select('*')
+                .eq('id', orderData.restaurant_id)
+                .single();
+            
+            if (data && !error) {
+                restaurantForTiming = data;
+            }
+        }
+        
         // Calculate pickup/delivery time based on restaurant settings
-        const restaurant = await getRestaurantByPhone(orderData.restaurant_phone || orderData.to_number);
         const isDelivery = orderData.order_type === 'delivery';
-        const timing = calculateOrderReadyTime(restaurant, isDelivery);
+        const timing = calculateOrderReadyTime(restaurantForTiming, isDelivery);
         
         // Add calculated ready time to order
         orderData.ready_time = timing.readyTimeString;
