@@ -342,17 +342,24 @@ async function updateOrder(orderId, updateData) {
             return null;
         }
         
+        console.log(`Updating order ${orderId} with:`, updateData);
+        
+        // Build the complete updated order details
+        const updatedOrderDetails = updateData.order_details || updateData.modifications || '';
+        const updatedInstructions = updateData.special_instructions || `MODIFIED: ${updatedOrderDetails}`;
+        const updatedTotal = updateData.total_amount || updateData.new_total || 0;
+        
         const { data, error } = await supabase
             .from('orders')
             .update({
-                order_details: updateData.order_details,
-                special_instructions: updateData.special_instructions,
-                total_amount: updateData.total_amount,
+                order_details: updatedOrderDetails,
+                special_instructions: updatedInstructions,
+                total_amount: updatedTotal,
                 status: 'modified',
                 updated_at: new Date().toISOString()
             })
             .eq('id', orderId)
-            .eq('status', 'pending') // Only allow modifying pending orders
+            .in('status', ['pending', 'modified']) // Allow updating both pending and previously modified orders
             .select()
             .single();
 
@@ -361,7 +368,8 @@ async function updateOrder(orderId, updateData) {
             return null;
         }
 
-        console.log('Order updated successfully:', orderId);
+        console.log('Order updated successfully in database:', orderId);
+        console.log('Updated order data:', data);
         return data;
     } catch (error) {
         console.error('Error updating order:', error);
@@ -553,7 +561,7 @@ INSTRUCTIONS:
    b) CHANGING EXISTING ORDERS - Use the search_recent_orders tool to find and modify orders
    c) SENDING MESSAGES - For complaints, compliments, or general inquiries
 
-3. For NEW ORDERING:
+3. For NEW ORDERING (ONLY when customer wants to place a completely new order, NOT modify existing):
    - Help them browse the menu and answer questions about items
    - Take orders clearly - ask for quantities and any special requests
    - When you need their phone number, say: "For your order, I see you're calling from a number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is this the number you'd like me to use for your order?"
@@ -564,26 +572,33 @@ INSTRUCTIONS:
    - ONLY use ORDER_CONFIRMED format for NEW orders, NEVER for modifications
 
 4. For CHANGING EXISTING ORDERS:
-   - If customer says they want to "change my order", "modify my order", "add another", "add to my order", or mentions wanting to update their existing order, immediately use the search_recent_orders tool
-   - After search_recent_orders returns results, you will see orders in the format:
+   TRIGGER PHRASES that indicate modification (ALWAYS search for orders when hearing these):
+   - "fix my order", "fix my last order"
+   - "change my order", "modify my order"
+   - "add to my order", "add another"
+   - "update my order", "adjust my order"
+   - Any mention of existing/previous/last order
+   
+   CRITICAL WORKFLOW FOR MODIFICATIONS:
+   Step 1: Use search_recent_orders immediately when modification is mentioned
+   Step 2: After finding orders, you'll see format like:
      {
        "orders": [
          {
-           "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+           "id": "12345678-abcd-efgh-ijkl-123456789012",
            "items": [...],
-           "total": XX.XX
+           "total": 25.99
          }
        ]
      }
+   Step 3: Ask what changes they want
+   Step 4: MUST use update_order with the EXACT order ID and changes
    
-   CRITICAL MODIFICATION RULES:
-   - IMPORTANT: When calling update_order, you MUST extract the actual order ID from the search results
-   - The order ID is in the "id" field of each order in the search results
-   - Example: If search returns {"orders": [{"id": "abc123-def456"}]}, you MUST call update_order with {"order_id": "abc123-def456", "modifications": "what to change"}
-   - NEVER call update_order without an order_id parameter
-   - NEVER EVER create a new order when modifying - DO NOT use ORDER_CONFIRMED format
-   - After successful update_order, just confirm the changes verbally
-   - DO NOT output ORDER_CONFIRMED after using update_order
+   ABSOLUTE RULE: If search_recent_orders finds an order and customer wants to add/change items:
+   - YOU MUST USE update_order function
+   - NEVER NEVER NEVER use ORDER_CONFIRMED format
+   - Extract the order ID: {"order_id": "12345678-abcd-efgh-ijkl-123456789012", "modifications": "Add 1 large pepperoni pizza", "new_total": 44.98}
+   - After update_order succeeds, say something like "I've updated your existing order with [changes]. Your new total is $[amount]."
    
    IF NO ORDERS ARE FOUND:
    - Say: "I couldn't find any pending orders for your phone number."
@@ -594,7 +609,7 @@ INSTRUCTIONS:
 
 5. For CANCELLATIONS:
    - Use the cancel_order tool with the ACTUAL ORDER ID from search results
-   - Example: {"order_id": "abc123-def456", "reason": "Customer requested"}
+   - Example: {"order_id": "12345678-abcd-efgh-ijkl-123456789012", "reason": "Customer requested"}
    - Confirm "Your order has been successfully cancelled"
    - DO NOT use ORDER_CONFIRMED format for cancellations
 
@@ -605,12 +620,23 @@ INSTRUCTIONS:
    - If it's about an order issue and no order is found, mention the restaurant is busy and may respond later or next day
 
 CRITICAL TOOL USAGE RULES:
-- search_recent_orders: Can be called with no arguments (will use customer's phone)
-- cancel_order: REQUIRES {"order_id": "actual-uuid-from-search-results"} - NEVER call with empty arguments
-- update_order: REQUIRES {"order_id": "actual-uuid-from-search-results", "modifications": "what to change"} - NEVER call with empty arguments
-- When you receive search results, ALWAYS extract the order ID before calling update_order or cancel_order
-- NEVER use ORDER_CONFIRMED format after update_order or cancel_order functions
-- Only use ORDER_CONFIRMED for brand new orders
+- search_recent_orders: Returns orders with format {"orders": [{"id": "uuid-here", "items": [...]}]}
+- update_order: MUST include {"order_id": "exact-uuid-from-search", "modifications": "description", "new_total": number}
+- cancel_order: MUST include {"order_id": "exact-uuid-from-search", "reason": "optional reason"}
+
+ABSOLUTE RULES FOR ORDER MODIFICATIONS:
+1. If customer mentions ANY existing order ("fix my order", "change my order", etc.) → ALWAYS search first
+2. If search finds orders → MUST use update_order function, NEVER create new order
+3. NEVER output ORDER_CONFIRMED when modifying existing orders
+4. Only use ORDER_CONFIRMED for brand new orders when no existing order is involved
+
+EXAMPLE MODIFICATION FLOW:
+Customer: "Fix my last order"
+You: [Call search_recent_orders]
+System: {"orders": [{"id": "abc-123", "items": [], "total": 0}]}
+Customer: "Add a large pizza"
+You: [Call update_order with {"order_id": "abc-123", "modifications": "Add 1 large pepperoni pizza", "new_total": 18.99}]
+You: "I've updated your existing order to include a large pepperoni pizza. Your total is now $18.99."
 
 IMPORTANT MESSAGE FORMAT (for messages to restaurant):
 MESSAGE_CONFIRMED:
@@ -862,22 +888,30 @@ Keep responses conversational and brief for phone calls.`;
                     const orders = await searchRecentOrders(phoneNumber, restaurant.id);
                     recentOrders = orders; // Store for reference
                     
-                    // If orders found and customer wants to modify, mark this as a modification call
+                    // If orders found, automatically mark as modification call
                     if (orders.length > 0) {
+                        // Check recent customer messages for modification intent
                         const recentCustomerText = conversationTranscript
                             .filter(m => m.speaker === 'Customer')
-                            .slice(-3)
+                            .slice(-5)
                             .map(m => m.text)
                             .join(' ')
                             .toLowerCase();
-                            
-                        if (recentCustomerText.includes('change') || 
-                            recentCustomerText.includes('modify') ||
-                            recentCustomerText.includes('add to') ||
-                            recentCustomerText.includes('add another') ||
-                            recentCustomerText.includes('update')) {
+                        
+                        // Expanded list of modification triggers
+                        const modificationTriggers = [
+                            'fix', 'change', 'modify', 'update', 'adjust',
+                            'add to', 'add another', 'correct', 'edit',
+                            'cancel', 'remove', 'delete', 'alter'
+                        ];
+                        
+                        const hasModificationIntent = modificationTriggers.some(trigger => 
+                            recentCustomerText.includes(trigger)
+                        );
+                        
+                        if (hasModificationIntent) {
                             isModificationCall = true;
-                            console.log('MODIFICATION CALL DETECTED - Will not create new order');
+                            console.log('MODIFICATION CALL DETECTED - Found orders + modification intent');
                         }
                     }
                     
@@ -899,8 +933,12 @@ Keep responses conversational and brief for phone calls.`;
                         count: orders.length,
                         phone_searched: phoneNumber,
                         message: orders.length === 0 
-                            ? 'No pending orders found for this phone number. I can take a message for the restaurant about your order issue. Please note the restaurant is fairly busy and may not respond until later today or tomorrow.' 
-                            : `Found ${orders.length} pending order(s)`
+                            ? 'No pending orders found. I can take a message for the restaurant about your order issue. Please note the restaurant is fairly busy and may not respond until later today or tomorrow.' 
+                            : `Found ${orders.length} pending order(s). Please tell me what changes you'd like to make.`,
+                        modification_required: orders.length > 0 ? true : false,
+                        instruction: orders.length > 0 
+                            ? `IMPORTANT: Customer wants to modify this order. You MUST use update_order function with order_id "${orders[0].id}" for any changes. DO NOT create a new order.`
+                            : null
                     };
                     console.log(`Found ${orders.length} pending orders for ${phoneNumber}`);
                     break;
@@ -999,14 +1037,21 @@ Keep responses conversational and brief for phone calls.`;
                     console.log(`Attempting to update order: ${orderId}`);
                     console.log(`Modifications requested: ${modifications}`);
                     
-                    // For order updates, we should update the actual order details properly
+                    // Build complete update data
                     const updateData = {
                         order_details: modifications,
+                        modifications: modifications,
                         special_instructions: `MODIFIED: ${modifications}`,
-                        total_amount: parsedArgs.new_total || 0
+                        total_amount: parsedArgs.new_total || 0,
+                        new_total: parsedArgs.new_total || 0
                     };
                     
                     const updateResult = await updateOrder(orderId, updateData);
+                    
+                    if (updateResult) {
+                        // Mark the update as successful in our tracking
+                        console.log('ORDER MODIFICATION SUCCESSFUL - Database updated');
+                    }
                     
                     result = {
                         success: !!updateResult,
@@ -1015,7 +1060,8 @@ Keep responses conversational and brief for phone calls.`;
                             : 'Failed to modify order - order may not be pending or may not exist',
                         order_id: orderId,
                         modifications: modifications,
-                        status: updateResult ? 'modified' : 'failed'
+                        status: updateResult ? 'modified' : 'failed',
+                        database_updated: !!updateResult
                     };
                     console.log(`Order modification result for ${orderId}:`, result.success);
                     break;
@@ -1142,27 +1188,32 @@ Keep responses conversational and brief for phone calls.`;
         try {
             // CRITICAL CHECK: Don't create orders during modification calls
             if (isModificationCall) {
-                console.log('SKIPPING ORDER CREATION - This is a modification call, not a new order');
+                console.log('BLOCKING ORDER CREATION - This is a modification call, not a new order');
                 return;
             }
             
-            const conversationText = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
-            const hasModificationKeywords = conversationText.includes('change') || 
-                                           conversationText.includes('modify') || 
-                                           conversationText.includes('update') ||
-                                           conversationText.includes('add another') ||
-                                           conversationText.includes('add to my order') ||
-                                           conversationText.includes('cancel my order');
+            // Check entire conversation for modification context
+            const fullConversation = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
+            const hasModificationContext = 
+                fullConversation.includes('fix my') ||
+                fullConversation.includes('change my order') || 
+                fullConversation.includes('modify my order') || 
+                fullConversation.includes('update my order') ||
+                fullConversation.includes('add another') ||
+                fullConversation.includes('add to my order') ||
+                fullConversation.includes('cancel my order') ||
+                fullConversation.includes('found a pending order') ||
+                fullConversation.includes('found 1 pending order') ||
+                fullConversation.includes('your existing order');
             
-            // Also check if we've used modification functions
-            const hasUsedModificationFunctions = conversationTranscript.some(msg => 
-                msg.text && (msg.text.includes('modified successfully') || 
-                             msg.text.includes('cancelled successfully') ||
-                             msg.text.includes('updated your order'))
-            );
+            if (hasModificationContext) {
+                console.log('BLOCKING ORDER CREATION - Modification context detected in conversation');
+                return;
+            }
             
-            if (hasModificationKeywords || hasUsedModificationFunctions) {
-                console.log('SKIPPING ORDER CREATION - Modification keywords or functions detected');
+            // Also check if search_recent_orders was used and found orders
+            if (recentOrders && recentOrders.length > 0) {
+                console.log('BLOCKING ORDER CREATION - Recent orders exist from search, should be modifying instead');
                 return;
             }
             
