@@ -358,6 +358,8 @@ async function updateOrder(orderId, updateData) {
         return null;
     }
 }
+
+// Function to create customer message in database
 async function createCustomerMessage(messageData) {
     try {
         const { data, error } = await supabase
@@ -397,6 +399,7 @@ async function createOrder(orderData) {
             .insert([{
                 restaurant_id: orderData.restaurant_id,
                 customer_phone: orderData.customer_phone,
+                customer_name: orderData.customer_name,
                 total_amount: orderData.total_amount,
                 status: 'pending',
                 order_details: orderData.order_details,
@@ -480,6 +483,8 @@ wss.on('connection', (ws, req) => {
     let restaurant = null;
     let callStartTime = new Date();
     let conversationTranscript = [];
+    let orderProcessed = false; // Track if order was already processed
+    let messageProcessed = false; // Track if message was already processed
 
     // Initialize OpenAI connection with restaurant context
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -747,8 +752,6 @@ Keep responses conversational and brief for phone calls.`;
                     case 'error':
                         console.error('OpenAI error:', response.error);
                         break;
-                        console.error('OpenAI error:', response.error);
-                        break;
                         
                     case 'session.updated':
                         console.log('OpenAI session configured for', restaurant.name);
@@ -929,6 +932,8 @@ Keep responses conversational and brief for phone calls.`;
             }
         }
     }
+
+    // Process message from AI transcript
     async function processMessageFromTranscript(transcript) {
         try {
             console.log('Processing customer message from transcript...');
@@ -949,6 +954,7 @@ Keep responses conversational and brief for phone calls.`;
             const message = await createCustomerMessage(messageData);
             if (message) {
                 console.log('Customer message saved successfully!');
+                messageProcessed = true; // Mark message as processed
                 
                 if (callSid) {
                     await updateCallLog(callSid, { 
@@ -1003,11 +1009,19 @@ Keep responses conversational and brief for phone calls.`;
                 
                 console.log('Found structured order:', orderSection);
                 
+                // Extract customer name from order section
+                let customerName = '';
+                const nameMatch = orderSection.match(/Customer Name:\s*([^\n]+)/);
+                if (nameMatch) {
+                    customerName = nameMatch[1].trim();
+                }
+                
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
+                    customer_name: customerName,
                     total_amount: extractTotal(orderSection) || 0,
-                    order_details: transcript,
+                    order_details: orderSection,
                     special_instructions: '',
                     call_sid: callSid,
                     items: []
@@ -1016,6 +1030,7 @@ Keep responses conversational and brief for phone calls.`;
                 const order = await createOrder(orderData);
                 if (order) {
                     console.log('Order saved successfully!');
+                    orderProcessed = true; // Mark order as processed
                     
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
@@ -1029,32 +1044,55 @@ Keep responses conversational and brief for phone calls.`;
 
     // Extract total amount from text
     function extractTotal(text) {
-        const totalMatch = text.match(/\$(\d+\.?\d*)/);
-        return totalMatch ? parseFloat(totalMatch[1]) : null;
+        const totalMatch = text.match(/Total:\s*\$(\d+\.?\d*)/);
+        if (totalMatch) return parseFloat(totalMatch[1]);
+        
+        // Fallback to any dollar amount
+        const dollarMatch = text.match(/\$(\d+\.?\d*)/);
+        return dollarMatch ? parseFloat(dollarMatch[1]) : null;
     }
 
     // Process call end
     async function processCallEnd() {
         try {
+            console.log('Processing call end...');
             const fullConversation = conversationTranscript.map(msg => 
                 `${msg.speaker}: ${msg.text}`
             ).join('\n');
             
             console.log('Analyzing conversation for missed orders or messages...');
+            console.log('Order already processed:', orderProcessed);
+            console.log('Message already processed:', messageProcessed);
             
-            // Check for potential orders or messages that weren't structured
-            if (fullConversation.toLowerCase().includes('pizza') || 
-                fullConversation.toLowerCase().includes('order') ||
-                fullConversation.includes('$')) {
+            // Skip creating duplicate orders if one was already properly processed
+            if (orderProcessed) {
+                console.log('Skipping order creation - order already processed during call');
                 
-                console.log('Potential order detected in conversation');
+                // Still update the call log with the conversation transcript
+                if (callSid) {
+                    await updateCallLog(callSid, { 
+                        conversation_transcript: JSON.stringify(conversationTranscript)
+                    });
+                }
+                return null;
+            }
+            
+            // Only create a fallback order if NO order was processed during the call
+            // AND there's evidence of an order attempt in the conversation
+            if (!orderProcessed && (
+                fullConversation.toLowerCase().includes('pizza') || 
+                fullConversation.toLowerCase().includes('order') ||
+                fullConversation.includes('$'))) {
+                
+                console.log('Potential order detected in conversation - creating fallback order');
                 
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
+                    customer_name: '',
                     total_amount: 0,
                     order_details: fullConversation,
-                    special_instructions: 'Order extracted from conversation',
+                    special_instructions: 'Order extracted from conversation - needs review',
                     call_sid: callSid,
                     items: []
                 };
@@ -1064,10 +1102,20 @@ Keep responses conversational and brief for phone calls.`;
                     console.log('Conversation order saved!');
                     
                     if (callSid) {
-                        await updateCallLog(callSid, { order_id: order.id });
+                        await updateCallLog(callSid, { 
+                            order_id: order.id,
+                            conversation_transcript: JSON.stringify(conversationTranscript)
+                        });
                     }
                     return order;
                 }
+            }
+            
+            // If no order was created, still update the call log with conversation
+            if (callSid) {
+                await updateCallLog(callSid, { 
+                    conversation_transcript: JSON.stringify(conversationTranscript)
+                });
             }
             
         } catch (error) {
@@ -1076,6 +1124,7 @@ Keep responses conversational and brief for phone calls.`;
         return null;
     }
     
+    // Handle WebSocket messages from Twilio
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
