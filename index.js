@@ -125,6 +125,11 @@ async function getRecentOrders(phoneNumber, restaurantId, daysBack = 1) {
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - daysBack);
         
+        console.log('🔍 Searching for recent orders:');
+        console.log('  Phone:', phoneNumber);
+        console.log('  Restaurant ID:', restaurantId);
+        console.log('  Since:', cutoffDate.toISOString());
+        
         const { data, error } = await supabase
             .from('orders')
             .select(`
@@ -144,13 +149,18 @@ async function getRecentOrders(phoneNumber, restaurantId, daysBack = 1) {
             .limit(3);
 
         if (error) {
-            console.error('Error fetching recent orders:', error);
+            console.error('❌ Error fetching recent orders:', error);
             return [];
+        }
+
+        console.log('📋 Found orders:', data?.length || 0);
+        if (data && data.length > 0) {
+            console.log('📋 Recent order details:', JSON.stringify(data[0], null, 2));
         }
 
         return data || [];
     } catch (error) {
-        console.error('Error fetching recent orders:', error);
+        console.error('❌ Error fetching recent orders:', error);
         return [];
     }
 }
