@@ -687,6 +687,13 @@ Keep responses conversational and brief for phone calls.`;
                         handleFunctionCall(response);
                         break;
                         
+                    case 'conversation.item.created':
+                        if (response.item?.type === 'function_call') {
+                            console.log('Function call item created:', response.item.name);
+                            handleFunctionCall(response.item);
+                        }
+                        break;
+                        
                     case 'error':
                         console.error('OpenAI error:', response.error);
                         break;
@@ -726,12 +733,23 @@ Keep responses conversational and brief for phone calls.`;
         try {
             const { name, call_id, arguments: args } = functionCall;
             let result = null;
+            let parsedArgs = {};
 
-            console.log(`Executing function: ${name} with args:`, args);
+            console.log(`Executing function: ${name} with raw args:`, args);
+
+            // Parse arguments if they're a string
+            try {
+                parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+            } catch (e) {
+                console.error('Error parsing function arguments:', e);
+                parsedArgs = args;
+            }
+
+            console.log('Parsed function arguments:', parsedArgs);
 
             switch (name) {
                 case 'search_recent_orders':
-                    const orders = await searchRecentOrders(args.phone_number, restaurant.id);
+                    const orders = await searchRecentOrders(parsedArgs.phone_number, restaurant.id);
                     result = {
                         orders: orders.map(order => ({
                             id: order.id,
@@ -752,24 +770,24 @@ Keep responses conversational and brief for phone calls.`;
                     break;
 
                 case 'update_order':
-                    const updateResult = await updateOrder(args.order_id, {
-                        order_details: args.modifications,
-                        special_instructions: args.modifications,
-                        total_amount: args.new_total || 0
+                    const updateResult = await updateOrder(parsedArgs.order_id, {
+                        order_details: parsedArgs.modifications,
+                        special_instructions: parsedArgs.modifications,
+                        total_amount: parsedArgs.new_total || 0
                     });
                     result = {
                         success: !!updateResult,
                         message: updateResult ? 'Order updated successfully' : 'Failed to update order',
-                        order_id: args.order_id
+                        order_id: parsedArgs.order_id
                     };
-                    console.log(`Order update result for ${args.order_id}:`, result.success);
+                    console.log(`Order update result for ${parsedArgs.order_id}:`, result.success);
                     break;
 
                 default:
                     result = { error: `Unknown function: ${name}` };
             }
 
-            // Send the function result back to OpenAI
+            // Send the function result back to OpenAI using the correct format
             const functionResponse = {
                 type: 'conversation.item.create',
                 item: {
@@ -781,7 +799,16 @@ Keep responses conversational and brief for phone calls.`;
 
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify(functionResponse));
-                console.log('Function result sent back to OpenAI');
+                console.log('Function result sent back to OpenAI:', result);
+            }
+
+            // Trigger response generation
+            const responseMessage = {
+                type: 'response.create'
+            };
+            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify(responseMessage));
+                console.log('Response generation triggered');
             }
 
         } catch (error) {
