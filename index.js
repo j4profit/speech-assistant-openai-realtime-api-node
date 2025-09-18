@@ -539,7 +539,7 @@ async function createCustomerMessage(messageData) {
                 call_sid: messageData.call_sid,
                 order_reference: messageData.order_reference,
                 priority: messageData.priority || 'normal',
-                status: 'pending'
+                status: 'new' // Changed from 'pending' to 'new'
             }])
             .select()
             .single();
@@ -560,9 +560,140 @@ async function createCustomerMessage(messageData) {
     }
 }
 
+// Function to calculate distance between two points (in miles)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 3959; // Radius of the Earth in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
+// Function to validate delivery address
+async function validateDeliveryAddress(address, restaurant) {
+    try {
+        console.log('Validating delivery address:', address);
+        
+        // Check if restaurant offers delivery
+        if (!restaurant.delivery_enabled) {
+            return {
+                valid: false,
+                message: 'Sorry, this restaurant does not offer delivery service.'
+            };
+        }
+        
+        // Check delivery hours if specified
+        if (restaurant.delivery_hours) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const [startHour, endHour] = restaurant.delivery_hours.split('-').map(h => parseInt(h));
+            
+            if (currentHour < startHour || currentHour >= endHour) {
+                return {
+                    valid: false,
+                    message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`
+                };
+            }
+        }
+        
+        // For basic validation, check if address contains minimum required parts
+        const addressParts = address.toLowerCase().split(/[\s,]+/);
+        const hasStreetNumber = /\d+/.test(address);
+        const hasZipCode = /\d{5}/.test(address);
+        
+        if (!hasStreetNumber || addressParts.length < 4) {
+            return {
+                valid: false,
+                message: 'Please provide a complete address including street number, street name, city, state, and zip code.'
+            };
+        }
+        
+        // If restaurant has coordinates and delivery radius, validate distance
+        if (restaurant.latitude && restaurant.longitude && restaurant.delivery_radius) {
+            // Note: In production, you would use a geocoding API here to get customer coordinates
+            // For now, we'll do basic zip code validation if available
+            
+            // Extract zip code from address
+            const zipMatch = address.match(/\d{5}/);
+            if (zipMatch) {
+                const customerZip = zipMatch[0];
+                const restaurantZip = restaurant.address ? restaurant.address.match(/\d{5}/)?.[0] : null;
+                
+                // Basic check: if zip codes are very different, likely out of range
+                if (restaurantZip && Math.abs(parseInt(customerZip) - parseInt(restaurantZip)) > 100) {
+                    return {
+                        valid: false,
+                        message: `Sorry, that address appears to be outside our ${restaurant.delivery_radius} mile delivery area.`
+                    };
+                }
+            }
+        }
+        
+        return {
+            valid: true,
+            message: 'Address validated successfully',
+            address: address
+        };
+        
+    } catch (error) {
+        console.error('Error validating delivery address:', error);
+        return {
+            valid: false,
+            message: 'Unable to validate address. Please provide a complete address or choose pickup.'
+        };
+    }
+}
+
+// Function to calculate pickup/delivery time
+function calculateOrderReadyTime(restaurant, isDelivery = false) {
+    try {
+        const now = new Date();
+        const preparationMinutes = restaurant.preparation_time || 20; // Default 20 minutes if not set
+        const deliveryAddedMinutes = isDelivery ? (restaurant.delivery_time || 15) : 0; // Add delivery time if delivery
+        
+        const totalMinutes = preparationMinutes + deliveryAddedMinutes;
+        const readyTime = new Date(now.getTime() + totalMinutes * 60000);
+        
+        // Format time as readable string (e.g., "3:45 PM")
+        const hours = readyTime.getHours();
+        const minutes = readyTime.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const displayHours = hours % 12 || 12;
+        const displayMinutes = minutes.toString().padStart(2, '0');
+        
+        return {
+            readyTime: readyTime,
+            readyTimeString: `${displayHours}:${displayMinutes} ${ampm}`,
+            preparationMinutes: totalMinutes,
+            estimatedTime: `approximately ${totalMinutes} minutes`
+        };
+    } catch (error) {
+        console.error('Error calculating ready time:', error);
+        return {
+            readyTime: new Date(Date.now() + 30 * 60000), // Default 30 minutes
+            readyTimeString: 'in about 30 minutes',
+            preparationMinutes: 30,
+            estimatedTime: 'approximately 30 minutes'
+        };
+    }
+}
+
 // Function to create order in database
 async function createOrder(orderData) {
     try {
+        // Calculate pickup/delivery time based on restaurant settings
+        const restaurant = await getRestaurantByPhone(orderData.restaurant_phone || orderData.to_number);
+        const isDelivery = orderData.order_type === 'delivery';
+        const timing = calculateOrderReadyTime(restaurant, isDelivery);
+        
+        // Add calculated ready time to order
+        orderData.ready_time = timing.readyTimeString;
+        orderData.estimated_ready_at = timing.readyTime.toISOString();
+        
         const { data: order, error: orderError } = await supabase
             .from('orders')
             .insert([{
@@ -571,8 +702,12 @@ async function createOrder(orderData) {
                 customer_name: orderData.customer_name,
                 total_amount: orderData.total_amount,
                 status: 'pending',
+                order_type: orderData.order_type || 'pickup', // 'pickup' or 'delivery'
+                delivery_address: orderData.delivery_address || null,
                 order_details: orderData.order_details,
                 special_instructions: orderData.special_instructions,
+                ready_time: orderData.ready_time,
+                estimated_ready_at: orderData.estimated_ready_at,
                 call_sid: orderData.call_sid
             }])
             .select()
@@ -880,10 +1015,12 @@ IMPORTANT ORDER FORMAT (ONLY for NEW orders, NEVER for modifications):
 ORDER_CONFIRMED:
 - Customer Name: [name if provided]
 - Phone: ${customerPhone || '[provided phone]'}
+- Order Type: [pickup/delivery]
+- Delivery Address: [if delivery, full address; if pickup, write "N/A"]
 - Items: [list each item with quantity and price]
 - Special Instructions: [any special requests]
 - Total: $[total amount]
-- Pickup Time: [if specified]
+- Ready Time: [calculated time based on preparation_time]
 ORDER_END
 
 Keep responses conversational and brief for phone calls.`;
@@ -919,6 +1056,21 @@ Keep responses conversational and brief for phone calls.`;
                                     }
                                 },
                                 required: []
+                            }
+                        },
+                        {
+                            type: "function",
+                            name: "validate_delivery_address",
+                            description: "Validate if a delivery address is within the restaurant's delivery area and during delivery hours.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    address: {
+                                        type: "string",
+                                        description: "Complete delivery address including street number, street name, city, state, and zip code"
+                                    }
+                                },
+                                required: ["address"]
                             }
                         },
                         {
@@ -1179,6 +1331,23 @@ Keep responses conversational and brief for phone calls.`;
                             : null
                     };
                     console.log(`Found ${orders.length} pending orders for ${phoneNumber}`);
+                    break;
+
+                case 'validate_delivery_address':
+                    const address = parsedArgs.address;
+                    console.log('Validating delivery address:', address);
+                    
+                    if (!address) {
+                        result = { 
+                            valid: false,
+                            message: 'No address provided. Please provide a complete delivery address.' 
+                        };
+                        break;
+                    }
+                    
+                    const validationResult = await validateDeliveryAddress(address, restaurant);
+                    result = validationResult;
+                    console.log('Address validation result:', result);
                     break;
 
                 case 'cancel_order':
@@ -1542,28 +1711,42 @@ Keep responses conversational and brief for phone calls.`;
                 let customerName = '';
                 let items = '';
                 let specialInstructions = '';
-                let pickupTime = '';
+                let orderType = 'pickup'; // Default to pickup
+                let deliveryAddress = null;
+                let readyTime = '';
                 
                 const lines = orderSection.split('\n').map(line => line.trim());
                 
                 for (const line of lines) {
                     if (line.startsWith('Customer Name:')) {
                         customerName = line.substring('Customer Name:'.length).trim();
+                    } else if (line.startsWith('Order Type:')) {
+                        orderType = line.substring('Order Type:'.length).trim().toLowerCase();
+                    } else if (line.startsWith('Delivery Address:')) {
+                        const addr = line.substring('Delivery Address:'.length).trim();
+                        if (addr && addr.toLowerCase() !== 'n/a') {
+                            deliveryAddress = addr;
+                        }
                     } else if (line.startsWith('Items:')) {
                         items = line.substring('Items:'.length).trim();
                     } else if (line.startsWith('Special Instructions:')) {
                         specialInstructions = line.substring('Special Instructions:'.length).trim();
-                    } else if (line.startsWith('Pickup Time:')) {
-                        pickupTime = line.substring('Pickup Time:'.length).trim();
+                    } else if (line.startsWith('Ready Time:') || line.startsWith('Pickup Time:')) {
+                        readyTime = line.substring(line.indexOf(':') + 1).trim();
                     }
                 }
+                
+                // Calculate ready time if not provided
+                const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
                 
                 // Build comprehensive order details
                 const formattedOrderDetails = `Customer: ${customerName || 'Not provided'}
 Phone: ${customerPhone}
+Order Type: ${orderType}
+${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup'}
 Items: ${items || 'No items specified'}
 Special Instructions: ${specialInstructions || 'None'}
-Pickup Time: ${pickupTime || 'ASAP'}
+Ready Time: ${readyTime || timing.readyTimeString}
 Order taken via AI phone system`;
                 
                 const orderData = {
@@ -1571,8 +1754,10 @@ Order taken via AI phone system`;
                     customer_phone: customerPhone,
                     customer_name: customerName || null,
                     total_amount: extractTotal(orderSection) || 0,
+                    order_type: orderType,
+                    delivery_address: deliveryAddress,
                     order_details: formattedOrderDetails,
-                    special_instructions: specialInstructions || pickupTime || '',
+                    special_instructions: specialInstructions || '',
                     call_sid: callSid,
                     items: []
                 };
