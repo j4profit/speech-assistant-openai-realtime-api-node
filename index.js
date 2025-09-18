@@ -1050,6 +1050,10 @@ Keep responses conversational and brief for phone calls.`;
             console.log('Processing order from transcript...');
             
             if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
+                // IMMEDIATELY mark as processed to prevent race conditions
+                orderProcessed = true;
+                console.log('Order processing started, flag set to prevent duplicates');
+                
                 const orderSection = transcript.substring(
                     transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
                     transcript.indexOf('ORDER_END')
@@ -1057,116 +1061,223 @@ Keep responses conversational and brief for phone calls.`;
                 
                 console.log('Found structured order:', orderSection);
                 
-                // Extract customer name from order section
+                // Extract all order details from the structured format
                 let customerName = '';
-                const nameMatch = orderSection.match(/Customer Name:\s*([^\n]+)/);
-                if (nameMatch) {
-                    customerName = nameMatch[1].trim();
+                let items = '';
+                let specialInstructions = '';
+                let pickupTime = '';
+                
+                const lines = orderSection.split('\n').map(line => line.trim());
+                
+                for (const line of lines) {
+                    if (line.startsWith('Customer Name:')) {
+                        customerName = line.substring('Customer Name:'.length).trim();
+                    } else if (line.startsWith('Items:')) {
+                        items = line.substring('Items:'.length).trim();
+                    } else if (line.startsWith('Special Instructions:')) {
+                        specialInstructions = line.substring('Special Instructions:'.length).trim();
+                    } else if (line.startsWith('Pickup Time:')) {
+                        pickupTime = line.substring('Pickup Time:'.length).trim();
+                    }
                 }
+                
+                // Build comprehensive order details
+                const formattedOrderDetails = `Customer: ${customerName || 'Not provided'}
+Phone: ${customerPhone}
+Items: ${items || 'No items specified'}
+Special Instructions: ${specialInstructions || 'None'}
+Pickup Time: ${pickupTime || 'ASAP'}
+Order taken via AI phone system`;
                 
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
-                    customer_name: customerName,
+                    customer_name: customerName || null,
                     total_amount: extractTotal(orderSection) || 0,
-                    order_details: orderSection,
-                    special_instructions: '',
+                    order_details: formattedOrderDetails,
+                    special_instructions: specialInstructions || pickupTime || '',
                     call_sid: callSid,
                     items: []
                 };
 
                 const order = await createOrder(orderData);
                 if (order) {
-                    console.log('Order saved successfully!');
-                    orderProcessed = true; // Mark order as processed
+                    console.log('Order saved successfully with ID:', order.id);
                     
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
                     }
+                } else {
+                    // If order creation failed, reset the flag
+                    orderProcessed = false;
+                    console.log('Order creation failed, resetting flag');
                 }
             }
         } catch (error) {
             console.error('Error processing order:', error);
+            orderProcessed = false; // Reset on error
         }
     }
 
-    // Extract total amount from text
+    // Extract total amount from text - IMPROVED VERSION
     function extractTotal(text) {
+        // Look for "Total: $XX.XX" pattern first
         const totalMatch = text.match(/Total:\s*\$(\d+\.?\d*)/);
         if (totalMatch) return parseFloat(totalMatch[1]);
         
-        // Fallback to any dollar amount
-        const dollarMatch = text.match(/\$(\d+\.?\d*)/);
-        return dollarMatch ? parseFloat(dollarMatch[1]) : null;
+        // Look for multiple prices and sum them
+        const priceMatches = text.match(/\$(\d+\.?\d*)/g);
+        if (priceMatches && priceMatches.length > 0) {
+            // If multiple prices found, sum them up
+            const prices = priceMatches.map(price => parseFloat(price.replace('
+    
+    // Handle WebSocket messages from Twilio
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            
+            switch (data.event) {
+                case 'connected':
+                    console.log('Twilio connected');
+                    break;
+                    
+                case 'start':
+                    streamSid = data.start.streamSid;
+                    
+                    const calledNumber = data.start.customParameters?.Called || 
+                                       data.start.customParameters?.To;
+                    
+                    const fromNumber = data.start.customParameters?.From ||
+                                      data.start.customParameters?.Caller;
+                    
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
+                    
+                    console.log('Stream started:', streamSid);
+                    console.log('Called number:', calledNumber);
+                    console.log('From number:', fromNumber);
+                    console.log('Call ID:', callId);
+                    
+                    initializeOpenAI(calledNumber, fromNumber, callId);
+                    break;
+                    
+                case 'media':
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const audioData = {
+                            type: 'input_audio_buffer.append',
+                            audio: data.media.payload
+                        };
+                        openaiWs.send(JSON.stringify(audioData));
+                    }
+                    break;
+                    
+                case 'stop':
+                    console.log('Stream stopped');
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.close();
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Error processing Twilio message:', error);
+        }
+    });
+    
+    ws.on('close', async () => {
+        console.log('Twilio connection closed');
+        
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
+        
+        await processCallEnd();
+        
+        if (callSid) {
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration
+            };
+            
+            await updateCallLog(callSid, updateData);
+            console.log(`Call completed. Duration: ${callDuration} seconds`);
+        }
+        
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('Twilio WebSocket error:', error);
+    });
+});
+
+wss.on('error', (error) => {
+    console.error('WebSocket Server error:', error);
+});
+
+server.listen(port, '0.0.0.0', () => {
+    console.log(`Restaurant AI System running on port ${port}`);
+    console.log(`Ready to take orders and messages via phone calls`);
+    console.log(`WebSocket ready for Twilio Media Streams`);
+    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
+    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+});, '')));
+            const total = prices.reduce((sum, price) => sum + price, 0);
+            return total;
+        }
+        
+        return 0;
     }
 
-    // Process call end - FIXED VERSION
+    // Process call end - COMPLETELY REVISED TO PREVENT DUPLICATES
     async function processCallEnd() {
         try {
-            console.log('Processing call end...');
-            const fullConversation = conversationTranscript.map(msg => 
-                `${msg.speaker}: ${msg.text}`
-            ).join('\n');
-            
-            console.log('Analyzing conversation for missed orders or messages...');
+            console.log('=== CALL END PROCESSING START ===');
             console.log('Order already processed:', orderProcessed);
             console.log('Message already processed:', messageProcessed);
             
-            // Always update call log with conversation
+            // Always update call log with conversation transcript
             if (callSid) {
+                const transcript = JSON.stringify(conversationTranscript);
                 await updateCallLog(callSid, { 
-                    conversation_transcript: JSON.stringify(conversationTranscript)
+                    conversation_transcript: transcript
                 });
+                console.log('Call log updated with conversation transcript');
             }
             
-            // Skip creating duplicate orders if one was already properly processed
-            if (orderProcessed) {
-                console.log('Skipping order creation - order already processed during call');
+            // STOP HERE if an order was already processed
+            if (orderProcessed === true) {
+                console.log('=== STOPPING: Order was already processed successfully ===');
                 return null;
             }
             
-            // Only create a fallback order if NO order was processed during the call
-            // AND there's evidence of an order attempt in the conversation
-            // BUT NOT if they were just modifying/canceling existing orders
-            const hasOrderKeywords = fullConversation.toLowerCase().includes('pizza') || 
-                                    fullConversation.toLowerCase().includes('pasta') ||
-                                    fullConversation.toLowerCase().includes('order');
+            // STOP HERE if this was just a cancellation/modification call
+            const fullConversation = conversationTranscript.map(msg => 
+                `${msg.speaker}: ${msg.text}`
+            ).join('\n').toLowerCase();
             
-            const isModifyingExisting = fullConversation.toLowerCase().includes('cancel') ||
-                                       fullConversation.toLowerCase().includes('change my order') ||
-                                       fullConversation.toLowerCase().includes('modify');
+            const wasCancellationCall = fullConversation.includes('cancel') && 
+                                        fullConversation.includes('found') && 
+                                        fullConversation.includes('pending order');
             
-            if (!orderProcessed && hasOrderKeywords && !isModifyingExisting) {
-                console.log('Potential new order detected in conversation - creating fallback order');
-                
-                const orderData = {
-                    restaurant_id: restaurant.id,
-                    customer_phone: customerPhone,
-                    customer_name: '',
-                    total_amount: 0,
-                    order_details: fullConversation,
-                    special_instructions: 'Order extracted from conversation - needs review',
-                    call_sid: callSid,
-                    items: []
-                };
-
-                const order = await createOrder(orderData);
-                if (order) {
-                    console.log('Conversation order saved!');
-                    
-                    if (callSid) {
-                        await updateCallLog(callSid, { 
-                            order_id: order.id
-                        });
-                    }
-                    return order;
-                }
-            } else {
-                console.log('No new order needed - call was for order modification/cancellation or no order detected');
+            if (wasCancellationCall) {
+                console.log('=== STOPPING: This was a cancellation/modification call only ===');
+                return null;
             }
             
+            // STOP HERE if ORDER_CONFIRMED was in the conversation (even if it failed to save)
+            const hadOrderConfirmation = conversationTranscript.some(msg => 
+                msg.text && msg.text.includes('ORDER_CONFIRMED:')
+            );
+            
+            if (hadOrderConfirmation) {
+                console.log('=== STOPPING: Order confirmation was already attempted ===');
+                return null;
+            }
+            
+            console.log('=== NO FALLBACK ORDER CREATED - Proper order processing should handle all orders ===');
+            
         } catch (error) {
-            console.error('Error processing call end:', error);
+            console.error('Error in processCallEnd:', error);
         }
         return null;
     }
