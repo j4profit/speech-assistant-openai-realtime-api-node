@@ -60,16 +60,10 @@ app.post('/voice', async (req, res) => {
     if (restaurant) {
         callData.restaurant_id = restaurant.id;
         
-        // Test recent orders lookup right here in webhook
-        console.log('WEBHOOK DEBUG: Testing recent orders lookup');
-        console.log('WEBHOOK DEBUG: From number:', callData.from_number);
-        console.log('WEBHOOK DEBUG: Restaurant ID:', restaurant.id);
-        
+        // Test recent orders lookup right here in webhook (minimal logging)
+        console.log('WEBHOOK DEBUG: Testing recent orders for', callData.from_number);
         const testOrders = await getRecentOrders(callData.from_number, restaurant.id);
-        console.log('WEBHOOK DEBUG: Found orders:', testOrders.length);
-        if (testOrders.length > 0) {
-            console.log('WEBHOOK DEBUG: First order:', JSON.stringify(testOrders[0], null, 2));
-        }
+        console.log('WEBHOOK DEBUG: Found', testOrders.length, 'recent orders');
     }
     
     // Create initial call log
