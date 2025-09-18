@@ -256,7 +256,7 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// Function to search for recent orders by phone number (only pending orders)
+// Function to search for recent orders by phone number (pending and modified orders)
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
         const cutoffDate = new Date();
@@ -283,7 +283,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
             `)
             .eq('customer_phone', phoneNumber)
             .eq('restaurant_id', restaurantId)
-            .eq('status', 'pending') // Only show pending orders
+            .in('status', ['pending', 'modified']) // Search for both pending AND modified orders
             .gte('created_at', cutoffDate.toISOString())
             .order('created_at', { ascending: false })
             .limit(3);
@@ -293,7 +293,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
             return [];
         }
 
-        console.log(`Found ${data?.length || 0} pending orders for phone: ${phoneNumber}`);
+        console.log(`Found ${data?.length || 0} pending/modified orders for phone: ${phoneNumber}`);
         return data || [];
     } catch (error) {
         console.error('Error searching orders:', error);
@@ -562,15 +562,14 @@ INSTRUCTIONS:
    - Ask for customer name and pickup time
 
 4. For CHANGING EXISTING ORDERS:
-   - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool
+   - If customer says they want to "change my order", "modify my order", "add another", "add to my order", or mentions wanting to update their existing order, immediately use the search_recent_orders tool
    - After search_recent_orders returns results, you will see order IDs in the format "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-   - CRITICAL FOR CANCELLATIONS: When the customer confirms they want to cancel an order (like "yes", "cancel the pizza", "the first one", etc.), you MUST:
-     a) Take the ACTUAL order ID from the search results (the UUID string)
-     b) Call cancel_order with {"order_id": "THE-ACTUAL-UUID-FROM-SEARCH"}
-     c) NEVER call cancel_order without arguments or with empty arguments
-     d) Example: If search shows order id "e6d909fb-264a-4366-9bc8-f648331dafdd", call cancel_order with {"order_id": "e6d909fb-264a-4366-9bc8-f648331dafdd"}
-   - For MODIFICATIONS: Same rule - always use the actual order ID from search results when calling update_order
-   - You can only modify or cancel PENDING orders. If no pending orders are found, explain that you can only help with pending orders
+   - CRITICAL: When modifying orders, use the update_order function with the order ID and the modifications
+   - NEVER create a new ORDER_CONFIRMED when modifying - use update_order instead
+   - Example: If customer wants to add another pizza to their existing order, use update_order with modifications like "Add one more large pepperoni pizza"
+   - After successful update_order, just confirm the changes verbally, don't use ORDER_CONFIRMED format
+   - For CANCELLATIONS: Use the cancel_order tool with the ACTUAL ORDER ID and confirm "Your order has been successfully cancelled"
+   - IMPORTANT: Always pass the actual order ID to update_order or cancel_order functions
 
 5. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
@@ -909,15 +908,20 @@ Keep responses conversational and brief for phone calls.`;
                     }
                     
                     console.log(`Attempting to update order: ${orderId}`);
-                    const updateResult = await updateOrder(orderId, {
+                    console.log(`Modifications requested: ${modifications}`);
+                    
+                    // For order updates, we should update the actual order details properly
+                    const updateData = {
                         order_details: modifications,
-                        special_instructions: modifications,
+                        special_instructions: `MODIFIED: ${modifications}`,
                         total_amount: parsedArgs.new_total || 0
-                    });
+                    };
+                    
+                    const updateResult = await updateOrder(orderId, updateData);
                     
                     result = {
                         success: !!updateResult,
-                        message: updateResult ? 'Order modified successfully' : 'Failed to modify order - order may not be pending or may not exist',
+                        message: updateResult ? 'Order modified successfully. The changes have been applied to your existing order.' : 'Failed to modify order - order may not be pending or may not exist',
                         order_id: orderId,
                         modifications: modifications,
                         status: updateResult ? 'modified' : 'failed'
@@ -1042,6 +1046,19 @@ Keep responses conversational and brief for phone calls.`;
     // Process order from AI transcript
     async function processOrderFromTranscript(transcript) {
         try {
+            // CRITICAL CHECK: Don't create orders during modification calls
+            const conversationText = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
+            const isModificationCall = conversationText.includes('change') || 
+                                      conversationText.includes('modify') || 
+                                      conversationText.includes('update') ||
+                                      conversationText.includes('add another') ||
+                                      conversationText.includes('add to');
+            
+            if (isModificationCall) {
+                console.log('SKIPPING ORDER CREATION - This is a modification call, not a new order');
+                return;
+            }
+            
             if (orderProcessed) {
                 console.log('Order already processed, skipping duplicate');
                 return;
