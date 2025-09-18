@@ -573,7 +573,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// FIXED: Function to validate delivery address - now properly returns the address
+// FIXED: Function to validate delivery address with proper time parsing
 async function validateDeliveryAddress(address, restaurant) {
     try {
         console.log('Validating delivery address:', address);
@@ -588,7 +588,7 @@ async function validateDeliveryAddress(address, restaurant) {
             return {
                 valid: false,
                 message: 'Sorry, this restaurant does not offer delivery service.',
-                address: address // Still return the address even if invalid
+                address: address
             };
         }
         
@@ -596,14 +596,89 @@ async function validateDeliveryAddress(address, restaurant) {
         if (restaurant.delivery_hours) {
             const now = new Date();
             const currentHour = now.getHours();
-            const [startHour, endHour] = restaurant.delivery_hours.split('-').map(h => parseInt(h));
+            const currentMinutes = now.getMinutes();
+            const currentTotalMinutes = currentHour * 60 + currentMinutes;
             
-            if (currentHour < startHour || currentHour >= endHour) {
-                return {
-                    valid: false,
-                    message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`,
-                    address: address
-                };
+            // Parse delivery hours (e.g., "9:00 - 11p" or "9:00am - 11:00pm")
+            const hoursString = restaurant.delivery_hours.toLowerCase().replace(/\s/g, '');
+            const [startTime, endTime] = hoursString.split('-');
+            
+            // Helper function to parse time string
+            const parseTime = (timeStr) => {
+                // Remove all spaces
+                timeStr = timeStr.trim();
+                
+                // Check for AM/PM indicators
+                const isPM = timeStr.includes('p');
+                const isAM = timeStr.includes('a');
+                
+                // Remove AM/PM indicators
+                timeStr = timeStr.replace(/[ap]m?/gi, '');
+                
+                let hours = 0;
+                let minutes = 0;
+                
+                // Check if it contains colon (e.g., "9:00")
+                if (timeStr.includes(':')) {
+                    const [h, m] = timeStr.split(':');
+                    hours = parseInt(h) || 0;
+                    minutes = parseInt(m) || 0;
+                } else {
+                    // Just the hour (e.g., "9" or "11")
+                    hours = parseInt(timeStr) || 0;
+                }
+                
+                // Convert to 24-hour format
+                if (isPM && hours !== 12) {
+                    hours += 12;
+                } else if (isAM && hours === 12) {
+                    hours = 0;
+                } else if (!isAM && !isPM) {
+                    // If no AM/PM specified, assume AM for hours < 12, PM for hours >= 12
+                    // But for restaurant hours, times like "11" without AM/PM usually mean 11 AM
+                    // unless it's clearly evening hours
+                    if (hours <= 11 && hours >= 6) {
+                        // Morning/day hours, keep as is
+                    } else if (hours >= 1 && hours <= 5) {
+                        // Evening hours, add 12
+                        hours += 12;
+                    }
+                }
+                
+                return hours * 60 + minutes; // Return total minutes since midnight
+            };
+            
+            let startMinutes = parseTime(startTime);
+            let endMinutes = parseTime(endTime);
+            
+            // Log parsed times for debugging
+            console.log(`Current time: ${currentHour}:${currentMinutes.toString().padStart(2, '0')} (${currentTotalMinutes} minutes from midnight)`);
+            console.log(`Delivery window: ${Math.floor(startMinutes/60)}:${(startMinutes%60).toString().padStart(2, '0')} - ${Math.floor(endMinutes/60)}:${(endMinutes%60).toString().padStart(2, '0')} (${startMinutes} - ${endMinutes} minutes)`);
+            
+            // Handle cases where end time is after midnight (e.g., 11pm = 1380 minutes)
+            // If end time appears to be before start time, it might cross midnight
+            if (endMinutes < startMinutes && endMinutes < 360) { // 360 = 6 AM
+                // End time is after midnight
+                if (currentTotalMinutes >= startMinutes || currentTotalMinutes <= endMinutes) {
+                    // We're within delivery hours
+                    console.log('Within delivery hours (crosses midnight)');
+                } else {
+                    return {
+                        valid: false,
+                        message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`,
+                        address: address
+                    };
+                }
+            } else {
+                // Normal hours check
+                if (currentTotalMinutes < startMinutes || currentTotalMinutes >= endMinutes) {
+                    return {
+                        valid: false,
+                        message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`,
+                        address: address
+                    };
+                }
+                console.log('Within delivery hours');
             }
         }
         
