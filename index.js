@@ -256,7 +256,78 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// Function to create customer message
+// Function to search for recent orders by phone number
+async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
+    try {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        
+        const { data, error } = await supabase
+            .from('orders')
+            .select(`
+                id,
+                customer_phone,
+                customer_name,
+                total_amount,
+                status,
+                order_details,
+                special_instructions,
+                created_at,
+                order_items (
+                    id,
+                    quantity,
+                    price,
+                    special_requests,
+                    menu_items (name, description, price)
+                )
+            `)
+            .eq('customer_phone', phoneNumber)
+            .eq('restaurant_id', restaurantId)
+            .gte('created_at', cutoffDate.toISOString())
+            .in('status', ['pending', 'confirmed', 'preparing'])
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        if (error) {
+            console.error('Error searching orders:', error);
+            return [];
+        }
+
+        return data || [];
+    } catch (error) {
+        console.error('Error searching orders:', error);
+        return [];
+    }
+}
+
+// Function to update an existing order
+async function updateOrder(orderId, updateData) {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .update({
+                order_details: updateData.order_details,
+                special_instructions: updateData.special_instructions,
+                total_amount: updateData.total_amount,
+                status: 'modified',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', orderId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating order:', error);
+            return null;
+        }
+
+        console.log('Order updated successfully:', orderId);
+        return data;
+    } catch (error) {
+        console.error('Error updating order:', error);
+        return null;
+    }
+}
 async function createCustomerMessage(messageData) {
     try {
         const { data, error } = await supabase
@@ -430,11 +501,12 @@ ${menuText}
 
 INSTRUCTIONS:
 1. Start EVERY call with the greeting above mentioning the restaurant name
-2. Help customers with TWO main things:
+2. Help customers with THREE main things:
    a) PLACING NEW ORDERS - Take orders clearly with quantities and special requests
-   b) SENDING MESSAGES - For complaints, questions about past orders, compliments, or general inquiries
+   b) CHANGING EXISTING ORDERS - Use the search_recent_orders tool to find and modify orders
+   c) SENDING MESSAGES - For complaints, compliments, or general inquiries
 
-3. For ORDERING:
+3. For NEW ORDERING:
    - Help them browse the menu and answer questions about items
    - Take orders clearly - ask for quantities and any special requests
    - When you need their phone number, say: "For your order, I see you're calling from a number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is this the number you'd like me to use for your order?"
@@ -443,16 +515,25 @@ INSTRUCTIONS:
    - Confirm orders back to the customer including prices and totals
    - Ask for customer name and pickup time
 
-4. For MESSAGES/INQUIRIES:
-   - If they ask about previous orders, explain that you can't access past orders directly
-   - Offer to take a message for the restaurant staff about their previous order
+4. For CHANGING EXISTING ORDERS:
+   - If customer says they want to "change my order", "modify my order", "cancel my order", or mentions a recent order they placed, immediately use the search_recent_orders tool with their phone number: ${customerPhone}
+   - Once you find their recent orders, read back the details and ask what they'd like to change
+   - Use the update_order tool to make the changes they request
+   - Confirm the changes and new total if applicable
+   - Let them know their order has been successfully updated
+
+5. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
    - When taking a message, confirm their phone number the same way: "I'll send this message and have someone follow up with you at the number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is that correct?"
    - Ask for their name and specific details about their inquiry
    - Reassure them that staff will review their message and follow up if needed
 
-5. Be helpful, friendly, and efficient
-6. If asked about items not on the menu, politely explain they're not available
+6. Be helpful, friendly, and efficient
+7. If asked about items not on the menu, politely explain they're not available
+
+TOOL USAGE:
+- Use search_recent_orders whenever customer mentions wanting to change, modify, cancel, or asks about their recent order
+- Use update_order after confirming what changes they want to make to an existing order
 
 IMPORTANT MESSAGE FORMAT:
 When taking a message (not an order), format it like this:
@@ -494,7 +575,47 @@ Keep responses conversational and brief for phone calls.`;
                         threshold: 0.5,
                         prefix_padding_ms: 300,
                         silence_duration_ms: 500
-                    }
+                    },
+                    tools: [
+                        {
+                            type: "function",
+                            name: "search_recent_orders",
+                            description: "Search for recent orders by the customer's phone number. Use this when customer mentions wanting to change, modify, or asks about their recent order.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    phone_number: {
+                                        type: "string",
+                                        description: "Customer's phone number"
+                                    }
+                                },
+                                required: ["phone_number"]
+                            }
+                        },
+                        {
+                            type: "function", 
+                            name: "update_order",
+                            description: "Update an existing order with modifications. Use after finding an order the customer wants to change.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    order_id: {
+                                        type: "string",
+                                        description: "ID of the order to update"
+                                    },
+                                    modifications: {
+                                        type: "string",
+                                        description: "Description of what changes the customer wants to make"
+                                    },
+                                    new_total: {
+                                        type: "number",
+                                        description: "New total amount if calculable"
+                                    }
+                                },
+                                required: ["order_id", "modifications"]
+                            }
+                        }
+                    ]
                 }
             };
             openaiWs.send(JSON.stringify(sessionUpdate));
@@ -557,7 +678,18 @@ Keep responses conversational and brief for phone calls.`;
                         console.log('AI response complete');
                         break;
                         
+                    case 'response.function_call_delta':
+                        // Handle function call deltas if needed
+                        break;
+                        
+                    case 'response.function_call_done':
+                        console.log('Function call completed:', response.name);
+                        handleFunctionCall(response);
+                        break;
+                        
                     case 'error':
+                        console.error('OpenAI error:', response.error);
+                        break;
                         console.error('OpenAI error:', response.error);
                         break;
                         
@@ -589,7 +721,87 @@ Keep responses conversational and brief for phone calls.`;
         });
     }
 
-    // Process message from AI transcript
+    // Handle function calls from OpenAI
+    async function handleFunctionCall(functionCall) {
+        try {
+            const { name, call_id, arguments: args } = functionCall;
+            let result = null;
+
+            console.log(`Executing function: ${name} with args:`, args);
+
+            switch (name) {
+                case 'search_recent_orders':
+                    const orders = await searchRecentOrders(args.phone_number, restaurant.id);
+                    result = {
+                        orders: orders.map(order => ({
+                            id: order.id,
+                            created_at: order.created_at,
+                            status: order.status,
+                            total: order.total_amount,
+                            items: order.order_items?.map(item => ({
+                                name: item.menu_items?.name || 'Item',
+                                quantity: item.quantity,
+                                price: item.price,
+                                special_requests: item.special_requests
+                            })) || [],
+                            customer_name: order.customer_name
+                        })),
+                        count: orders.length
+                    };
+                    console.log(`Found ${orders.length} recent orders for customer`);
+                    break;
+
+                case 'update_order':
+                    const updateResult = await updateOrder(args.order_id, {
+                        order_details: args.modifications,
+                        special_instructions: args.modifications,
+                        total_amount: args.new_total || 0
+                    });
+                    result = {
+                        success: !!updateResult,
+                        message: updateResult ? 'Order updated successfully' : 'Failed to update order',
+                        order_id: args.order_id
+                    };
+                    console.log(`Order update result for ${args.order_id}:`, result.success);
+                    break;
+
+                default:
+                    result = { error: `Unknown function: ${name}` };
+            }
+
+            // Send the function result back to OpenAI
+            const functionResponse = {
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: call_id,
+                    output: JSON.stringify(result)
+                }
+            };
+
+            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify(functionResponse));
+                console.log('Function result sent back to OpenAI');
+            }
+
+        } catch (error) {
+            console.error('Error handling function call:', error);
+            
+            // Send error response back to OpenAI
+            const errorResponse = {
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: functionCall.call_id,
+                    output: JSON.stringify({ error: error.message })
+                }
+            };
+
+            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify(errorResponse));
+            }
+        }
+    }
     async function processMessageFromTranscript(transcript) {
         try {
             console.log('Processing customer message from transcript...');
