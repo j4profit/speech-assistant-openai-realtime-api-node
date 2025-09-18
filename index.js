@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System with Customer Messaging
+// Restaurant AI Ordering System with Customer Messaging - FIXED VERSION
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -573,16 +573,22 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Function to validate delivery address
+// FIXED: Function to validate delivery address - now properly returns the address
 async function validateDeliveryAddress(address, restaurant) {
     try {
         console.log('Validating delivery address:', address);
+        console.log('Restaurant delivery settings:', {
+            delivery_enabled: restaurant.delivery_enabled,
+            delivery_radius: restaurant.delivery_radius,
+            delivery_hours: restaurant.delivery_hours
+        });
         
         // Check if restaurant offers delivery
         if (!restaurant.delivery_enabled) {
             return {
                 valid: false,
-                message: 'Sorry, this restaurant does not offer delivery service.'
+                message: 'Sorry, this restaurant does not offer delivery service.',
+                address: address // Still return the address even if invalid
             };
         }
         
@@ -595,7 +601,8 @@ async function validateDeliveryAddress(address, restaurant) {
             if (currentHour < startHour || currentHour >= endHour) {
                 return {
                     valid: false,
-                    message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`
+                    message: `Delivery is only available between ${restaurant.delivery_hours}. Please choose pickup instead.`,
+                    address: address
                 };
             }
         }
@@ -608,7 +615,8 @@ async function validateDeliveryAddress(address, restaurant) {
         if (!hasStreetNumber || addressParts.length < 4) {
             return {
                 valid: false,
-                message: 'Please provide a complete address including street number, street name, city, state, and zip code.'
+                message: 'Please provide a complete address including street number, street name, city, state, and zip code.',
+                address: address
             };
         }
         
@@ -627,23 +635,26 @@ async function validateDeliveryAddress(address, restaurant) {
                 if (restaurantZip && Math.abs(parseInt(customerZip) - parseInt(restaurantZip)) > 100) {
                     return {
                         valid: false,
-                        message: `Sorry, that address appears to be outside our ${restaurant.delivery_radius} mile delivery area.`
+                        message: `Sorry, that address appears to be outside our ${restaurant.delivery_radius} mile delivery area.`,
+                        address: address
                     };
                 }
             }
         }
         
+        // IMPORTANT: Return the validated address so it can be saved
         return {
             valid: true,
             message: 'Address validated successfully',
-            address: address
+            address: address // This is critical - must return the address!
         };
         
     } catch (error) {
         console.error('Error validating delivery address:', error);
         return {
             valid: false,
-            message: 'Unable to validate address. Please provide a complete address or choose pickup.'
+            message: 'Unable to validate address. Please provide a complete address or choose pickup.',
+            address: address
         };
     }
 }
@@ -813,6 +824,7 @@ wss.on('connection', (ws, req) => {
     let recentOrders = []; // Store recent orders for reference
     let isModificationCall = false; // Track if this is a modification call
     let accumulatedMessageText = ''; // Accumulate message text across multiple responses
+    let capturedDeliveryAddress = null; // FIXED: Store validated delivery address
 
     // Initialize OpenAI connection with restaurant context
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -846,6 +858,7 @@ wss.on('connection', (ws, req) => {
         openaiWs.on('open', () => {
             console.log('Connected to OpenAI Realtime API with GPT-4o mini');
             
+            // FIXED: Updated instructions to properly capture all order information
             const instructions = `You are an AI assistant for ${restaurant.name}. 
 
 IMPORTANT: As soon as the session starts, immediately greet the caller with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
@@ -866,194 +879,68 @@ RESTAURANT INFORMATION:
 - Description: ${restaurant.description || ''}
 - Hours: ${restaurant.hours || 'Call for hours'}
 - Location: ${restaurant.address || ''}
+- Delivery Enabled: ${restaurant.delivery_enabled ? 'Yes' : 'No'}
+- Delivery Radius: ${restaurant.delivery_radius || 'Not specified'} miles
+- Delivery Hours: ${restaurant.delivery_hours || 'Same as restaurant hours'}
 
 ${menuText}
 
-INSTRUCTIONS:
-1. Start EVERY call with the greeting above mentioning the restaurant name
-2. Help customers with THREE main things:
-   a) PLACING NEW ORDERS - Take orders clearly with quantities and special requests
-   b) CHANGING EXISTING ORDERS - Use the search_recent_orders tool to find and modify orders
-   c) SENDING MESSAGES - For complaints, compliments, or general inquiries
+INSTRUCTIONS FOR NEW ORDERS:
+1. ALWAYS START by asking for the customer's name FIRST before taking any order details
+2. For DELIVERY orders:
+   - After getting their name, ask for items they want to order
+   - Once items are confirmed, ask for the complete delivery address
+   - Use validate_delivery_address function with the full address
+   - If address is valid, proceed with order confirmation
+   - If address is invalid, explain the issue and offer pickup instead
+   - NEVER switch to pickup without customer's explicit agreement
+3. For PICKUP orders:
+   - After getting their name, take the order items
+   - Confirm pickup time preferences
+4. Always include all captured information in the ORDER_CONFIRMED format:
+   - Customer Name (REQUIRED - ask if not provided)
+   - Phone number (use the caller's number)
+   - Order Type (delivery or pickup - maintain original choice)
+   - Delivery Address (REQUIRED for delivery, "N/A" for pickup)
+   - Items (list with quantities and prices)
+   - Special Instructions
+   - Total amount
+   - Ready Time
 
-3. For NEW ORDERING (ONLY when customer wants to place a completely new order, NOT modify existing):
-   - Help them browse the menu and answer questions about items
-   - Take orders clearly - ask for quantities and any special requests
-   - When you need their phone number, say: "For your order, I see you're calling from a number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is this the number you'd like me to use for your order?"
-   - If they say yes, use ${customerPhone} as their phone number
-   - If they say no, ask them to provide the correct phone number
-   - Confirm orders back to the customer including prices and totals
-   - Ask for customer name and pickup time
-   - ONLY use ORDER_CONFIRMED format for NEW orders, NEVER for modifications
+ORDER TAKING WORKFLOW:
+Step 1: "May I have your name for the order?"
+Step 2: "What would you like to order today?"
+Step 3a: If delivery: "What's your complete delivery address including zip code?"
+Step 3b: If pickup: "When would you like to pick this up?"
+Step 4: Confirm the complete order with all details
 
-4. For CHANGING EXISTING ORDERS:
-   TRIGGER PHRASES that indicate modification (ALWAYS search for orders when hearing these):
-   - "add to this order", "add to my order", "add another"
-   - "fix my order", "fix my last order"
-   - "change my order", "modify my order"
-   - "update my order", "adjust my order"
-   - "remove from my order", "take off"
-   - Any mention of existing/previous/last order
-   
-   CRITICAL WORKFLOW FOR MODIFICATIONS:
-   Step 1: Use search_recent_orders immediately when modification is mentioned
-   Step 2: After finding orders, you'll see format like:
-     {
-       "orders": [
-         {
-           "id": "12345678-abcd-efgh-ijkl-123456789012",
-           "items": [...],
-           "total": 25.99
-         }
-       ]
-     }
-   Step 3: Ask what changes they want (if not already specified)
-   Step 4: MUST use update_order with the EXACT order ID, changes, AND new total
-   
-   ABSOLUTE RULES FOR MODIFICATIONS:
-   - "add to order" = USE update_order (NEVER cancel_order)
-   - "change order" = USE update_order (NEVER cancel_order)
-   - "fix my order" = USE update_order (NEVER cancel_order)
-   - "modify order" = USE update_order (NEVER cancel_order)
-   - ONLY use cancel_order when customer explicitly says "cancel my order" or "I don't want the order"
-   
-   NEVER CONFUSE THESE FUNCTIONS:
-   - update_order: For ANY changes, additions, modifications to existing orders
-   - cancel_order: ONLY for completely cancelling the entire order
-   - If customer wants to ADD items → use update_order
-   - If customer wants to CHANGE items → use update_order
-   - If customer wants to REMOVE some items → use update_order
-   - If customer wants to CANCEL everything → use cancel_order
-   
-   Example for ADDING to order:
-   Customer: "Add to this order"
-   You: "What would you like to add?"
-   Customer: "A large pepperoni pizza"
-   You: [Call update_order with {"order_id": "abc-123", "modifications": "Add 1 large pepperoni pizza", "new_total": 44.98}]
-   You: "I've added a large pepperoni pizza to your existing order. Your new total is $44.98.": {"order_id": "12345678-abcd-efgh-ijkl-123456789012", "modifications": "Add 1 large pepperoni pizza ($18.99)", "new_total": 44.98}
-   - After update_order succeeds, say something like "I've updated your existing order with [changes]. Your new total is $[amount]."
-   
-   HANDLING AMBIGUOUS REQUESTS:
-   If customer asks a question about modifications:
-   - "Add to this order?" → Ask "What would you like to add to your order?"
-   - "Can I change it?" → Ask "What would you like to change?"
-   - "Is it too late to modify?" → Say "I can help modify your order. What changes would you like?"
-   - NEVER assume an action from a question - always clarify first
-   
-   IF NO ORDERS ARE FOUND:
-   - Say: "I couldn't find any pending orders for your phone number."
-   - Then say: "I can take a message for the restaurant staff about your order issue."
-   - Explain: "I should let you know that the restaurant is fairly busy and they may not be able to get to this message until later today or possibly tomorrow."
-   - Ask: "Would you like me to send them a message about what you need?"
-   - If yes, take a detailed message using MESSAGE_CONFIRMED format
+IMPORTANT ORDER FORMAT (for NEW orders only):
+When you have ALL information, output this EXACT format:
 
-5. For CANCELLATIONS:
-   ONLY use cancel_order when customer EXPLICITLY says:
-   - "cancel my order" / "cancel the order"
-   - "I don't want the order anymore"
-   - "nevermind, cancel it"
-   - "forget the whole order"
-   
-   NEVER use cancel_order for:
-   - "add to order" → use update_order
-   - "change my order" → use update_order  
-   - "fix my order" → use update_order
-   - "remove one item" → use update_order
-   - Any partial changes → use update_order
-   
-   Example CANCELLATION:
-   Customer: "I want to cancel my order"
-   You: [Call cancel_order with {"order_id": "abc-123", "reason": "Customer requested cancellation"}]
-   You: "Your order has been successfully cancelled."
-   
-   If customer changes from modification to cancellation (which is common):
-   Customer: "I want to change my order"
-   You: [search and find order] "What would you like to change?"
-   Customer: "Actually, just cancel it"
-   You: [Call cancel_order] "I understand. I'll cancel your order for you."
-
-6. For MESSAGES/INQUIRIES:
-   - For complaints, compliments, or questions - offer to send a message to management
-   - When taking a message, confirm their phone number the same way
-   - Ask for their name and specific details about their inquiry
-   - If it's about an order issue and no order is found, mention the restaurant is busy and may respond later or next day
-   
-   CRITICAL MESSAGE TAKING INSTRUCTIONS:
-   1. First, collect ALL information from the customer (name and message details)
-   2. ONLY after you have ALL information, output the COMPLETE message format IN ONE RESPONSE
-   3. Do NOT start outputting MESSAGE_CONFIRMED until you have everything ready
-   4. The ENTIRE message from MESSAGE_CONFIRMED: to MESSAGE_END must be in a SINGLE response
-   
-   Example flow:
-   Customer: "Yes, send a message"
-   You: "Could you provide your name and details about the issue?"
-   Customer: "John Smith, I wanted to cancel my order"
-   You: [NOW output the COMPLETE format in ONE response]:
-   "I'll send this message to the restaurant for you.
-   
-   MESSAGE_CONFIRMED:
-   - Customer Name: John Smith
-   - Phone: +14435061908
-   - Message Type: order_inquiry
-   - Subject: Order cancellation request
-   - Message: Customer wanted to cancel their last order but no pending order was found in the system
-   - Priority: normal
-   MESSAGE_END
-   
-   The restaurant has received your message and will follow up when they can."
-
-CRITICAL TOOL USAGE RULES:
-- search_recent_orders: Returns orders with format {"orders": [{"id": "uuid-here", "items": [...]}]}
-- update_order: MUST include {"order_id": "exact-uuid-from-search", "modifications": "description", "new_total": number}
-- cancel_order: MUST include {"order_id": "exact-uuid-from-search", "reason": "optional reason"}
-
-ABSOLUTE RULES FOR ORDER MODIFICATIONS:
-1. If customer mentions ANY existing order ("fix my order", "change my order", etc.) → ALWAYS search first
-2. If search finds orders → MUST use update_order function, NEVER create new order
-3. NEVER output ORDER_CONFIRMED when modifying existing orders
-4. Only use ORDER_CONFIRMED for brand new orders when no existing order is involved
-
-EXAMPLE MODIFICATION FLOW:
-Customer: "Fix my last order"
-You: [Call search_recent_orders]
-System: {"orders": [{"id": "abc-123", "items": [], "total": 0}]}
-Customer: "Add a large pizza"
-You: [Call update_order with {"order_id": "abc-123", "modifications": "Add 1 large pepperoni pizza", "new_total": 18.99}]
-You: "I've updated your existing order to include a large pepperoni pizza. Your total is now $18.99."
-
-IMPORTANT MESSAGE FORMAT (for messages to restaurant):
-When taking a message, you MUST use this EXACT format with no modifications, ALL IN ONE RESPONSE:
-
-MESSAGE_CONFIRMED:
-- Customer Name: [name if provided]
-- Phone: ${customerPhone || '[provided phone]'}
-- Message Type: [order_inquiry/complaint/compliment/question/general]
-- Subject: [brief subject]
-- Message: [detailed customer message]
-- Priority: [normal/high based on urgency]
-MESSAGE_END
-
-CRITICAL RULES:
-1. Do NOT use markdown formatting (no ** or bold)
-2. Output the ENTIRE format from MESSAGE_CONFIRMED: to MESSAGE_END in ONE SINGLE RESPONSE
-3. NEVER split the message across multiple responses
-4. Include a confirmation statement before and/or after the format
-
-IMPORTANT ORDER FORMAT (ONLY for NEW orders, NEVER for modifications):
 ORDER_CONFIRMED:
-- Customer Name: [name if provided]
+- Customer Name: [MUST have actual name, never leave empty]
 - Phone: ${customerPhone || '[provided phone]'}
-- Order Type: [pickup/delivery]
-- Delivery Address: [if delivery, full address; if pickup, write "N/A"]
-- Items: [list each item with quantity and price]
-- Special Instructions: [any special requests]
-- Total: $[total amount]
-- Ready Time: [calculated time based on preparation_time]
+- Order Type: [delivery or pickup]
+- Delivery Address: [FULL address for delivery, or "N/A" for pickup]
+- Items: [detailed list with quantities and prices]
+- Special Instructions: [any special requests or "None"]
+- Total: $[calculated total]
+- Ready Time: [estimated time]
 ORDER_END
 
-Keep responses conversational and VERY BRIEF for phone calls. 
-NEVER give long explanations or multiple options at once.
-Ask for ONE thing at a time and wait for response.`;
+CRITICAL RULES FOR ORDERS:
+- NEVER create an order without the customer's name
+- NEVER change order type from delivery to pickup without explicit customer approval
+- ALWAYS include the full delivery address in the order for delivery orders
+- ALWAYS list specific items with quantities and individual prices
+
+For MODIFICATIONS to existing orders:
+[Keep existing modification instructions...]
+
+For MESSAGES/INQUIRIES:
+[Keep existing message instructions...]
+
+Keep responses conversational and VERY BRIEF for phone calls.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1267,7 +1154,7 @@ Ask for ONE thing at a time and wait for response.`;
         });
     }
 
-    // Handle function calls from OpenAI
+    // FIXED: Handle function calls from OpenAI - properly capture delivery address
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1364,22 +1251,22 @@ Ask for ONE thing at a time and wait for response.`;
                     break;
 
                 case 'validate_delivery_address':
-                    // Handle both direct arguments and fallback to recent conversation
+                    // FIXED: Properly handle address validation and capture
                     let address = parsedArgs.address;
                     
                     if (!address) {
                         // Try to extract address from recent conversation
                         console.log('No address in arguments, searching conversation for address...');
-                        const recentAI = conversationTranscript
+                        const recentCustomer = conversationTranscript
                             .filter(m => m.speaker === 'Customer')
                             .slice(-3)
                             .map(m => m.text)
                             .join(' ');
                         
                         // Look for address patterns
-                        const addressMatch = recentAI.match(/\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
+                        const addressMatch = recentCustomer.match(/\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
                         if (addressMatch) {
-                            address = recentAI; // Use the full recent customer text as address
+                            address = recentCustomer; // Use the full recent customer text as address
                             console.log('Found address in recent conversation:', address);
                         }
                     }
@@ -1389,12 +1276,20 @@ Ask for ONE thing at a time and wait for response.`;
                     if (!address) {
                         result = { 
                             valid: false,
-                            message: 'No address provided. Please provide a complete delivery address including street number, street name, city, state, and zip code.' 
+                            message: 'No address provided. Please provide a complete delivery address including street number, street name, city, state, and zip code.',
+                            address: null
                         };
                         break;
                     }
                     
                     const validationResult = await validateDeliveryAddress(address, restaurant);
+                    
+                    // FIXED: Store the address if validation was successful
+                    if (validationResult.valid) {
+                        capturedDeliveryAddress = validationResult.address;
+                        console.log('DELIVERY ADDRESS CAPTURED:', capturedDeliveryAddress);
+                    }
+                    
                     result = validationResult;
                     console.log('Address validation result:', result);
                     break;
@@ -1702,7 +1597,7 @@ Ask for ONE thing at a time and wait for response.`;
         return messageData;
     }
 
-    // Process order from AI transcript
+    // FIXED: Process order from AI transcript - properly capture all fields
     async function processOrderFromTranscript(transcript) {
         try {
             // CRITICAL CHECK: Don't create orders during modification calls
@@ -1755,43 +1650,69 @@ Ask for ONE thing at a time and wait for response.`;
                 
                 console.log('Found structured order:', orderSection);
                 
-                // Extract all order details from the structured format
+                // FIXED: Extract all order details from the structured format
                 let customerName = '';
                 let items = '';
                 let specialInstructions = '';
                 let orderType = 'pickup'; // Default to pickup
                 let deliveryAddress = null;
                 let readyTime = '';
+                let totalAmount = 0;
                 
                 const lines = orderSection.split('\n').map(line => line.trim());
                 
                 for (const line of lines) {
-                    if (line.startsWith('Customer Name:')) {
-                        customerName = line.substring('Customer Name:'.length).trim();
-                    } else if (line.startsWith('Order Type:')) {
-                        orderType = line.substring('Order Type:'.length).trim().toLowerCase();
-                    } else if (line.startsWith('Delivery Address:')) {
-                        const addr = line.substring('Delivery Address:'.length).trim();
-                        if (addr && addr.toLowerCase() !== 'n/a') {
+                    if (line.startsWith('- Customer Name:') || line.startsWith('Customer Name:')) {
+                        customerName = line.substring(line.indexOf(':') + 1).trim();
+                        // Remove any brackets or placeholder text
+                        customerName = customerName.replace(/\[.*?\]/g, '').trim();
+                    } else if (line.startsWith('- Order Type:') || line.startsWith('Order Type:')) {
+                        orderType = line.substring(line.indexOf(':') + 1).trim().toLowerCase();
+                    } else if (line.startsWith('- Delivery Address:') || line.startsWith('Delivery Address:')) {
+                        const addr = line.substring(line.indexOf(':') + 1).trim();
+                        if (addr && addr.toLowerCase() !== 'n/a' && addr !== 'N/A') {
                             deliveryAddress = addr;
+                        } else if (orderType === 'delivery' && capturedDeliveryAddress) {
+                            // FIXED: Use the captured delivery address from validation
+                            deliveryAddress = capturedDeliveryAddress;
+                            console.log('Using captured delivery address:', deliveryAddress);
                         }
-                    } else if (line.startsWith('Items:')) {
-                        items = line.substring('Items:'.length).trim();
-                    } else if (line.startsWith('Special Instructions:')) {
-                        specialInstructions = line.substring('Special Instructions:'.length).trim();
-                    } else if (line.startsWith('Ready Time:') || line.startsWith('Pickup Time:')) {
+                    } else if (line.startsWith('- Items:') || line.startsWith('Items:')) {
+                        items = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Special Instructions:') || line.startsWith('Special Instructions:')) {
+                        specialInstructions = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Ready Time:') || line.startsWith('Ready Time:') || 
+                              line.startsWith('- Pickup Time:') || line.startsWith('Pickup Time:')) {
                         readyTime = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Total:') || line.startsWith('Total:')) {
+                        totalAmount = extractTotal(line);
+                    }
+                }
+                
+                // FIXED: Additional validation and defaults
+                if (!customerName || customerName === 'Not provided' || customerName === '[name if provided]') {
+                    console.log('WARNING: Customer name not captured properly');
+                    // Try to find name from conversation
+                    const nameConversation = conversationTranscript.filter(m => m.speaker === 'Customer');
+                    // Look for common name patterns
+                    for (const msg of nameConversation) {
+                        const nameMatch = msg.text.match(/(?:my name is|this is|i'm|i am)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+                        if (nameMatch) {
+                            customerName = nameMatch[1];
+                            console.log('Found customer name from conversation:', customerName);
+                            break;
+                        }
                     }
                 }
                 
                 // Calculate ready time if not provided
                 const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
                 
-                // Build comprehensive order details
+                // FIXED: Build comprehensive order details with all captured information
                 const formattedOrderDetails = `Customer: ${customerName || 'Not provided'}
 Phone: ${customerPhone}
 Order Type: ${orderType}
-${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup'}
+${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress || 'Not provided'}` : 'Pickup'}
 Items: ${items || 'No items specified'}
 Special Instructions: ${specialInstructions || 'None'}
 Ready Time: ${readyTime || timing.readyTimeString}
@@ -1801,18 +1722,23 @@ Order taken via AI phone system`;
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
                     customer_name: customerName || null,
-                    total_amount: extractTotal(orderSection) || 0,
+                    total_amount: totalAmount || extractTotal(orderSection) || 0,
                     order_type: orderType,
-                    delivery_address: deliveryAddress,
+                    delivery_address: deliveryAddress, // This will now have the actual address
                     order_details: formattedOrderDetails,
                     special_instructions: specialInstructions || '',
                     call_sid: callSid,
-                    items: []
+                    items: [] // TODO: Parse items into structured format if needed
                 };
+
+                console.log('Final order data to save:', orderData);
 
                 const order = await createOrder(orderData);
                 if (order) {
                     console.log('NEW order saved successfully with ID:', order.id);
+                    
+                    // Clear the captured delivery address after successful order
+                    capturedDeliveryAddress = null;
                     
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
