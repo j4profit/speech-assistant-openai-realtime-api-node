@@ -891,12 +891,22 @@ Keep responses conversational and brief for phone calls.`;
 
                 case 'update_order':
                     let orderId = parsedArgs.order_id;
-                    const modifications = parsedArgs.modifications || 'Order modification requested';
+                    let modifications = parsedArgs.modifications || 'Order modification requested';
                     
                     // Fallback: If no order ID provided but we have recent orders, use the first one
                     if (!orderId && recentOrders && recentOrders.length > 0) {
                         console.log('No order ID provided for update, using first pending order from recent search');
                         orderId = recentOrders[0].id;
+                        
+                        // Try to infer modifications from conversation
+                        const recentConvo = conversationTranscript.slice(-5).map(m => m.text).join(' ').toLowerCase();
+                        if (recentConvo.includes('one')) {
+                            modifications = 'Change quantity to 1 item';
+                        } else if (recentConvo.includes('cancel')) {
+                            modifications = 'Cancel part of order';
+                        } else if (recentConvo.includes('add')) {
+                            modifications = 'Add items to order';
+                        }
                     }
                     
                     if (!orderId) {
