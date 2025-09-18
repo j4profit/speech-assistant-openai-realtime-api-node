@@ -735,13 +735,21 @@ Keep responses conversational and brief for phone calls.`;
             let result = null;
             let parsedArgs = {};
 
-            console.log(`Executing function: ${name} with raw args:`, args);
+            console.log(`Executing function: ${name}`);
+            console.log('Raw function call object:', JSON.stringify(functionCall, null, 2));
 
-            // Parse arguments if they're a string
-            try {
-                parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
-            } catch (e) {
-                console.error('Error parsing function arguments:', e);
+            // Handle different argument formats
+            if (!args || args === '') {
+                console.log('No arguments provided, using defaults');
+                parsedArgs = {};
+            } else if (typeof args === 'string') {
+                try {
+                    parsedArgs = JSON.parse(args);
+                } catch (e) {
+                    console.error('Error parsing JSON arguments, using as string:', e);
+                    parsedArgs = { raw: args };
+                }
+            } else {
                 parsedArgs = args;
             }
 
@@ -749,11 +757,20 @@ Keep responses conversational and brief for phone calls.`;
 
             switch (name) {
                 case 'search_recent_orders':
-                    const orders = await searchRecentOrders(parsedArgs.phone_number, restaurant.id);
+                    // Use the customer's phone from the call context if not provided
+                    const phoneNumber = parsedArgs.phone_number || customerPhone;
+                    console.log('Searching orders for phone:', phoneNumber);
+                    
+                    if (!phoneNumber) {
+                        result = { error: 'No phone number available to search orders' };
+                        break;
+                    }
+                    
+                    const orders = await searchRecentOrders(phoneNumber, restaurant.id);
                     result = {
                         orders: orders.map(order => ({
                             id: order.id,
-                            created_at: order.created_at,
+                            created_at: new Date(order.created_at).toLocaleDateString(),
                             status: order.status,
                             total: order.total_amount,
                             items: order.order_items?.map(item => ({
@@ -762,32 +779,44 @@ Keep responses conversational and brief for phone calls.`;
                                 price: item.price,
                                 special_requests: item.special_requests
                             })) || [],
-                            customer_name: order.customer_name
+                            customer_name: order.customer_name,
+                            order_details: order.order_details
                         })),
-                        count: orders.length
+                        count: orders.length,
+                        phone_searched: phoneNumber
                     };
-                    console.log(`Found ${orders.length} recent orders for customer`);
+                    console.log(`Found ${orders.length} recent orders for ${phoneNumber}`);
                     break;
 
                 case 'update_order':
-                    const updateResult = await updateOrder(parsedArgs.order_id, {
-                        order_details: parsedArgs.modifications,
-                        special_instructions: parsedArgs.modifications,
+                    const orderId = parsedArgs.order_id;
+                    const modifications = parsedArgs.modifications || 'Order modification requested';
+                    
+                    if (!orderId) {
+                        result = { error: 'No order ID provided for update' };
+                        break;
+                    }
+                    
+                    const updateResult = await updateOrder(orderId, {
+                        order_details: modifications,
+                        special_instructions: modifications,
                         total_amount: parsedArgs.new_total || 0
                     });
+                    
                     result = {
                         success: !!updateResult,
                         message: updateResult ? 'Order updated successfully' : 'Failed to update order',
-                        order_id: parsedArgs.order_id
+                        order_id: orderId,
+                        modifications: modifications
                     };
-                    console.log(`Order update result for ${parsedArgs.order_id}:`, result.success);
+                    console.log(`Order update result for ${orderId}:`, result.success);
                     break;
 
                 default:
                     result = { error: `Unknown function: ${name}` };
             }
 
-            // Send the function result back to OpenAI using the correct format
+            // Send the function result back to OpenAI
             const functionResponse = {
                 type: 'conversation.item.create',
                 item: {
@@ -799,7 +828,7 @@ Keep responses conversational and brief for phone calls.`;
 
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify(functionResponse));
-                console.log('Function result sent back to OpenAI:', result);
+                console.log('Function result sent back to OpenAI');
             }
 
             // Trigger response generation
@@ -808,7 +837,6 @@ Keep responses conversational and brief for phone calls.`;
             };
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify(responseMessage));
-                console.log('Response generation triggered');
             }
 
         } catch (error) {
@@ -819,7 +847,7 @@ Keep responses conversational and brief for phone calls.`;
                 type: 'conversation.item.create',
                 item: {
                     type: 'function_call_output',
-                    call_id: functionCall.call_id,
+                    call_id: functionCall.call_id || 'unknown',
                     output: JSON.stringify({ error: error.message })
                 }
             };
