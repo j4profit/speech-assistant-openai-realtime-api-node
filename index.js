@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System with Customer Messaging - FIXED VERSION
+// Restaurant AI Ordering System with Customer Messaging
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -256,7 +256,7 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// Function to search for recent orders by phone number (pending and modified orders)
+// Function to search for recent orders by phone number (only pending orders)
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
         const cutoffDate = new Date();
@@ -283,7 +283,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
             `)
             .eq('customer_phone', phoneNumber)
             .eq('restaurant_id', restaurantId)
-            .in('status', ['pending', 'modified']) // Search for both pending AND modified orders
+            .eq('status', 'pending') // Only show pending orders
             .gte('created_at', cutoffDate.toISOString())
             .order('created_at', { ascending: false })
             .limit(3);
@@ -293,7 +293,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
             return [];
         }
 
-        console.log(`Found ${data?.length || 0} pending/modified orders for phone: ${phoneNumber}`);
+        console.log(`Found ${data?.length || 0} pending orders for phone: ${phoneNumber}`);
         return data || [];
     } catch (error) {
         console.error('Error searching orders:', error);
@@ -583,8 +583,12 @@ INSTRUCTIONS:
 CRITICAL TOOL USAGE RULES:
 - search_recent_orders: Can be called with no arguments (will use customer's phone)
 - cancel_order: MUST be called with {"order_id": "actual-uuid-from-search-results"}. NEVER call with empty arguments.
-- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change"}. NEVER call with empty arguments.
-- When you get search results showing orders like [{"id": "abc123", ...}, {"id": "def456", ...}], and customer says "cancel the first one", you MUST use {"order_id": "abc123"} when calling cancel_order
+- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change", "new_total": number}. NEVER call with empty arguments.
+- When you get search results showing orders, and customer wants to modify, you MUST:
+  1. Use update_order function with the order_id and modifications
+  2. Do NOT use ORDER_CONFIRMED format for modifications
+  3. Just confirm the changes verbally
+- Example: Customer says "change to one burger" -> Call update_order with {"order_id": "xxx", "modifications": "Change to 1 hamburger", "new_total": 12.99}
 
 IMPORTANT MESSAGE FORMAT:
 When taking a message (not an order), format it like this:
@@ -1146,113 +1150,34 @@ Order taken via AI phone system`;
         }
     }
 
-    // Extract total amount from text - IMPROVED VERSION
+    // Extract total amount from text
     function extractTotal(text) {
-        // Look for "Total: $XX.XX" pattern first
-        const totalMatch = text.match(/Total:\s*\$(\d+\.?\d*)/);
-        if (totalMatch) return parseFloat(totalMatch[1]);
-        
-        // Look for multiple prices and sum them
-        const priceMatches = text.match(/\$(\d+\.?\d*)/g);
-        if (priceMatches && priceMatches.length > 0) {
-            // If multiple prices found, sum them up
-            const prices = priceMatches.map(price => parseFloat(price.replace('
-    
-    // Handle WebSocket messages from Twilio
-    ws.on('message', (message) => {
         try {
-            const data = JSON.parse(message);
-            
-            switch (data.event) {
-                case 'connected':
-                    console.log('Twilio connected');
-                    break;
-                    
-                case 'start':
-                    streamSid = data.start.streamSid;
-                    
-                    const calledNumber = data.start.customParameters?.Called || 
-                                       data.start.customParameters?.To;
-                    
-                    const fromNumber = data.start.customParameters?.From ||
-                                      data.start.customParameters?.Caller;
-                    
-                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
-                    
-                    console.log('Stream started:', streamSid);
-                    console.log('Called number:', calledNumber);
-                    console.log('From number:', fromNumber);
-                    console.log('Call ID:', callId);
-                    
-                    initializeOpenAI(calledNumber, fromNumber, callId);
-                    break;
-                    
-                case 'media':
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        const audioData = {
-                            type: 'input_audio_buffer.append',
-                            audio: data.media.payload
-                        };
-                        openaiWs.send(JSON.stringify(audioData));
-                    }
-                    break;
-                    
-                case 'stop':
-                    console.log('Stream stopped');
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.close();
-                    }
-                    break;
+            // Look for Total: $XX.XX pattern
+            const totalMatch = text.match(/Total:\s*\$(\d+\.?\d*)/);
+            if (totalMatch) {
+                return parseFloat(totalMatch[1]);
             }
-        } catch (error) {
-            console.error('Error processing Twilio message:', error);
-        }
-    });
-    
-    ws.on('close', async () => {
-        console.log('Twilio connection closed');
-        
-        const callEndTime = new Date();
-        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
-        
-        await processCallEnd();
-        
-        if (callSid) {
-            const updateData = {
-                call_ended_at: callEndTime.toISOString(),
-                call_duration: callDuration
-            };
             
-            await updateCallLog(callSid, updateData);
-            console.log(`Call completed. Duration: ${callDuration} seconds`);
+            // Look for any dollar amounts in the text
+            const dollarPattern = /\$(\d+\.?\d*)/g;
+            const matches = text.match(dollarPattern);
+            
+            if (matches && matches.length > 0) {
+                let sum = 0;
+                for (let i = 0; i < matches.length; i++) {
+                    // Remove dollar sign and parse
+                    const amount = matches[i].substring(1);
+                    sum += parseFloat(amount);
+                }
+                return sum;
+            }
+            
+            return 0;
+        } catch (err) {
+            console.error('Error in extractTotal:', err);
+            return 0;
         }
-        
-        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.close();
-        }
-    });
-    
-    ws.on('error', (error) => {
-        console.error('Twilio WebSocket error:', error);
-    });
-});
-
-wss.on('error', (error) => {
-    console.error('WebSocket Server error:', error);
-});
-
-server.listen(port, '0.0.0.0', () => {
-    console.log(`Restaurant AI System running on port ${port}`);
-    console.log(`Ready to take orders and messages via phone calls`);
-    console.log(`WebSocket ready for Twilio Media Streams`);
-    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
-    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
-});, '')));
-            const total = prices.reduce((sum, price) => sum + price, 0);
-            return total;
-        }
-        
-        return 0;
     }
 
     // Process call end - COMPLETELY REVISED TO PREVENT DUPLICATES
