@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System with Supabase Integration - Clean Version
+// Restaurant AI Ordering System with Customer Messaging
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -59,11 +59,6 @@ app.post('/voice', async (req, res) => {
     const restaurant = await getRestaurantByPhone(callData.to_number);
     if (restaurant) {
         callData.restaurant_id = restaurant.id;
-        
-        // Test recent orders lookup right here in webhook (minimal logging)
-        console.log('WEBHOOK DEBUG: Testing recent orders for', callData.from_number);
-        const testOrders = await getRecentOrders(callData.from_number, restaurant.id);
-        console.log('WEBHOOK DEBUG: Found', testOrders.length, 'recent orders');
     }
     
     // Create initial call log
@@ -86,7 +81,7 @@ app.post('/voice', async (req, res) => {
 
 app.get('/', (req, res) => {
     res.json({ 
-        message: 'Restaurant AI Ordering System',
+        message: 'Restaurant AI Ordering and Messaging System',
         websocket_url: `wss://${req.get('host')}/media-stream`,
         server_time: new Date().toISOString()
     });
@@ -124,87 +119,51 @@ app.get('/orders', async (req, res) => {
     }
 });
 
-// Function to get recent orders for a phone number
-async function getRecentOrders(phoneNumber, restaurantId, daysBack = 1) {
+// API endpoint to get customer messages
+app.get('/messages', async (req, res) => {
     try {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-        
-        console.log('🔍 Searching for recent orders:');
-        console.log('  Phone:', phoneNumber);
-        console.log('  Restaurant ID:', restaurantId);
-        console.log('  Since:', cutoffDate.toISOString());
-        
         const { data, error } = await supabase
-            .from('orders')
+            .from('customer_messages')
             .select(`
                 *,
-                order_items (
-                    id,
-                    quantity,
-                    price,
-                    special_requests,
-                    menu_items (name, description, price)
-                )
+                restaurants(name)
             `)
-            .eq('customer_phone', phoneNumber)
-            .eq('restaurant_id', restaurantId)
-            .gte('created_at', cutoffDate.toISOString())
             .order('created_at', { ascending: false })
-            .limit(3);
+            .limit(50);
 
         if (error) {
-            console.error('❌ Error fetching recent orders:', error);
-            return [];
+            return res.status(500).json({ error: error.message });
         }
 
-        console.log('📋 Found orders:', data?.length || 0);
-        if (data && data.length > 0) {
-            console.log('📋 Recent order details:', JSON.stringify(data[0], null, 2));
-        }
-
-        return data || [];
+        res.json({ messages: data });
     } catch (error) {
-        console.error('❌ Error fetching recent orders:', error);
-        return [];
+        res.status(500).json({ error: error.message });
     }
-}
+});
 
-// Function to format recent order for AI
-function formatRecentOrderForAI(orders) {
-    if (!orders || orders.length === 0) {
-        return null;
-    }
+// API endpoint to get messages by status
+app.get('/messages/:status', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('customer_messages')
+            .select(`
+                *,
+                restaurants(name)
+            `)
+            .eq('status', req.params.status)
+            .order('created_at', { ascending: false });
 
-    const mostRecent = orders[0];
-    const orderDate = new Date(mostRecent.created_at).toLocaleDateString();
-    
-    let orderSummary = `RECENT ORDER FROM ${orderDate}:\n`;
-    orderSummary += `Order ID: ${mostRecent.id}\n`;
-    orderSummary += `Total: ${mostRecent.total_amount}\n`;
-    
-    if (mostRecent.order_items && mostRecent.order_items.length > 0) {
-        orderSummary += `Items:\n`;
-        mostRecent.order_items.forEach(item => {
-            const menuItem = item.menu_items;
-            orderSummary += `- ${item.quantity}x ${menuItem?.name || 'Item'} (${item.price})`;
-            if (item.special_requests) {
-                orderSummary += ` - Special: ${item.special_requests}`;
-            }
-            orderSummary += `\n`;
-        });
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ messages: data });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-    
-    if (mostRecent.special_instructions) {
-        orderSummary += `Special Instructions: ${mostRecent.special_instructions}\n`;
-    }
-    
-    return {
-        summary: orderSummary,
-        orderId: mostRecent.id,
-        orderData: mostRecent
-    };
-}
+});
+
+// Function to get restaurant data by phone number
 async function getRestaurantByPhone(phoneNumber) {
     try {
         const { data, error } = await supabase
@@ -297,10 +256,41 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
+// Function to create customer message
+async function createCustomerMessage(messageData) {
+    try {
+        const { data, error } = await supabase
+            .from('customer_messages')
+            .insert([{
+                restaurant_id: messageData.restaurant_id,
+                customer_phone: messageData.customer_phone,
+                customer_name: messageData.customer_name,
+                message_type: messageData.message_type,
+                subject: messageData.subject,
+                message_content: messageData.message_content,
+                call_sid: messageData.call_sid,
+                order_reference: messageData.order_reference,
+                priority: messageData.priority || 'normal'
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating customer message:', error);
+            return null;
+        }
+
+        console.log('Customer message created:', data.id);
+        return data;
+    } catch (error) {
+        console.error('Error creating customer message:', error);
+        return null;
+    }
+}
+
 // Function to create order in database
 async function createOrder(orderData) {
     try {
-        // Insert order
         const { data: order, error: orderError } = await supabase
             .from('orders')
             .insert([{
@@ -320,7 +310,6 @@ async function createOrder(orderData) {
             return null;
         }
 
-        // Insert order items
         if (orderData.items && orderData.items.length > 0) {
             const orderItems = orderData.items.map(item => ({
                 order_id: order.id,
@@ -395,11 +384,9 @@ wss.on('connection', (ws, req) => {
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
         
-        // Fallback to a test number if calledNumber is undefined/null
         const phoneToLookup = calledNumber || '+14108880091';
         console.log('Using phone number for lookup:', phoneToLookup);
         
-        // Get restaurant data
         restaurant = await getRestaurantByPhone(phoneToLookup);
         
         if (!restaurant) {
@@ -423,9 +410,8 @@ wss.on('connection', (ws, req) => {
         });
         
         openaiWs.on('open', () => {
-            console.log('Connected to OpenAI Realtime API');
+            console.log('Connected to OpenAI Realtime API with GPT-4o mini');
             
-            // Configure the session with restaurant context
             const instructions = `You are an AI assistant for ${restaurant.name}. 
 
 IMPORTANT: As soon as the session starts, immediately greet the caller with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
@@ -440,16 +426,39 @@ ${menuText}
 
 INSTRUCTIONS:
 1. Start EVERY call with the greeting above mentioning the restaurant name
-2. Help customers browse the menu and answer questions about items
-3. Take orders clearly - ask for quantities and any special requests
-4. Confirm orders back to the customer including prices
-5. Calculate totals accurately
-6. Ask for customer information if needed (name, pickup time, etc.)
-7. Be helpful, friendly, and efficient
-8. If asked about items not on the menu, politely explain they're not available
+2. Help customers with TWO main things:
+   a) PLACING NEW ORDERS - Take orders clearly with quantities and special requests
+   b) SENDING MESSAGES - For complaints, questions about past orders, compliments, or general inquiries
 
-IMPORTANT ORDER PROCESSING:
-When an order is confirmed, you MUST format it exactly like this:
+3. For ORDERING:
+   - Help them browse the menu and answer questions about items
+   - Take orders clearly - ask for quantities and any special requests
+   - Confirm orders back to the customer including prices and totals
+   - Ask for customer information (name, pickup time, etc.)
+
+4. For MESSAGES/INQUIRIES:
+   - If they ask about previous orders, explain that you can't access past orders directly
+   - Offer to take a message for the restaurant staff about their previous order
+   - For complaints, compliments, or questions - offer to send a message to management
+   - Ask for their name and specific details about their inquiry
+   - Reassure them that staff will review their message and follow up if needed
+
+5. Be helpful, friendly, and efficient
+6. If asked about items not on the menu, politely explain they're not available
+
+IMPORTANT MESSAGE FORMAT:
+When taking a message (not an order), format it like this:
+MESSAGE_CONFIRMED:
+- Customer Name: [name if provided]
+- Phone: [customer phone]
+- Message Type: [order_inquiry/complaint/compliment/question/general]
+- Subject: [brief subject]
+- Message: [detailed customer message]
+- Priority: [normal/high based on urgency]
+MESSAGE_END
+
+IMPORTANT ORDER FORMAT:
+When an order is confirmed, format it like this:
 ORDER_CONFIRMED:
 - Customer Name: [name if provided]
 - Items: [list each item with quantity and price]
@@ -458,7 +467,6 @@ ORDER_CONFIRMED:
 - Pickup Time: [if specified]
 ORDER_END
 
-This format is critical for our system to process the order correctly.
 Keep responses conversational and brief for phone calls.`;
 
             const sessionUpdate = {
@@ -489,7 +497,6 @@ Keep responses conversational and brief for phone calls.`;
                 
                 switch (response.type) {
                     case 'response.audio.delta':
-                        // Send AI audio back to Twilio
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
                             const mediaMessage = {
                                 event: 'media',
@@ -505,15 +512,16 @@ Keep responses conversational and brief for phone calls.`;
                     case 'response.audio_transcript.done':
                         console.log('AI said:', response.transcript);
                         
-                        // Add to conversation transcript
                         conversationTranscript.push({
                             timestamp: new Date().toISOString(),
                             speaker: 'AI',
                             text: response.transcript
                         });
                         
-                        // Check if this looks like a confirmed order
-                        if (response.transcript.includes('ORDER_CONFIRMED:')) {
+                        // Check for message or order confirmation
+                        if (response.transcript.includes('MESSAGE_CONFIRMED:')) {
+                            processMessageFromTranscript(response.transcript);
+                        } else if (response.transcript.includes('ORDER_CONFIRMED:')) {
                             processOrderFromTranscript(response.transcript);
                         }
                         break;
@@ -521,7 +529,6 @@ Keep responses conversational and brief for phone calls.`;
                     case 'conversation.item.input_audio_transcription.completed':
                         console.log('Customer said:', response.transcript);
                         
-                        // Add to conversation transcript
                         conversationTranscript.push({
                             timestamp: new Date().toISOString(),
                             speaker: 'Customer',
@@ -548,7 +555,6 @@ Keep responses conversational and brief for phone calls.`;
                     case 'session.updated':
                         console.log('OpenAI session configured for', restaurant.name);
                         
-                        // Immediately send a greeting to break the silence
                         const greetingMessage = {
                             type: 'response.create',
                             response: {
@@ -574,17 +580,73 @@ Keep responses conversational and brief for phone calls.`;
         });
     }
 
+    // Process message from AI transcript
+    async function processMessageFromTranscript(transcript) {
+        try {
+            console.log('Processing customer message from transcript...');
+            
+            const messageSection = transcript.substring(
+                transcript.indexOf('MESSAGE_CONFIRMED:') + 'MESSAGE_CONFIRMED:'.length,
+                transcript.indexOf('MESSAGE_END')
+            ).trim();
+            
+            console.log('Found customer message:', messageSection);
+            
+            // Parse the message data
+            const messageData = parseMessageData(messageSection);
+            messageData.restaurant_id = restaurant.id;
+            messageData.customer_phone = customerPhone;
+            messageData.call_sid = callSid;
+            
+            const message = await createCustomerMessage(messageData);
+            if (message) {
+                console.log('Customer message saved successfully!');
+                
+                if (callSid) {
+                    await updateCallLog(callSid, { 
+                        conversation_transcript: JSON.stringify(conversationTranscript)
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error processing customer message:', error);
+        }
+    }
+
+    // Parse message data from transcript
+    function parseMessageData(messageText) {
+        const lines = messageText.split('\n').map(line => line.trim()).filter(line => line);
+        
+        const messageData = {
+            customer_name: '',
+            message_type: 'general',
+            subject: '',
+            message_content: '',
+            priority: 'normal'
+        };
+        
+        for (const line of lines) {
+            if (line.includes('Customer Name:')) {
+                messageData.customer_name = line.split('Customer Name:')[1].trim();
+            } else if (line.includes('Message Type:')) {
+                messageData.message_type = line.split('Message Type:')[1].trim();
+            } else if (line.includes('Subject:')) {
+                messageData.subject = line.split('Subject:')[1].trim();
+            } else if (line.includes('Message:')) {
+                messageData.message_content = line.split('Message:')[1].trim();
+            } else if (line.includes('Priority:')) {
+                messageData.priority = line.split('Priority:')[1].trim();
+            }
+        }
+        
+        return messageData;
+    }
+
     // Process order from AI transcript
     async function processOrderFromTranscript(transcript) {
         try {
             console.log('Processing order from transcript...');
             
-            // Check for modified order format first
-            if (transcript.includes('MODIFIED_ORDER_CONFIRMED:') && transcript.includes('MODIFIED_ORDER_END')) {
-                return await processModifiedOrder(transcript);
-            }
-            
-            // Check for regular order format
             if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
                 const orderSection = transcript.substring(
                     transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
@@ -617,77 +679,22 @@ Keep responses conversational and brief for phone calls.`;
         }
     }
 
-    // Process modified order
-    async function processModifiedOrder(transcript) {
-        try {
-            console.log('Processing modified order...');
-            
-            const orderSection = transcript.substring(
-                transcript.indexOf('MODIFIED_ORDER_CONFIRMED:') + 'MODIFIED_ORDER_CONFIRMED:'.length,
-                transcript.indexOf('MODIFIED_ORDER_END')
-            ).trim();
-            
-            // Extract original order ID
-            const originalOrderIdMatch = orderSection.match(/Original Order ID:\s*([^\n]+)/);
-            const originalOrderId = originalOrderIdMatch ? originalOrderIdMatch[1].trim() : null;
-            
-            console.log('Modifying order ID:', originalOrderId);
-            
-            // Create new order with reference to original
-            const orderData = {
-                restaurant_id: restaurant.id,
-                customer_phone: customerPhone,
-                total_amount: extractTotal(orderSection) || 0,
-                order_details: transcript,
-                special_instructions: `Modified from order ${originalOrderId}`,
-                call_sid: callSid,
-                items: []
-            };
-
-            const newOrder = await createOrder(orderData);
-            if (newOrder) {
-                console.log('Modified order saved successfully!');
-                
-                // Update the original order status to indicate it was modified
-                if (originalOrderId) {
-                    await supabase
-                        .from('orders')
-                        .update({ 
-                            status: 'modified',
-                            special_instructions: `Modified by new order ${newOrder.id}`
-                        })
-                        .eq('id', originalOrderId);
-                    
-                    console.log('Original order marked as modified');
-                }
-                
-                if (callSid) {
-                    await updateCallLog(callSid, { order_id: newOrder.id });
-                }
-                
-                return newOrder;
-            }
-        } catch (error) {
-            console.error('Error processing modified order:', error);
-        }
-        return null;
-    }
-
     // Extract total amount from text
     function extractTotal(text) {
         const totalMatch = text.match(/\$(\d+\.?\d*)/);
         return totalMatch ? parseFloat(totalMatch[1]) : null;
     }
 
-    // Process orders at call end
-    async function processCallEndOrder() {
+    // Process call end
+    async function processCallEnd() {
         try {
             const fullConversation = conversationTranscript.map(msg => 
                 `${msg.speaker}: ${msg.text}`
             ).join('\n');
             
-            console.log('Analyzing full conversation for orders...');
+            console.log('Analyzing conversation for missed orders or messages...');
             
+            // Check for potential orders or messages that weren't structured
             if (fullConversation.toLowerCase().includes('pizza') || 
                 fullConversation.toLowerCase().includes('order') ||
                 fullConversation.includes('$')) {
@@ -714,8 +721,9 @@ Keep responses conversational and brief for phone calls.`;
                     return order;
                 }
             }
+            
         } catch (error) {
-            console.error('Error processing call end order:', error);
+            console.error('Error processing call end:', error);
         }
         return null;
     }
@@ -731,8 +739,6 @@ Keep responses conversational and brief for phone calls.`;
                     
                 case 'start':
                     streamSid = data.start.streamSid;
-                    
-                    console.log('Start data:', JSON.stringify(data.start, null, 2));
                     
                     const calledNumber = data.start.customParameters?.Called || 
                                        data.start.customParameters?.To;
@@ -778,8 +784,8 @@ Keep responses conversational and brief for phone calls.`;
         const callEndTime = new Date();
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
         
-        console.log('Checking for orders before call ends...');
-        await processCallEndOrder();
+        console.log('Processing call end...');
+        await processCallEnd();
         
         if (callSid) {
             const updateData = {
@@ -808,7 +814,7 @@ wss.on('error', (error) => {
 
 server.listen(port, '0.0.0.0', () => {
     console.log(`Restaurant AI System running on port ${port}`);
-    console.log(`Ready to take orders via phone calls`);
+    console.log(`Ready to take orders and messages via phone calls`);
     console.log(`WebSocket ready for Twilio Media Streams`);
     console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
     console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
