@@ -496,6 +496,7 @@ wss.on('connection', (ws, req) => {
     let orderProcessed = false; // Track if order was already processed
     let messageProcessed = false; // Track if message was already processed
     let recentOrders = []; // Store recent orders for reference
+    let isModificationCall = false; // Track if this is a modification call
 
     // Initialize OpenAI connection with restaurant context
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -546,7 +547,7 @@ RESTAURANT INFORMATION:
 ${menuText}
 
 INSTRUCTIONS:
-1. Start EVERY call with the greeting above mentioning the restaurant name
+1. Start EVERY call with the greeting above mentioning the restaurant name and asking how you can help
 2. Help customers with THREE main things:
    a) PLACING NEW ORDERS - Take orders clearly with quantities and special requests
    b) CHANGING EXISTING ORDERS - Use the search_recent_orders tool to find and modify orders
@@ -560,38 +561,44 @@ INSTRUCTIONS:
    - If they say no, ask them to provide the correct phone number
    - Confirm orders back to the customer including prices and totals
    - Ask for customer name and pickup time
+   - ONLY use ORDER_CONFIRMED format for NEW orders, NEVER for modifications
 
 4. For CHANGING EXISTING ORDERS:
    - If customer says they want to "change my order", "modify my order", "add another", "add to my order", or mentions wanting to update their existing order, immediately use the search_recent_orders tool
    - After search_recent_orders returns results, you will see order IDs in the format "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-   - CRITICAL: When modifying orders, use the update_order function with the order ID and the modifications
-   - NEVER create a new ORDER_CONFIRMED when modifying - use update_order instead
-   - Example: If customer wants to add another pizza to their existing order, use update_order with modifications like "Add one more large pepperoni pizza"
-   - After successful update_order, just confirm the changes verbally, don't use ORDER_CONFIRMED format
-   - For CANCELLATIONS: Use the cancel_order tool with the ACTUAL ORDER ID and confirm "Your order has been successfully cancelled"
-   - IMPORTANT: Always pass the actual order ID to update_order or cancel_order functions
+   
+   CRITICAL MODIFICATION RULES:
+   - When modifying orders, use the update_order function with the order ID and the modifications
+   - NEVER EVER create a new order when modifying - DO NOT use ORDER_CONFIRMED format
+   - After successful update_order, just say something like "I've updated your order with [the changes]. Is there anything else you need?"
+   - DO NOT output ORDER_CONFIRMED after using update_order
+   
+   IF NO ORDERS ARE FOUND:
+   - Say: "I couldn't find any pending orders for your phone number."
+   - Then say: "I can take a message for the restaurant staff about your order issue."
+   - Explain: "I should let you know that the restaurant is fairly busy and they may not be able to get to this message until later today or possibly tomorrow."
+   - Ask: "Would you like me to send them a message about what you need?"
+   - If yes, take a detailed message using MESSAGE_CONFIRMED format
 
-5. For MESSAGES/INQUIRIES:
+5. For CANCELLATIONS:
+   - Use the cancel_order tool with the ACTUAL ORDER ID
+   - Confirm "Your order has been successfully cancelled"
+   - DO NOT use ORDER_CONFIRMED format for cancellations
+
+6. For MESSAGES/INQUIRIES:
    - For complaints, compliments, or questions - offer to send a message to management
-   - When taking a message, confirm their phone number the same way: "I'll send this message and have someone follow up with you at the number ending in ${customerPhone ? customerPhone.slice(-4) : 'XXXX'}. Is that correct?"
+   - When taking a message, confirm their phone number the same way
    - Ask for their name and specific details about their inquiry
-   - Reassure them that staff will review their message and follow up if needed
-
-6. Be helpful, friendly, and efficient
-7. If asked about items not on the menu, politely explain they're not available
+   - If it's about an order issue and no order is found, mention the restaurant is busy and may respond later or next day
 
 CRITICAL TOOL USAGE RULES:
 - search_recent_orders: Can be called with no arguments (will use customer's phone)
-- cancel_order: MUST be called with {"order_id": "actual-uuid-from-search-results"}. NEVER call with empty arguments.
-- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change", "new_total": number}. NEVER call with empty arguments.
-- When you get search results showing orders, and customer wants to modify, you MUST:
-  1. Use update_order function with the order_id and modifications
-  2. Do NOT use ORDER_CONFIRMED format for modifications
-  3. Just confirm the changes verbally
-- Example: Customer says "change to one burger" -> Call update_order with {"order_id": "xxx", "modifications": "Change to 1 hamburger", "new_total": 12.99}
+- cancel_order: MUST be called with {"order_id": "actual-uuid-from-search-results"}
+- update_order: MUST be called with {"order_id": "actual-uuid-from-search-results", "modifications": "what to change", "new_total": number}
+- NEVER use ORDER_CONFIRMED format after update_order or cancel_order functions
+- Only use ORDER_CONFIRMED for brand new orders
 
-IMPORTANT MESSAGE FORMAT:
-When taking a message (not an order), format it like this:
+IMPORTANT MESSAGE FORMAT (for messages to restaurant):
 MESSAGE_CONFIRMED:
 - Customer Name: [name if provided]
 - Phone: ${customerPhone || '[provided phone]'}
@@ -601,8 +608,7 @@ MESSAGE_CONFIRMED:
 - Priority: [normal/high based on urgency]
 MESSAGE_END
 
-IMPORTANT ORDER FORMAT:
-When an order is confirmed, format it like this:
+IMPORTANT ORDER FORMAT (ONLY for NEW orders, NEVER for modifications):
 ORDER_CONFIRMED:
 - Customer Name: [name if provided]
 - Phone: ${customerPhone || '[provided phone]'}
@@ -725,7 +731,8 @@ Keep responses conversational and brief for phone calls.`;
                         // Check for message or order confirmation
                         if (response.transcript.includes('MESSAGE_CONFIRMED:')) {
                             processMessageFromTranscript(response.transcript);
-                        } else if (response.transcript.includes('ORDER_CONFIRMED:')) {
+                        } else if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall) {
+                            // Only process ORDER_CONFIRMED if this is NOT a modification call
                             processOrderFromTranscript(response.transcript);
                         }
                         break;
@@ -841,6 +848,25 @@ Keep responses conversational and brief for phone calls.`;
                     const orders = await searchRecentOrders(phoneNumber, restaurant.id);
                     recentOrders = orders; // Store for reference
                     
+                    // If orders found and customer wants to modify, mark this as a modification call
+                    if (orders.length > 0) {
+                        const recentCustomerText = conversationTranscript
+                            .filter(m => m.speaker === 'Customer')
+                            .slice(-3)
+                            .map(m => m.text)
+                            .join(' ')
+                            .toLowerCase();
+                            
+                        if (recentCustomerText.includes('change') || 
+                            recentCustomerText.includes('modify') ||
+                            recentCustomerText.includes('add to') ||
+                            recentCustomerText.includes('add another') ||
+                            recentCustomerText.includes('update')) {
+                            isModificationCall = true;
+                            console.log('MODIFICATION CALL DETECTED - Will not create new order');
+                        }
+                    }
+                    
                     result = {
                         orders: orders.map(order => ({
                             id: order.id,
@@ -858,26 +884,23 @@ Keep responses conversational and brief for phone calls.`;
                         })),
                         count: orders.length,
                         phone_searched: phoneNumber,
-                        message: orders.length === 0 ? 'No pending orders found. Only pending orders can be modified or cancelled.' : `Found ${orders.length} pending order(s)`
+                        message: orders.length === 0 
+                            ? 'No pending orders found for this phone number. I can take a message for the restaurant about your order issue. Please note the restaurant is fairly busy and may not respond until later today or tomorrow.' 
+                            : `Found ${orders.length} pending order(s)`
                     };
                     console.log(`Found ${orders.length} pending orders for ${phoneNumber}`);
                     break;
 
                 case 'cancel_order':
+                    isModificationCall = true; // Mark as modification to prevent new order creation
                     let cancelOrderId = parsedArgs.order_id;
                     const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
-                    
-                    // Fallback: If no order ID provided but we have recent orders, use the first one
-                    if (!cancelOrderId && recentOrders && recentOrders.length > 0) {
-                        console.log('No order ID provided, using first pending order from recent search');
-                        cancelOrderId = recentOrders[0].id;
-                    }
                     
                     if (!cancelOrderId) {
                         result = { 
                             error: 'No order ID provided for cancellation. Please search for orders first.' 
                         };
-                        console.error('Cancel order called without order ID and no recent orders available');
+                        console.error('Cancel order called without order ID');
                         break;
                     }
                     
@@ -894,30 +917,15 @@ Keep responses conversational and brief for phone calls.`;
                     break;
 
                 case 'update_order':
+                    isModificationCall = true; // Mark as modification to prevent new order creation
                     let orderId = parsedArgs.order_id;
                     let modifications = parsedArgs.modifications || 'Order modification requested';
-                    
-                    // Fallback: If no order ID provided but we have recent orders, use the first one
-                    if (!orderId && recentOrders && recentOrders.length > 0) {
-                        console.log('No order ID provided for update, using first pending order from recent search');
-                        orderId = recentOrders[0].id;
-                        
-                        // Try to infer modifications from conversation
-                        const recentConvo = conversationTranscript.slice(-5).map(m => m.text).join(' ').toLowerCase();
-                        if (recentConvo.includes('one')) {
-                            modifications = 'Change quantity to 1 item';
-                        } else if (recentConvo.includes('cancel')) {
-                            modifications = 'Cancel part of order';
-                        } else if (recentConvo.includes('add')) {
-                            modifications = 'Add items to order';
-                        }
-                    }
                     
                     if (!orderId) {
                         result = { 
                             error: 'No order ID provided for update. Please search for orders first.' 
                         };
-                        console.error('Update order called without order ID and no recent orders available');
+                        console.error('Update order called without order ID');
                         break;
                     }
                     
@@ -935,7 +943,9 @@ Keep responses conversational and brief for phone calls.`;
                     
                     result = {
                         success: !!updateResult,
-                        message: updateResult ? 'Order modified successfully. The changes have been applied to your existing order.' : 'Failed to modify order - order may not be pending or may not exist',
+                        message: updateResult 
+                            ? 'Order modified successfully. The changes have been applied to your existing order.' 
+                            : 'Failed to modify order - order may not be pending or may not exist',
                         order_id: orderId,
                         modifications: modifications,
                         status: updateResult ? 'modified' : 'failed'
@@ -1061,15 +1071,28 @@ Keep responses conversational and brief for phone calls.`;
     async function processOrderFromTranscript(transcript) {
         try {
             // CRITICAL CHECK: Don't create orders during modification calls
-            const conversationText = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
-            const isModificationCall = conversationText.includes('change') || 
-                                      conversationText.includes('modify') || 
-                                      conversationText.includes('update') ||
-                                      conversationText.includes('add another') ||
-                                      conversationText.includes('add to');
-            
             if (isModificationCall) {
                 console.log('SKIPPING ORDER CREATION - This is a modification call, not a new order');
+                return;
+            }
+            
+            const conversationText = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
+            const hasModificationKeywords = conversationText.includes('change') || 
+                                           conversationText.includes('modify') || 
+                                           conversationText.includes('update') ||
+                                           conversationText.includes('add another') ||
+                                           conversationText.includes('add to my order') ||
+                                           conversationText.includes('cancel my order');
+            
+            // Also check if we've used modification functions
+            const hasUsedModificationFunctions = conversationTranscript.some(msg => 
+                msg.text && (msg.text.includes('modified successfully') || 
+                             msg.text.includes('cancelled successfully') ||
+                             msg.text.includes('updated your order'))
+            );
+            
+            if (hasModificationKeywords || hasUsedModificationFunctions) {
+                console.log('SKIPPING ORDER CREATION - Modification keywords or functions detected');
                 return;
             }
             
@@ -1078,7 +1101,7 @@ Keep responses conversational and brief for phone calls.`;
                 return;
             }
             
-            console.log('Processing order from transcript...');
+            console.log('Processing NEW order from transcript...');
             
             if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
                 // IMMEDIATELY mark as processed to prevent race conditions
@@ -1133,7 +1156,7 @@ Order taken via AI phone system`;
 
                 const order = await createOrder(orderData);
                 if (order) {
-                    console.log('Order saved successfully with ID:', order.id);
+                    console.log('NEW order saved successfully with ID:', order.id);
                     
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
@@ -1186,6 +1209,7 @@ Order taken via AI phone system`;
             console.log('=== CALL END PROCESSING START ===');
             console.log('Order already processed:', orderProcessed);
             console.log('Message already processed:', messageProcessed);
+            console.log('Was modification call:', isModificationCall);
             
             // Always update call log with conversation transcript
             if (callSid) {
@@ -1196,37 +1220,8 @@ Order taken via AI phone system`;
                 console.log('Call log updated with conversation transcript');
             }
             
-            // STOP HERE if an order was already processed
-            if (orderProcessed === true) {
-                console.log('=== STOPPING: Order was already processed successfully ===');
-                return null;
-            }
-            
-            // STOP HERE if this was just a cancellation/modification call
-            const fullConversation = conversationTranscript.map(msg => 
-                `${msg.speaker}: ${msg.text}`
-            ).join('\n').toLowerCase();
-            
-            const wasCancellationCall = fullConversation.includes('cancel') && 
-                                        fullConversation.includes('found') && 
-                                        fullConversation.includes('pending order');
-            
-            if (wasCancellationCall) {
-                console.log('=== STOPPING: This was a cancellation/modification call only ===');
-                return null;
-            }
-            
-            // STOP HERE if ORDER_CONFIRMED was in the conversation (even if it failed to save)
-            const hadOrderConfirmation = conversationTranscript.some(msg => 
-                msg.text && msg.text.includes('ORDER_CONFIRMED:')
-            );
-            
-            if (hadOrderConfirmation) {
-                console.log('=== STOPPING: Order confirmation was already attempted ===');
-                return null;
-            }
-            
-            console.log('=== NO FALLBACK ORDER CREATED - Proper order processing should handle all orders ===');
+            // NEVER create fallback orders - all orders should be explicitly confirmed
+            console.log('=== CALL END PROCESSING COMPLETE - No fallback orders created ===');
             
         } catch (error) {
             console.error('Error in processCallEnd:', error);
