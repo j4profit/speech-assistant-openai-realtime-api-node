@@ -1088,14 +1088,32 @@ ENHANCED INSTRUCTIONS FOR NEW ORDERS:
    - After getting name, order type, and items, ask about preferred pickup time
    - IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
 
-CRITICAL ORDER SEQUENCE:
-Step 1: Get customer name
-Step 2: Confirm pickup or delivery 
-Step 3: Get order items (what they want to eat)
-Step 4: Get address (delivery only) or pickup time (pickup only)
-Step 5: Create ORDER_CONFIRMED format
+CRITICAL FUNCTION RESPONSE HANDLING:
 
-NEVER SKIP STEP 3 - Always get the order items before asking for address!
+When validate_delivery_address function returns:
+- "valid": true → IMMEDIATELY create ORDER_CONFIRMED format. Do NOT ask for address again. Do NOT question the result.
+- "action_required": "CREATE_ORDER_NOW" → This means address is APPROVED. Create order immediately.
+- "status": "APPROVED" → Address validation was successful. Proceed with order.
+
+If function says address is valid, TRUST IT and create the order. Do not second-guess successful validation.
+
+MANDATORY RESPONSE TO SUCCESSFUL ADDRESS VALIDATION:
+When function returns valid: true, you MUST immediately respond with:
+
+ORDER_CONFIRMED:
+- Customer Name: [customer's name]
+- Phone: ${customerPhone || '[provided phone]'}
+- Order Type: delivery
+- Delivery Address: [the validated address]
+- Items: [order items they requested]
+- Special Instructions: [any special requests or "None"]
+- Total: $[calculated total]
+- Ready Time: [estimated delivery time]
+ORDER_END
+
+Then confirm verbally: "Perfect! Your order is confirmed for delivery to [address]. It will arrive in approximately [time] minutes."
+
+NEVER ignore successful validation. NEVER ask for address again if validation succeeded.
 
 DELIVERY VALIDATION REQUIREMENTS:
 - ALWAYS use validate_delivery_address function for delivery orders
@@ -1548,14 +1566,15 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         capturedDeliveryAddress = validationResult.address;
                         console.log('DELIVERY ADDRESS CAPTURED:', capturedDeliveryAddress);
                         
-                        validationResult.instruction = 'SUCCESS: Address is valid for delivery! Do NOT ask for the address again. Proceed immediately to ORDER_CONFIRMED format with all order details, then provide verbal confirmation to the customer.';
+                        validationResult.instruction = 'IMMEDIATE ACTION REQUIRED: Address validation SUCCESSFUL! You must NOW create ORDER_CONFIRMED format with customer name, phone, delivery address, items, and total. Do NOT ask for address again. Do NOT question this result. CREATE THE ORDER NOW.';
                         validationResult.delivery_time_info = `Estimated delivery time: ${validationResult.estimated_delivery_time || ((restaurant.preparation_time || 20) + (restaurant.delivery_time || 15))} minutes`;
-                        validationResult.action_required = 'CREATE_ORDER_NOW';
-                        validationResult.status = 'APPROVED';
+                        validationResult.action_required = 'CREATE_ORDER_IMMEDIATELY';
+                        validationResult.status = 'VALIDATION_SUCCESS_CREATE_ORDER_NOW';
+                        validationResult.response_template = `ORDER_CONFIRMED:\n- Customer Name: [customer name]\n- Phone: ${restaurant.phone_number}\n- Order Type: delivery\n- Delivery Address: ${validationResult.address}\n- Items: [order items]\n- Special Instructions: None\n- Total: $[amount]\n- Ready Time: [time]\nORDER_END`;
                     } else {
                         console.log('Delivery address validation failed:', validationResult.reason);
                         validationResult.action_required = 'ASK_FOR_PICKUP_OR_NEW_ADDRESS';
-                        validationResult.status = 'REJECTED';
+                        validationResult.status = 'VALIDATION_FAILED';
                     }
                     
                     result = validationResult;
