@@ -316,14 +316,16 @@ async function getRestaurantByPhone(phoneNumber) {
 
         if (!response.ok) {
             console.error('Edge Function response not ok:', response.status, response.statusText);
-            return null;
+            // Fallback to direct database query if Edge Function fails
+            return await getRestaurantByPhoneFallback(phoneNumber);
         }
 
         const result = await response.json();
         
         if (result.error) {
             console.error('Edge Function returned error:', result.error);
-            return null;
+            // Fallback to direct database query if Edge Function has error
+            return await getRestaurantByPhoneFallback(phoneNumber);
         }
 
         const restaurant = result.data;
@@ -353,6 +355,59 @@ async function getRestaurantByPhone(phoneNumber) {
         return restaurantWithDefaults;
     } catch (error) {
         console.error('Error calling get-restaurant Edge Function:', error);
+        // Fallback to direct database query if Edge Function completely fails
+        return await getRestaurantByPhoneFallback(phoneNumber);
+    }
+}
+
+// Fallback function using direct database query with correct schema
+async function getRestaurantByPhoneFallback(phoneNumber) {
+    try {
+        console.log('Using fallback direct database query for phone:', phoneNumber);
+        
+        const { data, error } = await supabase
+            .from('restaurants')
+            .select(`
+                *,
+                menu_items (
+                    id,
+                    name,
+                    description,
+                    price,
+                    category,
+                    available,
+                    display_order
+                )
+            `)
+            .eq('phone_number', phoneNumber)
+            .single();
+
+        if (error) {
+            console.error('Error fetching restaurant from database:', error);
+            return null;
+        }
+
+        // Ensure delivery settings have defaults
+        const restaurantWithDefaults = {
+            ...data,
+            delivery_enabled: data.delivery_enabled ?? false,
+            delivery_radius: data.delivery_radius ?? 5,
+            delivery_hours: data.delivery_hours ?? null,
+            delivery_time: data.delivery_time ?? 15,
+            preparation_time: data.preparation_time ?? 20
+        };
+
+        console.log('Restaurant loaded via fallback with delivery settings:', {
+            name: restaurantWithDefaults.name,
+            delivery_enabled: restaurantWithDefaults.delivery_enabled,
+            delivery_radius: restaurantWithDefaults.delivery_radius,
+            delivery_hours: restaurantWithDefaults.delivery_hours,
+            delivery_time: restaurantWithDefaults.delivery_time
+        });
+
+        return restaurantWithDefaults;
+    } catch (error) {
+        console.error('Fallback database error:', error);
         return null;
     }
 }
@@ -956,20 +1011,22 @@ async function createOrder(orderData) {
     }
 }
 
-// Function to format menu for AI with delivery information
+// Function to format menu for AI with delivery information (updated for correct schema)
 function formatMenuForAI(menuItems, restaurant) {
     if (!menuItems || menuItems.length === 0) {
         return "No menu items available.";
     }
 
+    // Group by category (string field, not foreign key)
     const categories = {};
     menuItems.forEach(item => {
         if (!item.available) return;
         
-        if (!categories[item.category]) {
-            categories[item.category] = [];
+        const categoryName = item.category || 'Other';
+        if (!categories[categoryName]) {
+            categories[categoryName] = [];
         }
-        categories[item.category].push({
+        categories[categoryName].push({
             name: item.name,
             description: item.description,
             price: item.price,
@@ -978,11 +1035,19 @@ function formatMenuForAI(menuItems, restaurant) {
     });
 
     let menuText = "MENU:\n";
-    Object.keys(categories).forEach(category => {
+    
+    // Sort categories and items by display_order if available, then alphabetically
+    const sortedCategories = Object.keys(categories).sort();
+    
+    sortedCategories.forEach(category => {
         menuText += `\n${category.toUpperCase()}:\n`;
-        categories[category].forEach(item => {
-            menuText += `- ${item.name}: ${item.description} - $${item.price}\n`;
-        });
+        
+        // Sort items within category
+        categories[category]
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .forEach(item => {
+                menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.price}\n`;
+            });
     });
 
     // Add delivery information to menu context
