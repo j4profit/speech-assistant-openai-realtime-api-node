@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - FIXED VERSION
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -352,10 +352,34 @@ async function updateOrder(orderId, updateData) {
     }
 }
 
-// Validate delivery address using Edge Function
+// Validate delivery address using Edge Function with improved error handling
 async function validateDeliveryAddress(address, restaurant) {
     try {
         console.log('Validating delivery address:', address);
+        
+        // Ensure we have a valid address before making the call
+        if (!address || address.trim().length < 10) {
+            return {
+                valid: false,
+                message: 'Please provide a complete address with street number, street name, city, state, and zip code.',
+                address: address
+            };
+        }
+        
+        const requestData = {
+            address: address.trim(),
+            restaurant_id: restaurant.id,
+            delivery_enabled: restaurant.delivery_enabled,
+            delivery_radius: restaurant.delivery_radius,
+            delivery_hours: restaurant.delivery_hours,
+            delivery_time: restaurant.delivery_time,
+            preparation_time: restaurant.preparation_time,
+            restaurant_address: restaurant.address,
+            restaurant_latitude: restaurant.latitude,
+            restaurant_longitude: restaurant.longitude
+        };
+
+        console.log('Sending validation request:', requestData);
         
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
             method: 'POST',
@@ -363,21 +387,11 @@ async function validateDeliveryAddress(address, restaurant) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
             },
-            body: JSON.stringify({
-                address: address,
-                restaurant_id: restaurant.id,
-                delivery_enabled: restaurant.delivery_enabled,
-                delivery_radius: restaurant.delivery_radius,
-                delivery_hours: restaurant.delivery_hours,
-                delivery_time: restaurant.delivery_time,
-                preparation_time: restaurant.preparation_time,
-                restaurant_address: restaurant.address,
-                restaurant_latitude: restaurant.latitude,
-                restaurant_longitude: restaurant.longitude
-            })
+            body: JSON.stringify(requestData)
         });
 
         if (!response.ok) {
+            console.error('Delivery validation API error:', response.status, response.statusText);
             return {
                 valid: false,
                 message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
@@ -386,8 +400,10 @@ async function validateDeliveryAddress(address, restaurant) {
         }
 
         const result = await response.json();
+        console.log('Validation result:', result);
         
         if (result.error) {
+            console.error('Validation error:', result.error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
@@ -409,7 +425,8 @@ async function validateDeliveryAddress(address, restaurant) {
         return {
             valid: false,
             message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
-            address: address
+            address: address,
+            error: error.message
         };
     }
 }
@@ -547,34 +564,89 @@ function formatMenuForAI(menuItems, restaurant) {
     return menuText;
 }
 
-// Extract address from conversation
+// Improved address extraction with better patterns and fallbacks
 function extractAddressFromConversation(conversationTranscript) {
+    // Get all customer messages, prioritizing recent ones
     const customerMessages = conversationTranscript
         .filter(msg => msg.speaker === 'Customer')
-        .slice(-5)
+        .slice(-10) // Look at last 10 customer messages
         .map(msg => msg.text)
         .join(' ');
     
     console.log('Searching for address in conversation:', customerMessages);
     
+    // Enhanced address patterns with more flexibility
     const addressPatterns = [
-        // Complete address with state and 5-digit zip
-        /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*[\w\s,]*\d{5}/i,
-        // Address with road/street and 5-digit zip
-        /\d+\s+[\w\s]+(?:road|rd|street|st|avenue|ave|lane|ln|drive|dr|way|court|ct|place|pl|boulevard|blvd)[\w\s,]*\d{5}/i,
-        // Any street number + name + 5-digit zip
-        /\d+\s+[\w\s,]+\d{5}/,
-        // Street number + name with common suffixes
-        /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i
+        // Complete address: number + street + city + state + 5-digit zip
+        /\b\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[\w\s,]*?[\w\s,]*?\b\d{5}\b/gi,
+        
+        // Address with common abbreviations
+        /\b\d+\s+[\w\s]+(?:rd|st|ave|ln|dr|ct|pl|way|blvd)\b[\w\s,]*?\b\d{5}\b/gi,
+        
+        // Number + any text + 5-digit zip (more liberal)
+        /\b\d+\s+[\w\s,.-]+?\b\d{5}\b/g,
+        
+        // Street number + words ending with common suffixes
+        /\b\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[\w\s,]*/gi,
+        
+        // Very liberal: any sequence with a street number at the start
+        /\b\d+\s+[A-Za-z][\w\s,.-]*(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr|maryland|md|baltimore|laurel)[\w\s,.-]*/gi
     ];
     
-    for (const pattern of addressPatterns) {
-        const match = customerMessages.match(pattern);
-        if (match) {
-            const address = match[0].trim().replace(/\.$/, '');
-            console.log('Found address:', address);
-            return address;
+    for (let i = 0; i < addressPatterns.length; i++) {
+        const pattern = addressPatterns[i];
+        const matches = customerMessages.match(pattern);
+        
+        if (matches && matches.length > 0) {
+            // Get the longest match (most likely to be complete)
+            const bestMatch = matches.reduce((longest, current) => 
+                current.length > longest.length ? current : longest
+            );
+            
+            const address = bestMatch.trim().replace(/^[,\s]+|[,\s]+$/g, '');
+            console.log(`Found address with pattern ${i + 1}:`, address);
+            
+            // Basic validation - must have number and some text
+            if (address.length >= 10 && /^\d+\s/.test(address)) {
+                return address;
+            }
         }
+    }
+    
+    // Fallback: look for any sequence that might be an address
+    const words = customerMessages.split(/\s+/);
+    let possibleAddress = '';
+    let foundNumber = false;
+    
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        
+        // Start capturing when we find a number
+        if (/^\d+$/.test(word) && !foundNumber) {
+            foundNumber = true;
+            possibleAddress = word;
+            continue;
+        }
+        
+        // Continue capturing if we've started
+        if (foundNumber) {
+            possibleAddress += ' ' + word;
+            
+            // Stop if we hit punctuation that suggests end of address
+            if (word.includes('.') || word.includes('?') || word.includes('!')) {
+                break;
+            }
+            
+            // Stop if we've captured a reasonable amount
+            if (possibleAddress.length > 50) {
+                break;
+            }
+        }
+    }
+    
+    if (foundNumber && possibleAddress.length >= 10) {
+        console.log('Fallback address found:', possibleAddress.trim());
+        return possibleAddress.trim();
     }
     
     console.log('No address pattern matched');
@@ -600,6 +672,7 @@ wss.on('connection', (ws, req) => {
     let recentOrders = [];
     let isModificationCall = false;
     let capturedDeliveryAddress = null;
+    let addressValidationInProgress = false;
 
     // Initialize OpenAI connection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -633,7 +706,7 @@ wss.on('connection', (ws, req) => {
 
 IMPORTANT: Immediately greet with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
 
-Keep responses SHORT - maximum 2-3 sentences at a time.
+Keep responses SHORT and CONVERSATIONAL - maximum 2-3 sentences at a time.
 
 DELIVERY SETTINGS:
 - Delivery Enabled: ${restaurant.delivery_enabled ? 'YES' : 'NO'}
@@ -643,28 +716,43 @@ ${!restaurant.delivery_enabled ?
 
 ${menuText}
 
-ORDER PROCESS:
+ORDER FLOW (Follow this exact sequence):
 1. Get customer name first
-2. Ask if they want pickup or delivery  
-3. Take their order items
-4. For delivery: get complete address then call validate_delivery_address("exact address")
-5. Create ORDER_CONFIRMED format immediately after successful validation
+2. Ask if they want pickup or delivery
+3. Take their complete order (items, quantities)
+4. For DELIVERY ONLY: Get complete address with street number, street name, city, state, and zip code
+5. Once you have complete address, call validate_delivery_address("exact complete address")
+6. Wait for validation response before proceeding
+7. After successful validation, immediately create ORDER_CONFIRMED format
 
-CRITICAL: When calling validate_delivery_address, ALWAYS include the address parameter.
-Example: validate_delivery_address("123 Main Street, City, State, 12345")
+CRITICAL ADDRESS RULES:
+- For delivery, you MUST get: street number, street name, city, state, zip code
+- Example: "Could you please provide your complete delivery address including street number, street name, city, state, and zip code?"
+- ALWAYS call validate_delivery_address with the EXACT complete address
+- Do NOT proceed with order until address is validated
 
-ORDER_CONFIRMED:
+VALIDATION FUNCTION:
+- Call: validate_delivery_address("123 Main Street, City, State, 12345")
+- Include full address as one parameter
+- Wait for response before continuing
+
+ORDER_CONFIRMED FORMAT (only after successful validation):
 - Customer Name: [name]
 - Phone: ${customerPhone || '[phone]'}
-- Order Type: [delivery or pickup]
-- Delivery Address: [full address or N/A]
-- Items: [items with prices]
+- Order Type: [delivery or pickup]  
+- Delivery Address: [complete validated address or N/A]
+- Items: [items with individual prices]
 - Special Instructions: [instructions or None]
-- Total: $[amount]
-- Ready Time: [estimated time]
+- Total: $[total amount]
+- Ready Time: [estimated minutes]
 ORDER_END
 
-Keep all responses conversational and brief.`;
+CONVERSATION STYLE:
+- Be friendly and professional
+- Ask one question at a time
+- Don't rush the process
+- Confirm important details
+- Keep responses brief and clear`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -679,7 +767,7 @@ Keep all responses conversational and brief.`;
                         type: 'server_vad',
                         threshold: 0.7,
                         prefix_padding_ms: 300,
-                        silence_duration_ms: 1800
+                        silence_duration_ms: 2000
                     },
                     tools: [
                         {
@@ -697,11 +785,14 @@ Keep all responses conversational and brief.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address for the restaurant",
+                            description: "Validate delivery address for the restaurant - REQUIRED for all delivery orders",
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    address: { type: "string", description: "Complete delivery address with street, city, state, zip" }
+                                    address: { 
+                                        type: "string", 
+                                        description: "Complete delivery address with street number, street name, city, state, and zip code" 
+                                    }
                                 },
                                 required: ["address"]
                             }
@@ -762,7 +853,8 @@ Keep all responses conversational and brief.`;
                             text: response.transcript
                         });
                         
-                        if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall) {
+                        // Process order only after successful validation and not during modification calls
+                        if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
                         }
                         break;
@@ -806,13 +898,18 @@ Keep all responses conversational and brief.`;
                         
                     case 'session.updated':
                         console.log('OpenAI session configured');
-                        openaiWs.send(JSON.stringify({
-                            type: 'response.create',
-                            response: {
-                                modalities: ['audio', 'text'],
-                                instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                        // Send initial greeting
+                        setTimeout(() => {
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                openaiWs.send(JSON.stringify({
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['audio', 'text'],
+                                        instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                                    }
+                                }));
                             }
-                        }));
+                        }, 500);
                         break;
                 }
             } catch (error) {
@@ -829,7 +926,7 @@ Keep all responses conversational and brief.`;
         });
     }
 
-    // Handle function calls from OpenAI
+    // Enhanced function call handler with better error handling and validation
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -838,17 +935,21 @@ Keep all responses conversational and brief.`;
 
             console.log(`Executing function: ${name}`);
 
+            // Parse arguments more robustly
             if (!args || args === '') {
                 parsedArgs = {};
             } else if (typeof args === 'string') {
                 try {
                     parsedArgs = JSON.parse(args);
                 } catch (e) {
+                    console.log('Could not parse args as JSON, treating as raw:', args);
                     parsedArgs = { raw: args };
                 }
             } else {
                 parsedArgs = args;
             }
+
+            console.log('Parsed function arguments:', parsedArgs);
 
             switch (name) {
                 case 'search_recent_orders':
@@ -874,43 +975,61 @@ Keep all responses conversational and brief.`;
                     break;
 
                 case 'validate_delivery_address':
+                    addressValidationInProgress = true;
                     let address = parsedArgs.address;
                     
-                    // If no address in arguments, extract from conversation
-                    if (!address) {
+                    // Enhanced address extraction if not provided directly
+                    if (!address || address.trim().length < 5) {
+                        console.log('No address in function call, extracting from conversation...');
                         address = extractAddressFromConversation(conversationTranscript);
                         console.log('Extracted address from conversation:', address);
                     }
                     
-                    if (!address) {
+                    if (!address || address.trim().length < 10) {
                         result = {
                             valid: false,
-                            message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.'
+                            message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.',
+                            needs_complete_address: true
                         };
+                        addressValidationInProgress = false;
                         break;
                     }
                     
-                    // Check if restaurant supports delivery
+                    // Check if restaurant supports delivery first
                     if (!restaurant.delivery_enabled) {
                         result = {
                             valid: false,
-                            message: 'We only offer pickup orders. Delivery is not available.'
+                            message: 'We only offer pickup orders. Delivery is not available at this location.',
+                            delivery_not_available: true
                         };
+                        addressValidationInProgress = false;
                         break;
                     }
                     
+                    console.log('Validating address:', address);
                     const validationResult = await validateDeliveryAddress(address, restaurant);
+                    console.log('Validation result received:', validationResult);
                     
                     if (validationResult.valid) {
                         capturedDeliveryAddress = address;
-                        console.log('DELIVERY ADDRESS VALIDATED:', address);
+                        console.log('DELIVERY ADDRESS VALIDATED SUCCESSFULLY:', address);
                         
-                        validationResult.instruction = 'SUCCESS! Address is valid. Create ORDER_CONFIRMED format immediately.';
-                        validationResult.status = 'APPROVED';
-                        validationResult.confirmed_address = address;
+                        result = {
+                            ...validationResult,
+                            instruction: 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately.',
+                            status: 'APPROVED',
+                            confirmed_address: address,
+                            proceed_to_order: true
+                        };
+                    } else {
+                        console.log('Address validation failed:', validationResult.message);
+                        result = {
+                            ...validationResult,
+                            instruction: 'Address validation failed. Ask customer for a complete address or suggest pickup.'
+                        };
                     }
                     
-                    result = validationResult;
+                    addressValidationInProgress = false;
                     break;
 
                 case 'cancel_order':
@@ -922,7 +1041,10 @@ Keep all responses conversational and brief.`;
                     }
                     
                     if (!cancelOrderId) {
-                        result = { error: 'No order ID provided' };
+                        result = { 
+                            error: 'No order ID provided. Please search for recent orders first.',
+                            success: false
+                        };
                         break;
                     }
                     
@@ -943,7 +1065,10 @@ Keep all responses conversational and brief.`;
                     }
                     
                     if (!orderId) {
-                        result = { error: 'No order ID provided' };
+                        result = { 
+                            error: 'No order ID provided. Please search for recent orders first.',
+                            success: false
+                        };
                         break;
                     }
                     
@@ -964,6 +1089,8 @@ Keep all responses conversational and brief.`;
                     result = { error: `Unknown function: ${name}` };
             }
 
+            console.log('Function result:', result);
+
             // Send result back to OpenAI
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify({
@@ -975,15 +1102,17 @@ Keep all responses conversational and brief.`;
                     }
                 }));
                 
+                // Trigger response generation
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                         openaiWs.send(JSON.stringify({ type: 'response.create' }));
                     }
-                }, 100);
+                }, 200);
             }
 
         } catch (error) {
             console.error('Error handling function call:', error);
+            addressValidationInProgress = false;
             
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify({
@@ -991,18 +1120,26 @@ Keep all responses conversational and brief.`;
                     item: {
                         type: 'function_call_output',
                         call_id: functionCall.call_id || 'unknown',
-                        output: JSON.stringify({ error: error.message })
+                        output: JSON.stringify({ 
+                            error: `Function execution failed: ${error.message}`,
+                            success: false
+                        })
                     }
                 }));
             }
         }
     }
 
-    // Process order from AI transcript
+    // Enhanced order processing with better validation
     async function processOrderFromTranscript(transcript) {
         try {
             if (isModificationCall || orderProcessed) {
                 console.log('Skipping order processing - already processed or modification call');
+                return;
+            }
+            
+            if (addressValidationInProgress) {
+                console.log('Skipping order processing - address validation in progress');
                 return;
             }
             
@@ -1021,31 +1158,54 @@ Keep all responses conversational and brief.`;
                 let deliveryAddress = null;
                 let specialInstructions = '';
                 let totalAmount = 0;
+                let readyTime = '';
                 
-                const lines = orderSection.split('\n').map(line => line.trim());
+                const lines = orderSection.split('\n').map(line => line.trim()).filter(line => line.length > 0);
                 
                 for (const line of lines) {
-                    if (line.includes('Customer Name:')) {
-                        customerName = line.substring(line.indexOf(':') + 1).trim();
-                    } else if (line.includes('Order Type:')) {
-                        orderType = line.substring(line.indexOf(':') + 1).trim().toLowerCase();
-                    } else if (line.includes('Delivery Address:')) {
-                        const addr = line.substring(line.indexOf(':') + 1).trim();
-                        if (addr && addr.toLowerCase() !== 'n/a') {
-                            deliveryAddress = addr;
+                    const colonIndex = line.indexOf(':');
+                    if (colonIndex === -1) continue;
+                    
+                    const key = line.substring(0, colonIndex).trim().toLowerCase();
+                    const value = line.substring(colonIndex + 1).trim();
+                    
+                    if (key.includes('customer name')) {
+                        customerName = value;
+                    } else if (key.includes('order type')) {
+                        orderType = value.toLowerCase();
+                    } else if (key.includes('delivery address')) {
+                        if (value && value.toLowerCase() !== 'n/a' && value.toLowerCase() !== 'none') {
+                            deliveryAddress = value;
                         } else if (orderType === 'delivery' && capturedDeliveryAddress) {
                             deliveryAddress = capturedDeliveryAddress;
                         }
-                    } else if (line.includes('Items:')) {
-                        items = line.substring(line.indexOf(':') + 1).trim();
-                    } else if (line.includes('Special Instructions:')) {
-                        specialInstructions = line.substring(line.indexOf(':') + 1).trim();
-                    } else if (line.includes('Total:')) {
-                        const totalMatch = line.match(/\$(\d+\.?\d*)/);
+                    } else if (key.includes('items')) {
+                        items = value;
+                    } else if (key.includes('special instructions')) {
+                        if (value.toLowerCase() !== 'none' && value.toLowerCase() !== 'n/a') {
+                            specialInstructions = value;
+                        }
+                    } else if (key.includes('total')) {
+                        const totalMatch = value.match(/\$?(\d+\.?\d*)/);
                         if (totalMatch) {
                             totalAmount = parseFloat(totalMatch[1]);
                         }
+                    } else if (key.includes('ready time')) {
+                        readyTime = value;
                     }
+                }
+                
+                // Validate required fields
+                if (!customerName) {
+                    console.log('Order processing failed: Missing customer name');
+                    orderProcessed = false;
+                    return;
+                }
+                
+                if (orderType === 'delivery' && !deliveryAddress) {
+                    console.log('Order processing failed: Missing delivery address for delivery order');
+                    orderProcessed = false;
+                    return;
                 }
                 
                 const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
@@ -1053,17 +1213,19 @@ Keep all responses conversational and brief.`;
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
-                    customer_name: customerName || null,
+                    customer_name: customerName,
                     total_amount: totalAmount || 0,
                     order_type: orderType,
                     delivery_address: deliveryAddress,
-                    order_details: `Customer: ${customerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
+                    order_details: `Customer: ${customerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup Order'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
                     special_instructions: specialInstructions || '',
                     call_sid: callSid,
                     restaurant_settings: restaurant,
                     items: []
                 };
 
+                console.log('Creating order with data:', orderData);
+                
                 const order = await createOrder(orderData);
                 if (order) {
                     console.log('NEW order saved successfully with ID:', order.id);
@@ -1072,14 +1234,16 @@ Keep all responses conversational and brief.`;
                         console.log('Delivery address:', order.delivery_address);
                     }
                     
+                    // Clear captured address after successful order
                     capturedDeliveryAddress = null;
                     
+                    // Update call log with order ID
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
                     }
                 } else {
-                    orderProcessed = false;
                     console.log('Order creation failed, resetting flag');
+                    orderProcessed = false;
                 }
             }
         } catch (error) {
@@ -1173,4 +1337,5 @@ server.listen(port, '0.0.0.0', () => {
     console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
     console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
     console.log(`Multi-tenant delivery controls enabled`);
+    console.log(`Enhanced address validation and error handling active`);
 });
