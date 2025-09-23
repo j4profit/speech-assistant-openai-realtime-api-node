@@ -1354,7 +1354,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         // Look in the last few customer messages for an address
                         const recentCustomerMessages = conversationTranscript
                             .filter(m => m.speaker === 'Customer')
-                            .slice(-5); // Look at last 5 customer messages
+                            .slice(-3); // Look at last 3 customer messages
                         
                         console.log('Recent customer messages:', recentCustomerMessages);
                         
@@ -1362,6 +1362,18 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
                             const msgText = recentCustomerMessages[i].text;
                             console.log(`Checking message: "${msgText}"`);
+                            
+                            // Skip if this looks like a name (common name patterns)
+                            const isName = /^[A-Z][a-z]+\s+[A-Z][a-z]+\.?$/i.test(msgText.trim()) ||
+                                         msgText.toLowerCase().includes('my name is') ||
+                                         msgText.toLowerCase().includes('this is') ||
+                                         msgText.toLowerCase().includes("i'm") ||
+                                         msgText.toLowerCase().includes("i am");
+                            
+                            if (isName) {
+                                console.log('Skipping name-like message:', msgText);
+                                continue;
+                            }
                             
                             // Look for street addresses with numbers
                             const streetPattern = /\d+\s+[\w\s]+(?:road|rd|street|st|avenue|ave|drive|dr|lane|ln|way|court|ct|place|pl|boulevard|blvd)/i;
@@ -1374,27 +1386,16 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                             const hasState = /\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|Maryland|maryland)\b/i.test(msgText);
                             
                             // If message looks like it contains address components, use it
-                            if (hasStreetAddress || (hasZipCode && msgText.length > 10)) {
+                            if (hasStreetAddress && (hasZipCode || hasState)) {
                                 address = msgText;
-                                console.log('Found potential address in conversation:', address);
-                                break;
-                            }
-                            
-                            // Also check if the message is just after "What's your delivery address?"
-                            if (i > 0 && conversationTranscript[conversationTranscript.indexOf(recentCustomerMessages[i]) - 1]?.text?.toLowerCase().includes('delivery address')) {
-                                address = msgText;
-                                console.log('Found address as response to delivery address question:', address);
+                                console.log('Found valid address in conversation:', address);
                                 break;
                             }
                         }
                         
-                        // If still no address found, check the most recent customer message specifically
+                        // If still no valid address found
                         if (!address) {
-                            const lastCustomerMessage = recentCustomerMessages[recentCustomerMessages.length - 1];
-                            if (lastCustomerMessage) {
-                                console.log('Using last customer message as address:', lastCustomerMessage.text);
-                                address = lastCustomerMessage.text;
-                            }
+                            console.log('No valid address found in recent messages');
                         }
                     }
                     
@@ -1403,7 +1404,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     if (!address || address === 'undefined') {
                         result = { 
                             valid: false,
-                            message: 'I didn\'t catch your address. Could you please repeat your complete delivery address including street number, street name, city, state, and zip code?',
+                            message: 'I didn\'t catch your complete address. Could you please provide your full delivery address including street number, street name, city, state, and zip code?',
                             address: null,
                             needs_retry: true
                         };
