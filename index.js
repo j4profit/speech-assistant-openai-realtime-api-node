@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - FIXED VERSION
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - FULLY FIXED
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -564,7 +564,7 @@ function formatMenuForAI(menuItems, restaurant) {
     return menuText;
 }
 
-// Improved address extraction with better patterns and fallbacks
+// Enhanced address extraction that looks for address patterns
 function extractAddressFromConversation(conversationTranscript) {
     // Get all customer messages, prioritizing recent ones
     const customerMessages = conversationTranscript
@@ -716,43 +716,48 @@ ${!restaurant.delivery_enabled ?
 
 ${menuText}
 
-ORDER FLOW (Follow this exact sequence):
+CRITICAL ORDER FLOW (Follow this EXACT sequence):
 1. Get customer name first
-2. Ask if they want pickup or delivery
-3. Take their complete order (items, quantities)
-4. For DELIVERY ONLY: Get complete address with street number, street name, city, state, and zip code
-5. Once you have complete address, call validate_delivery_address("exact complete address")
-6. Wait for validation response before proceeding
-7. After successful validation, immediately create ORDER_CONFIRMED format
+2. SMART Order Type Detection:
+   - If customer says "delivery", "deliver", "delivered", "put a delivery order" → DELIVERY CONFIRMED, skip to step 3
+   - If customer says "pickup", "pick up", "pick it up" → PICKUP CONFIRMED, skip to step 4  
+   - If unclear, ask: "Would you like this for pickup or delivery?"
+3. FOR DELIVERY: Get their order items, then get complete address and validate
+4. FOR PICKUP: Get their order items, then create ORDER_CONFIRMED
+5. Create ORDER_CONFIRMED format IMMEDIATELY after getting all required info
 
-CRITICAL ADDRESS RULES:
-- For delivery, you MUST get: street number, street name, city, state, zip code
-- Example: "Could you please provide your complete delivery address including street number, street name, city, state, and zip code?"
-- ALWAYS call validate_delivery_address with the EXACT complete address
-- Do NOT proceed with order until address is validated
+CONVERSATION EXAMPLES:
+Customer: "I want to put a delivery order in"
+AI: "Great! May I have your name, please?" (DON'T ask about delivery again!)
 
-VALIDATION FUNCTION:
-- Call: validate_delivery_address("123 Main Street, City, State, 12345")
-- Include full address as one parameter
-- Wait for response before continuing
+Customer: "I'd like to order for pickup"  
+AI: "Perfect! May I have your name, please?" (DON'T ask about pickup again!)
 
-ORDER_CONFIRMED FORMAT (only after successful validation):
+DELIVERY ADDRESS PROCESS:
+- Only ask for address AFTER getting items for delivery orders
+- Must get: street number, street name, city, state, zip code
+- Call validate_delivery_address("complete address") with EXACT address
+- After successful validation, CREATE ORDER_CONFIRMED immediately
+
+ORDER_CONFIRMED FORMAT (Create THIS EXACT format - no asterisks):
+ORDER_CONFIRMED:
 - Customer Name: [name]
 - Phone: ${customerPhone || '[phone]'}
-- Order Type: [delivery or pickup]  
-- Delivery Address: [complete validated address or N/A]
-- Items: [items with individual prices]
+- Order Type: [delivery or pickup]
+- Delivery Address: [complete validated address or N/A for pickup]
+- Items: [items with individual prices like "Large Pepperoni Pizza - $18.99"]
 - Special Instructions: [instructions or None]
 - Total: $[total amount]
 - Ready Time: [estimated minutes]
 ORDER_END
 
-CONVERSATION STYLE:
-- Be friendly and professional
-- Ask one question at a time
-- Don't rush the process
-- Confirm important details
-- Keep responses brief and clear`;
+CRITICAL RULES:
+- NEVER ask for delivery/pickup preference if customer already mentioned it
+- NEVER repeat questions customer already answered
+- LISTEN carefully to what customer says about delivery/pickup
+- CREATE ORDER_CONFIRMED immediately after address validation (delivery) or after items (pickup)
+- Use exact "ORDER_CONFIRMED:" format without asterisks or other formatting
+- Be efficient and natural`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -985,11 +990,20 @@ CONVERSATION STYLE:
                         console.log('Extracted address from conversation:', address);
                     }
                     
-                    if (!address || address.trim().length < 10) {
+                    // Check if customer actually provided address info vs just said "delivered" or similar
+                    const lastMessage = conversationTranscript
+                        .filter(msg => msg.speaker === 'Customer')
+                        .slice(-1)[0]?.text || '';
+                    
+                    const hasAddressInfo = /\d+.*?(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr|maryland|md)/i.test(lastMessage);
+                    
+                    if (!address || address.trim().length < 10 || !hasAddressInfo) {
+                        console.log('Customer has not provided address yet. Last message:', lastMessage);
                         result = {
                             valid: false,
                             message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.',
-                            needs_complete_address: true
+                            needs_complete_address: true,
+                            instruction: 'Customer has not provided delivery address yet. Ask for complete address.'
                         };
                         addressValidationInProgress = false;
                         break;
@@ -1016,7 +1030,7 @@ CONVERSATION STYLE:
                         
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately.',
+                            instruction: 'SUCCESS! Address is valid for delivery. NOW ask what items they want to order. After getting items, create ORDER_CONFIRMED format immediately.',
                             status: 'APPROVED',
                             confirmed_address: address,
                             proceed_to_order: true
@@ -1143,12 +1157,22 @@ CONVERSATION STYLE:
                 return;
             }
             
-            if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
+            // Look for both formatted versions of ORDER_CONFIRMED
+            const hasOrderConfirmed = transcript.includes('ORDER_CONFIRMED:') || transcript.includes('**ORDER_CONFIRMED**');
+            const hasOrderEnd = transcript.includes('ORDER_END');
+            
+            if (hasOrderConfirmed && hasOrderEnd) {
                 orderProcessed = true;
                 console.log('Processing NEW order from transcript...');
                 
+                // Handle both formats
+                let orderStartMarker = 'ORDER_CONFIRMED:';
+                if (!transcript.includes('ORDER_CONFIRMED:')) {
+                    orderStartMarker = '**ORDER_CONFIRMED**';
+                }
+                
                 const orderSection = transcript.substring(
-                    transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
+                    transcript.indexOf(orderStartMarker) + orderStartMarker.length,
                     transcript.indexOf('ORDER_END')
                 ).trim();
                 
@@ -1198,6 +1222,12 @@ CONVERSATION STYLE:
                 // Validate required fields
                 if (!customerName) {
                     console.log('Order processing failed: Missing customer name');
+                    orderProcessed = false;
+                    return;
+                }
+                
+                if (!items || items.includes('[') || items.toLowerCase().includes('please let me know')) {
+                    console.log('Order processing failed: Missing or incomplete items');
                     orderProcessed = false;
                     return;
                 }
