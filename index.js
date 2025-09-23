@@ -141,21 +141,108 @@ app.get('/messages', async (req, res) => {
     }
 });
 
-// UPDATED: Function to get restaurant data using edge function
+// Function to get restaurant data with direct database calls
 async function getRestaurantByPhone(phoneNumber) {
     try {
-        const { data, error } = await supabase.functions.invoke('get-restaurant', {
-            body: { phone_number: phoneNumber }
-        });
+        console.log('Looking up restaurant for phone:', phoneNumber);
 
-        if (error || !data?.restaurant) {
-            console.error('Error fetching restaurant:', error);
+        if (!phoneNumber || phoneNumber === '9999999999') {
+            console.log('Invalid phone number provided');
             return null;
         }
 
-        return data.restaurant;
+        // First, let's check if we can connect to the database at all
+        console.log('Testing database connection...');
+        
+        // Query ALL restaurants first to see what's in the database
+        const { data: allRestaurants, error: allError } = await supabase
+            .from('restaurants')
+            .select('id, name, phone, status');
+
+        console.log('All restaurants in database:', allRestaurants);
+        console.log('Database connection error (if any):', allError);
+
+        // Now try the specific phone lookup
+        const { data: restaurant, error } = await supabase
+            .from('restaurants')
+            .select(`
+                *,
+                menu_categories(
+                    id,
+                    name,
+                    description,
+                    sort_order,
+                    active
+                ),
+                menu_items(
+                    id,
+                    name,
+                    description,
+                    price,
+                    available,
+                    category_id,
+                    preparation_time,
+                    dietary_info,
+                    modifiers,
+                    sort_order,
+                    menu_categories(name)
+                )
+            `)
+            .eq('phone', phoneNumber)
+            .single();
+
+        console.log('Specific restaurant lookup result:', restaurant);
+        console.log('Specific restaurant lookup error:', error);
+
+        if (error) {
+            console.log('Database error details:', {
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            
+            // Try a simpler query without joins
+            console.log('Trying simpler query...');
+            const { data: simpleResult, error: simpleError } = await supabase
+                .from('restaurants')
+                .select('*')
+                .eq('phone', phoneNumber)
+                .single();
+                
+            console.log('Simple query result:', simpleResult);
+            console.log('Simple query error:', simpleError);
+            
+            if (simpleResult) {
+                console.log('Restaurant found with simple query, using that');
+                return simpleResult;
+            }
+            
+            return null;
+        }
+
+        if (!restaurant) {
+            console.log('No restaurant found for phone number:', phoneNumber);
+            return null;
+        }
+
+        // Format menu items with categories
+        if (restaurant.menu_items) {
+            restaurant.menu_items = restaurant.menu_items
+                .filter(item => item.available)
+                .map(item => ({
+                    ...item,
+                    category: item.menu_categories?.name || 'Other'
+                }))
+                .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        }
+
+        console.log('Restaurant found:', restaurant.name);
+        return restaurant;
+
     } catch (error) {
-        console.error('Edge function error:', error);
+        console.error('Error fetching restaurant:', error);
+        console.error('Error stack:', error.stack);
         return null;
     }
 }
@@ -222,26 +309,62 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// UPDATED: Function to search for recent orders using edge function
+// Function to search for recent orders with direct database calls
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
-        const { data, error } = await supabase.functions.invoke('search-orders', {
-            body: { 
-                phone_number: phoneNumber,
-                restaurant_id: restaurantId,
-                days_back: daysBack
-            }
-        });
+        console.log('Searching orders for phone:', phoneNumber, 'restaurant:', restaurantId);
+
+        if (!phoneNumber || phoneNumber === '9999999999') {
+            console.log('Invalid phone number provided');
+            return [];
+        }
+
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+        // Search for pending orders
+        const { data: orders, error } = await supabase
+            .from('orders')
+            .select(`
+                id,
+                customer_phone,
+                customer_name,
+                total_amount,
+                status,
+                order_type,
+                order_details,
+                special_instructions,
+                created_at,
+                updated_at,
+                order_items(
+                    id,
+                    quantity,
+                    price,
+                    special_requests,
+                    menu_items(
+                        id,
+                        name,
+                        description,
+                        price
+                    )
+                )
+            `)
+            .eq('customer_phone', phoneNumber)
+            .eq('restaurant_id', restaurantId)
+            .in('status', ['pending', 'confirmed', 'modified'])
+            .gte('created_at', cutoffDate.toISOString())
+            .order('created_at', { ascending: false });
 
         if (error) {
             console.error('Error searching orders:', error);
             return [];
         }
 
-        console.log(`Found ${data?.orders?.length || 0} pending orders for phone: ${phoneNumber}`);
-        return data?.orders || [];
+        console.log(`Found ${orders?.length || 0} orders for phone: ${phoneNumber}`);
+        return orders || [];
+
     } catch (error) {
-        console.error('Edge function error:', error);
+        console.error('Error searching orders:', error);
         return [];
     }
 }
@@ -433,22 +556,45 @@ async function updateOrder(orderId, updateData) {
     }
 }
 
-// UPDATED: Function to create customer message using edge function
+// Function to create customer message with direct database calls
 async function createCustomerMessage(messageData) {
     try {
-        console.log('Creating customer message via edge function:', messageData);
+        console.log('Creating customer message:', messageData);
         
-        const { data, error } = await supabase.functions.invoke('create-message', {
-            body: messageData
-        });
-
-        if (error || !data?.success) {
-            console.error('Edge function error creating message:', error);
+        // Validate required fields
+        if (!messageData.restaurant_id || !messageData.message_content) {
+            console.error('Missing required fields for message creation');
             return null;
         }
 
-        console.log('Customer message created successfully:', data.message_id);
-        return data.data;
+        // Set defaults for missing fields
+        const finalMessageData = {
+            restaurant_id: messageData.restaurant_id,
+            customer_phone: messageData.customer_phone || '9999999999',
+            customer_name: messageData.customer_name || 'Unknown Customer',
+            message_type: messageData.message_type || 'general',
+            subject: messageData.subject || 'Customer Inquiry',
+            message_content: messageData.message_content,
+            priority: messageData.priority || 'normal',
+            status: 'unread',
+            call_sid: messageData.call_sid || null
+        };
+
+        // Insert the message
+        const { data: message, error } = await supabase
+            .from('customer_messages')
+            .insert([finalMessageData])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating message:', error);
+            return null;
+        }
+
+        console.log('Message created successfully:', message.id);
+        return message;
+
     } catch (error) {
         console.error('Error creating customer message:', error);
         return null;
@@ -468,33 +614,94 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// UPDATED: Function to validate delivery address using edge function
+// Function to validate delivery address with direct database calls
 async function validateDeliveryAddress(address, restaurant) {
     try {
-        console.log('Validating delivery address via edge function:', address);
+        console.log('Validating delivery address:', address);
         
-        const { data, error } = await supabase.functions.invoke('validate-delivery', {
-            body: { 
-                address: address,
-                restaurant_id: restaurant.id
-            }
-        });
-
-        if (error) {
-            console.error('Edge function error:', error);
+        if (!address || !restaurant) {
             return {
                 valid: false,
-                message: 'Unable to validate address. Please provide a complete address or choose pickup.',
+                message: 'Address and restaurant information are required',
+                address: null
+            };
+        }
+
+        if (!restaurant.delivery_enabled) {
+            return {
+                valid: false,
+                message: 'Delivery is not available for this restaurant',
                 address: address
             };
         }
 
-        return data;
+        // Basic address validation
+        const hasStreetNumber = /\d+/.test(address);
+        const hasStreetName = /(street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|court|ct|place|pl|boulevard|blvd)/i.test(address);
+        const hasZipCode = /\d{5}/.test(address);
+        
+        if (!hasStreetNumber || !hasStreetName) {
+            return {
+                valid: false,
+                message: 'Please provide a complete street address with street number and name',
+                address: address,
+                needs_retry: true
+            };
+        }
+
+        // Check delivery zones if they exist
+        const { data: deliveryZones } = await supabase
+            .from('delivery_zones')
+            .select('*')
+            .eq('restaurant_id', restaurant.id)
+            .eq('active', true);
+
+        if (deliveryZones && deliveryZones.length > 0) {
+            // Check if address is in any delivery zone
+            let inDeliveryZone = false;
+            
+            for (const zone of deliveryZones) {
+                if (zone.zip_codes && hasZipCode) {
+                    const addressZip = address.match(/\d{5}/)?.[0];
+                    if (addressZip && zone.zip_codes.includes(addressZip)) {
+                        inDeliveryZone = true;
+                        break;
+                    }
+                }
+                
+                if (zone.cities && zone.cities.length > 0) {
+                    for (const city of zone.cities) {
+                        if (address.toLowerCase().includes(city.toLowerCase())) {
+                            inDeliveryZone = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (!inDeliveryZone) {
+                return {
+                    valid: false,
+                    message: `Sorry, we don't deliver to that area. Our delivery radius is ${restaurant.delivery_radius_miles || 5} miles from the restaurant.`,
+                    address: address
+                };
+            }
+        }
+
+        // If we get here, the address appears valid
+        return {
+            valid: true,
+            message: 'Address is valid for delivery',
+            address: address,
+            delivery_fee: restaurant.delivery_fee || 0,
+            estimated_time: '30-45 minutes'
+        };
+
     } catch (error) {
         console.error('Error validating delivery address:', error);
         return {
             valid: false,
-            message: 'Unable to validate address. Please provide a complete address or choose pickup.',
+            message: 'Unable to validate address at this time',
             address: address
         };
     }
