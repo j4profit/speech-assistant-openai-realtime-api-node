@@ -1,34 +1,39 @@
-// Restaurant AI Ordering System - COMPLETE CLEAN VERSION
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuration
+// Environment Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
 if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
     console.error('Missing required environment variables');
+    console.error('Required: OPENAI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY');
     process.exit(1);
 }
 
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Create HTTP server
+// Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
-
-// Create WebSocket server
 const wss = new WebSocket.Server({ 
     server,
     path: '/media-stream'
 });
 
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// =============================================================================
+// HTTP ENDPOINTS
+// =============================================================================
 
 // Twilio webhook endpoint for incoming calls
 app.post('/voice', async (req, res) => {
@@ -53,11 +58,13 @@ app.post('/voice', async (req, res) => {
         restaurant_id: null
     };
     
+    // Look up restaurant to get restaurant_id for the call log
     const restaurant = await getRestaurantByPhone(callData.to_number);
     if (restaurant) {
         callData.restaurant_id = restaurant.id;
     }
     
+    // Create initial call log
     await createCallLog(callData);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -75,14 +82,7 @@ app.post('/voice', async (req, res) => {
     res.send(twiml);
 });
 
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'Restaurant AI Ordering and Messaging System',
-        websocket_url: `wss://${req.get('host')}/media-stream`,
-        server_time: new Date().toISOString()
-    });
-});
-
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy',
@@ -92,7 +92,16 @@ app.get('/health', (req, res) => {
     });
 });
 
-// API endpoints
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'Restaurant AI Ordering and Messaging System',
+        websocket_url: `wss://${req.get('host')}/media-stream`,
+        server_time: new Date().toISOString()
+    });
+});
+
+// API endpoint to get recent orders
 app.get('/orders', async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -115,6 +124,7 @@ app.get('/orders', async (req, res) => {
     }
 });
 
+// API endpoint to get customer messages
 app.get('/messages', async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -136,7 +146,11 @@ app.get('/messages', async (req, res) => {
     }
 });
 
-// Helper Functions
+// =============================================================================
+// HELPER FUNCTIONS - DATABASE & EXTERNAL SERVICES
+// =============================================================================
+
+// Get restaurant data by phone number using Edge Function
 async function getRestaurantByPhone(phoneNumber) {
     try {
         console.log('Calling get-restaurant Edge Function for phone:', phoneNumber);
@@ -170,6 +184,7 @@ async function getRestaurantByPhone(phoneNumber) {
             return null;
         }
 
+        // Ensure delivery settings have defaults
         const restaurantWithDefaults = {
             ...restaurant,
             delivery_enabled: restaurant.delivery_enabled ?? false,
@@ -179,7 +194,7 @@ async function getRestaurantByPhone(phoneNumber) {
             preparation_time: restaurant.preparation_time ?? 20
         };
 
-        console.log('Restaurant loaded with delivery settings:', {
+        console.log('Restaurant loaded:', {
             name: restaurantWithDefaults.name,
             delivery_enabled: restaurantWithDefaults.delivery_enabled,
             delivery_radius: restaurantWithDefaults.delivery_radius,
@@ -193,10 +208,9 @@ async function getRestaurantByPhone(phoneNumber) {
     }
 }
 
+// Create call log using Edge Function
 async function createCallLog(callData) {
     try {
-        console.log('Calling create-call-log Edge Function');
-        
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-call-log', {
             method: 'POST',
             headers: {
@@ -218,7 +232,7 @@ async function createCallLog(callData) {
             return null;
         }
 
-        console.log('Call log created via Edge Function:', result.data?.id);
+        console.log('Call log created:', result.data?.id);
         return result.data;
     } catch (error) {
         console.error('Error calling create-call-log Edge Function:', error);
@@ -226,6 +240,7 @@ async function createCallLog(callData) {
     }
 }
 
+// Update call log using Edge Function
 async function updateCallLog(callSid, updateData) {
     try {
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-call-log', {
@@ -253,6 +268,7 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
+// Search for recent orders using Edge Function
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
@@ -281,6 +297,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     }
 }
 
+// Cancel order using Edge Function
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/cancel-order', {
@@ -307,6 +324,7 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
     }
 }
 
+// Update order using Edge Function
 async function updateOrder(orderId, updateData) {
     try {
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-order', {
@@ -334,8 +352,11 @@ async function updateOrder(orderId, updateData) {
     }
 }
 
+// Validate delivery address using Edge Function
 async function validateDeliveryAddress(address, restaurant) {
     try {
+        console.log('Validating delivery address:', address);
+        
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
             method: 'POST',
             headers: {
@@ -349,36 +370,55 @@ async function validateDeliveryAddress(address, restaurant) {
                 delivery_radius: restaurant.delivery_radius,
                 delivery_hours: restaurant.delivery_hours,
                 delivery_time: restaurant.delivery_time,
-                preparation_time: restaurant.preparation_time
+                preparation_time: restaurant.preparation_time,
+                restaurant_address: restaurant.address,
+                restaurant_latitude: restaurant.latitude,
+                restaurant_longitude: restaurant.longitude
             })
         });
 
         if (!response.ok) {
             return {
                 valid: false,
-                message: 'Unable to validate address at this time.',
+                message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
                 address: address
             };
         }
 
         const result = await response.json();
+        
+        if (result.error) {
+            return {
+                valid: false,
+                message: 'Unable to validate address. Please provide a complete address or choose pickup.',
+                address: address
+            };
+        }
+
         return {
             valid: result.valid || false,
             message: result.message || 'Address validation completed',
             address: address,
-            estimated_delivery_time: result.estimated_delivery_time
+            estimated_delivery_time: result.estimated_delivery_time,
+            delivery_radius: result.delivery_radius,
+            reason: result.reason
         };
         
     } catch (error) {
         console.error('Error calling validate-delivery Edge Function:', error);
         return {
             valid: false,
-            message: 'Unable to validate address at this time.',
+            message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
             address: address
         };
     }
 }
 
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+// Calculate order ready time
 function calculateOrderReadyTime(restaurant, isDelivery = false) {
     try {
         const now = new Date();
@@ -414,14 +454,11 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
     }
 }
 
+// Create order in database
 async function createOrder(orderData) {
     try {
         const isDelivery = orderData.order_type === 'delivery';
-        const timing = calculateOrderReadyTime({ 
-            preparation_time: 20, 
-            delivery_time: 15, 
-            delivery_enabled: true 
-        }, isDelivery);
+        const timing = calculateOrderReadyTime(orderData.restaurant_settings, isDelivery);
         
         orderData.ready_time = timing.readyTimeString;
         orderData.estimated_ready_at = timing.readyTime?.toISOString();
@@ -458,6 +495,7 @@ async function createOrder(orderData) {
     }
 }
 
+// Format menu for AI
 function formatMenuForAI(menuItems, restaurant) {
     if (!menuItems || menuItems.length === 0) {
         return "No menu items available.";
@@ -500,6 +538,7 @@ function formatMenuForAI(menuItems, restaurant) {
         if (restaurant.delivery_enabled) {
             menuText += `- Delivery Hours: ${restaurant.delivery_hours || 'Same as restaurant hours'}\n`;
             menuText += `- Delivery Radius: ${restaurant.delivery_radius || 'Contact restaurant'} miles\n`;
+            menuText += `- Estimated Delivery Time: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes\n`;
         } else {
             menuText += `- Pickup Only\n`;
         }
@@ -508,6 +547,7 @@ function formatMenuForAI(menuItems, restaurant) {
     return menuText;
 }
 
+// Extract address from conversation
 function extractAddressFromConversation(conversationTranscript) {
     const customerMessages = conversationTranscript
         .filter(msg => msg.speaker === 'Customer')
@@ -518,9 +558,13 @@ function extractAddressFromConversation(conversationTranscript) {
     console.log('Searching for address in conversation:', customerMessages);
     
     const addressPatterns = [
-        /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*(?:maryland|md)[\w\s,]*\d{5}/i,
+        // Complete address with state and 5-digit zip
+        /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*[\w\s,]*\d{5}/i,
+        // Address with road/street and 5-digit zip
         /\d+\s+[\w\s]+(?:road|rd|street|st|avenue|ave|lane|ln|drive|dr|way|court|ct|place|pl|boulevard|blvd)[\w\s,]*\d{5}/i,
+        // Any street number + name + 5-digit zip
         /\d+\s+[\w\s,]+\d{5}/,
+        // Street number + name with common suffixes
         /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i
     ];
     
@@ -533,13 +577,18 @@ function extractAddressFromConversation(conversationTranscript) {
         }
     }
     
+    console.log('No address pattern matched');
     return null;
 }
 
-// WebSocket connection handler
+// =============================================================================
+// WEBSOCKET CONNECTION HANDLER
+// =============================================================================
+
 wss.on('connection', (ws, req) => {
     console.log('New WebSocket connection');
     
+    // Connection-specific variables
     let openaiWs = null;
     let streamSid = null;
     let callSid = null;
@@ -552,6 +601,7 @@ wss.on('connection', (ws, req) => {
     let isModificationCall = false;
     let capturedDeliveryAddress = null;
 
+    // Initialize OpenAI connection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
         
@@ -583,33 +633,38 @@ wss.on('connection', (ws, req) => {
 
 IMPORTANT: Immediately greet with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"
 
-Keep responses SHORT - no more than 2-3 sentences.
+Keep responses SHORT - maximum 2-3 sentences at a time.
 
 DELIVERY SETTINGS:
 - Delivery Enabled: ${restaurant.delivery_enabled ? 'YES' : 'NO'}
 ${!restaurant.delivery_enabled ? 
-    'ONLY offer PICKUP orders. No delivery available.' :
-    'Offer both pickup and delivery options.'}
+    'IMPORTANT: This restaurant does NOT offer delivery. Only offer PICKUP orders.' :
+    'You can offer both pickup and delivery options.'}
 
 ${menuText}
 
 ORDER PROCESS:
-1. Get customer name
-2. Ask pickup or delivery
-3. Take order items
-4. For delivery: get address, call validate_delivery_address("address")
-5. Create ORDER_CONFIRMED format
+1. Get customer name first
+2. Ask if they want pickup or delivery  
+3. Take their order items
+4. For delivery: get complete address then call validate_delivery_address("exact address")
+5. Create ORDER_CONFIRMED format immediately after successful validation
+
+CRITICAL: When calling validate_delivery_address, ALWAYS include the address parameter.
+Example: validate_delivery_address("123 Main Street, City, State, 12345")
 
 ORDER_CONFIRMED:
 - Customer Name: [name]
 - Phone: ${customerPhone || '[phone]'}
-- Order Type: [delivery/pickup]
-- Delivery Address: [address or N/A]
-- Items: [items]
+- Order Type: [delivery or pickup]
+- Delivery Address: [full address or N/A]
+- Items: [items with prices]
 - Special Instructions: [instructions or None]
 - Total: $[amount]
-- Ready Time: [time]
-ORDER_END`;
+- Ready Time: [estimated time]
+ORDER_END
+
+Keep all responses conversational and brief.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -630,32 +685,36 @@ ORDER_END`;
                         {
                             type: "function",
                             name: "search_recent_orders",
-                            description: "Search for recent orders",
+                            description: "Search for recent pending orders by customer's phone number",
                             parameters: {
                                 type: "object",
-                                properties: { phone_number: { type: "string" } },
+                                properties: {
+                                    phone_number: { type: "string", description: "Customer's phone number" }
+                                },
                                 required: []
                             }
                         },
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address",
+                            description: "Validate delivery address for the restaurant",
                             parameters: {
                                 type: "object",
-                                properties: { address: { type: "string" } },
+                                properties: {
+                                    address: { type: "string", description: "Complete delivery address with street, city, state, zip" }
+                                },
                                 required: ["address"]
                             }
                         },
                         {
                             type: "function", 
                             name: "cancel_order",
-                            description: "Cancel an order",
+                            description: "Cancel an existing order",
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    order_id: { type: "string" },
-                                    reason: { type: "string" }
+                                    order_id: { type: "string", description: "Order ID to cancel" },
+                                    reason: { type: "string", description: "Cancellation reason" }
                                 },
                                 required: ["order_id"]
                             }
@@ -663,13 +722,13 @@ ORDER_END`;
                         {
                             type: "function", 
                             name: "update_order",
-                            description: "Update an order",
+                            description: "Update an existing order",
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    order_id: { type: "string" },
-                                    modifications: { type: "string" },
-                                    new_total: { type: "number" }
+                                    order_id: { type: "string", description: "Order ID to update" },
+                                    modifications: { type: "string", description: "Description of changes" },
+                                    new_total: { type: "number", description: "New total amount" }
                                 },
                                 required: ["order_id", "modifications"]
                             }
@@ -770,6 +829,7 @@ ORDER_END`;
         });
     }
 
+    // Handle function calls from OpenAI
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -801,30 +861,36 @@ ORDER_END`;
                             id: order.id,
                             total: order.total_amount,
                             order_type: order.order_type,
+                            delivery_address: order.delivery_address,
                             items: order.order_items?.map(item => ({
                                 name: item.menu_items?.name || 'Item',
-                                quantity: item.quantity
+                                quantity: item.quantity,
+                                price: item.price
                             })) || []
                         })),
-                        count: orders.length
+                        count: orders.length,
+                        message: orders.length === 0 ? 'No pending orders found.' : `Found ${orders.length} pending order(s).`
                     };
                     break;
 
                 case 'validate_delivery_address':
                     let address = parsedArgs.address;
                     
+                    // If no address in arguments, extract from conversation
                     if (!address) {
                         address = extractAddressFromConversation(conversationTranscript);
+                        console.log('Extracted address from conversation:', address);
                     }
                     
                     if (!address) {
                         result = {
                             valid: false,
-                            message: 'Please provide your complete delivery address including zip code.'
+                            message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.'
                         };
                         break;
                     }
                     
+                    // Check if restaurant supports delivery
                     if (!restaurant.delivery_enabled) {
                         result = {
                             valid: false,
@@ -839,8 +905,9 @@ ORDER_END`;
                         capturedDeliveryAddress = address;
                         console.log('DELIVERY ADDRESS VALIDATED:', address);
                         
-                        validationResult.instruction = 'SUCCESS! Create ORDER_CONFIRMED format immediately.';
+                        validationResult.instruction = 'SUCCESS! Address is valid. Create ORDER_CONFIRMED format immediately.';
                         validationResult.status = 'APPROVED';
+                        validationResult.confirmed_address = address;
                     }
                     
                     result = validationResult;
@@ -859,10 +926,11 @@ ORDER_END`;
                         break;
                     }
                     
-                    const cancelResult = await cancelOrder(cancelOrderId);
+                    const cancelResult = await cancelOrder(cancelOrderId, parsedArgs.reason);
                     result = {
                         success: !!cancelResult,
-                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order'
+                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order',
+                        order_id: cancelOrderId
                     };
                     break;
 
@@ -886,7 +954,9 @@ ORDER_END`;
                     
                     result = {
                         success: !!updateResult,
-                        message: updateResult ? 'Order updated successfully' : 'Failed to update order'
+                        message: updateResult ? 'Order updated successfully' : 'Failed to update order',
+                        order_id: orderId,
+                        modifications: parsedArgs.modifications
                     };
                     break;
 
@@ -928,9 +998,11 @@ ORDER_END`;
         }
     }
 
+    // Process order from AI transcript
     async function processOrderFromTranscript(transcript) {
         try {
             if (isModificationCall || orderProcessed) {
+                console.log('Skipping order processing - already processed or modification call');
                 return;
             }
             
@@ -947,6 +1019,7 @@ ORDER_END`;
                 let items = '';
                 let orderType = 'pickup';
                 let deliveryAddress = null;
+                let specialInstructions = '';
                 let totalAmount = 0;
                 
                 const lines = orderSection.split('\n').map(line => line.trim());
@@ -965,6 +1038,8 @@ ORDER_END`;
                         }
                     } else if (line.includes('Items:')) {
                         items = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.includes('Special Instructions:')) {
+                        specialInstructions = line.substring(line.indexOf(':') + 1).trim();
                     } else if (line.includes('Total:')) {
                         const totalMatch = line.match(/\$(\d+\.?\d*)/);
                         if (totalMatch) {
@@ -973,6 +1048,8 @@ ORDER_END`;
                     }
                 }
                 
+                const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
+                
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
@@ -980,14 +1057,21 @@ ORDER_END`;
                     total_amount: totalAmount || 0,
                     order_type: orderType,
                     delivery_address: deliveryAddress,
-                    order_details: `Customer: ${customerName}\nItems: ${items}`,
+                    order_details: `Customer: ${customerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
+                    special_instructions: specialInstructions || '',
                     call_sid: callSid,
+                    restaurant_settings: restaurant,
                     items: []
                 };
 
                 const order = await createOrder(orderData);
                 if (order) {
                     console.log('NEW order saved successfully with ID:', order.id);
+                    console.log('Order type:', order.order_type);
+                    if (order.order_type === 'delivery') {
+                        console.log('Delivery address:', order.delivery_address);
+                    }
+                    
                     capturedDeliveryAddress = null;
                     
                     if (callSid) {
@@ -995,6 +1079,7 @@ ORDER_END`;
                     }
                 } else {
                     orderProcessed = false;
+                    console.log('Order creation failed, resetting flag');
                 }
             }
         } catch (error) {
@@ -1020,6 +1105,10 @@ ORDER_END`;
                     const callId = data.start.customParameters?.CallSid || data.start.callSid;
                     
                     console.log('Stream started:', streamSid);
+                    console.log('Called number:', calledNumber);
+                    console.log('From number:', fromNumber);
+                    console.log('Call ID:', callId);
+                    
                     initializeOpenAI(calledNumber, fromNumber, callId);
                     break;
                     
@@ -1069,13 +1158,19 @@ ORDER_END`;
     });
 });
 
+// =============================================================================
+// SERVER STARTUP
+// =============================================================================
+
 wss.on('error', (error) => {
     console.error('WebSocket Server error:', error);
 });
 
 server.listen(port, '0.0.0.0', () => {
     console.log(`Restaurant AI System running on port ${port}`);
+    console.log(`Ready to take orders and messages via phone calls`);
     console.log(`WebSocket ready for Twilio Media Streams`);
     console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
     console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+    console.log(`Multi-tenant delivery controls enabled`);
 });
