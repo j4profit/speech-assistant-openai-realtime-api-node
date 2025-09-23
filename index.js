@@ -215,96 +215,42 @@ async function getRestaurantByPhone(phoneNumber) {
             return null;
         }
 
-        // First, let's see what columns actually exist
-        console.log('Checking what columns exist in restaurants table...');
-        
-        // Try different possible column names for phone
-        const possiblePhoneColumns = ['phone', 'phone_number', 'contact_phone', 'number'];
-        let restaurant = null;
-        let workingPhoneColumn = null;
-
-        // First try to get any restaurant to see the structure
-        const { data: sampleRestaurants, error: sampleError } = await supabase
+        // Query restaurant using phone_number column directly
+        const { data: restaurant, error } = await supabase
             .from('restaurants')
             .select('*')
-            .limit(1);
+            .eq('phone_number', phoneNumber)
+            .single();
 
-        console.log('Sample restaurant data:', sampleRestaurants);
-        console.log('Sample error:', sampleError);
+        console.log('Restaurant lookup result:', restaurant ? `Found: ${restaurant.name}` : 'Not found');
+        if (error) console.log('Restaurant lookup error:', error.message);
 
-        if (sampleRestaurants && sampleRestaurants.length > 0) {
-            console.log('Restaurant table columns:', Object.keys(sampleRestaurants[0]));
-        }
-
-        // Try different phone column names
-        for (const phoneCol of possiblePhoneColumns) {
-            try {
-                console.log(`Trying phone column: ${phoneCol}`);
-                const { data: result, error } = await supabase
-                    .from('restaurants')
-                    .select('*')
-                    .eq(phoneCol, phoneNumber)
-                    .single();
-
-                if (!error && result) {
-                    console.log(`Found restaurant using column: ${phoneCol}`);
-                    restaurant = result;
-                    workingPhoneColumn = phoneCol;
-                    break;
-                } else if (error) {
-                    console.log(`Error with column ${phoneCol}:`, error.message);
-                }
-            } catch (err) {
-                console.log(`Exception with column ${phoneCol}:`, err.message);
-                continue;
-            }
-        }
-
-        if (!restaurant) {
-            console.log('No restaurant found with any phone column variations');
-            
-            // Let's try a broader search - maybe the phone format is different
-            const { data: allRestaurants, error: allError } = await supabase
+        if (error || !restaurant) {
+            // Let's see what restaurants are available for debugging
+            const { data: availableRestaurants } = await supabase
                 .from('restaurants')
-                .select('*');
-
-            console.log('All restaurants in database:', allRestaurants);
+                .select('id, name, phone_number')
+                .limit(3);
             
-            if (allRestaurants && allRestaurants.length > 0) {
-                console.log('Available restaurants:', allRestaurants.map(r => ({
-                    id: r.id,
-                    name: r.name,
-                    phone_related_fields: Object.keys(r).filter(key => 
-                        key.toLowerCase().includes('phone') || 
-                        key.toLowerCase().includes('number') ||
-                        key.toLowerCase().includes('contact')
-                    ).map(key => ({ [key]: r[key] }))
-                })));
-            }
-            
+            console.log('Available restaurants:', availableRestaurants?.map(r => `${r.name}: ${r.phone_number}`));
             return null;
         }
 
-        // Try to get menu items separately to avoid relationship issues
-        try {
-            console.log('Fetching menu items for restaurant:', restaurant.id);
-            const { data: menuItems, error: menuError } = await supabase
-                .from('menu_items')
-                .select('*')
-                .eq('restaurant_id', restaurant.id);
+        // Get menu items for the restaurant
+        console.log('Fetching menu items for restaurant:', restaurant.id);
+        const { data: menuItems, error: menuError } = await supabase
+            .from('menu_items')
+            .select('*')
+            .eq('restaurant_id', restaurant.id);
 
-            if (menuItems && !menuError) {
-                restaurant.menu_items = menuItems.map(item => ({
-                    ...item,
-                    category: 'General' // Default category for now
-                }));
-                console.log(`Found ${menuItems.length} menu items`);
-            } else {
-                console.log('Menu items error or none found:', menuError);
-                restaurant.menu_items = [];
-            }
-        } catch (menuErr) {
-            console.log('Exception getting menu items:', menuErr);
+        if (menuItems && !menuError) {
+            restaurant.menu_items = menuItems.map(item => ({
+                ...item,
+                category: 'General' // Default category since relationships are complex
+            }));
+            console.log(`Found ${menuItems.length} menu items`);
+        } else {
+            console.log('Menu items error or none found:', menuError?.message);
             restaurant.menu_items = [];
         }
 
@@ -312,8 +258,7 @@ async function getRestaurantByPhone(phoneNumber) {
         return restaurant;
 
     } catch (error) {
-        console.error('Error fetching restaurant:', error);
-        console.error('Error stack:', error.stack);
+        console.error('Error fetching restaurant:', error.message);
         return null;
     }
 }
