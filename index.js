@@ -1364,7 +1364,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
             if (cleanLine.toLowerCase().includes('customer name:')) {
                 messageData.customer_name = cleanLine.split(':').slice(1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('message type:')) {
-                messageData.message_type = cleanLine.split(':').slice1).join(':').trim();
+                messageData.message_type = cleanLine.split(':').slice(1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('subject:')) {
                 messageData.subject = cleanLine.split(':').slice(1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('message:') && !cleanLine.toLowerCase().includes('message type:')) {
