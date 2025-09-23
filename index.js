@@ -412,12 +412,18 @@ async function getRestaurantByPhoneFallback(phoneNumber) {
     }
 }
 
-// Function to create call log in database
+// Function to create call log using Edge Function
 async function createCallLog(callData) {
     try {
-        const { data, error } = await supabase
-            .from('call_logs')
-            .insert([{
+        console.log('Calling create-call-log Edge Function with data:', callData);
+        
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-call-log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
                 call_sid: callData.call_sid,
                 restaurant_id: callData.restaurant_id,
                 from_number: callData.from_number,
@@ -434,42 +440,62 @@ async function createCallLog(callData) {
                 to_zip: callData.to_zip,
                 call_started_at: callData.call_started_at,
                 twilio_data: callData.twilio_data
-            }])
-            .select()
-            .single();
+            })
+        });
 
-        if (error) {
-            console.error('Error creating call log:', error);
+        if (!response.ok) {
+            console.error('create-call-log Edge Function response not ok:', response.status);
             return null;
         }
 
-        console.log('Call log created:', data.id);
-        return data;
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('create-call-log Edge Function returned error:', result.error);
+            return null;
+        }
+
+        console.log('Call log created via Edge Function:', result.data?.id);
+        return result.data;
     } catch (error) {
-        console.error('Error creating call log:', error);
+        console.error('Error calling create-call-log Edge Function:', error);
         return null;
     }
 }
 
-// Function to update call log when call ends
+// Function to update call log using Edge Function
 async function updateCallLog(callSid, updateData) {
     try {
-        const { data, error } = await supabase
-            .from('call_logs')
-            .update(updateData)
-            .eq('call_sid', callSid)
-            .select()
-            .single();
+        console.log('Calling update-call-log Edge Function for:', callSid);
+        
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-call-log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                call_sid: callSid,
+                ...updateData
+            })
+        });
 
-        if (error) {
-            console.error('Error updating call log:', error);
+        if (!response.ok) {
+            console.error('update-call-log Edge Function response not ok:', response.status);
             return null;
         }
 
-        console.log('Call log updated for:', callSid);
-        return data;
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('update-call-log Edge Function returned error:', result.error);
+            return null;
+        }
+
+        console.log('Call log updated via Edge Function for:', callSid);
+        return result.data;
     } catch (error) {
-        console.error('Error updating call log:', error);
+        console.error('Error calling update-call-log Edge Function:', error);
         return null;
     }
 }
@@ -514,7 +540,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     }
 }
 
-// Function to cancel an existing order
+// Function to cancel an existing order using Edge Function
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
         if (!orderId) {
@@ -522,32 +548,41 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
             return null;
         }
         
-        const { data, error } = await supabase
-            .from('orders')
-            .update({
-                status: 'cancelled',
-                special_instructions: reason,
-                updated_at: new Date().toISOString()
+        console.log('Calling cancel-order Edge Function for:', orderId);
+        
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/cancel-order', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                order_id: orderId,
+                reason: reason
             })
-            .eq('id', orderId)
-            .eq('status', 'pending')
-            .select()
-            .single();
+        });
 
-        if (error) {
-            console.error('Error cancelling order:', error);
+        if (!response.ok) {
+            console.error('cancel-order Edge Function response not ok:', response.status);
             return null;
         }
 
-        console.log('Order cancelled successfully:', orderId);
-        return data;
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('cancel-order Edge Function returned error:', result.error);
+            return null;
+        }
+
+        console.log('Order cancelled successfully via Edge Function:', orderId);
+        return result.data;
     } catch (error) {
-        console.error('Error cancelling order:', error);
+        console.error('Error calling cancel-order Edge Function:', error);
         return null;
     }
 }
 
-// Function to update an existing order with modifications
+// Function to update an existing order using Edge Function
 async function updateOrder(orderId, updateData) {
     try {
         if (!orderId) {
@@ -555,160 +590,37 @@ async function updateOrder(orderId, updateData) {
             return null;
         }
         
-        console.log(`Updating order ${orderId} with:`, updateData);
+        console.log(`Calling update-order Edge Function for ${orderId} with:`, updateData);
         
-        // First, fetch the existing order to preserve and update its details
-        const { data: existingOrder, error: fetchError } = await supabase
-            .from('orders')
-            .select(`
-                *,
-                order_items (
-                    id,
-                    quantity,
-                    price,
-                    special_requests,
-                    menu_items (
-                        id,
-                        name,
-                        description,
-                        price
-                    )
-                )
-            `)
-            .eq('id', orderId)
-            .single();
-
-        if (fetchError || !existingOrder) {
-            console.error('Error fetching existing order:', fetchError);
-            return null;
-        }
-
-        console.log('Existing order found:', existingOrder);
-
-        // Parse the modifications to understand what's being changed
-        const modifications = updateData.modifications || '';
-        const modLower = modifications.toLowerCase();
-        
-        // Build the complete updated order details
-        let updatedOrderDetails = existingOrder.order_details || '';
-        let newTotal = existingOrder.total_amount || 0;
-        
-        // If modifications include adding items, append to order details
-        if (modLower.includes('add')) {
-            const addedItems = modifications;
-            
-            const existingLines = updatedOrderDetails.split('\n');
-            let customerInfo = [];
-            let itemsSection = [];
-            let otherInfo = [];
-            let currentSection = 'info';
-            
-            for (const line of existingLines) {
-                if (line.toLowerCase().includes('items:')) {
-                    currentSection = 'items';
-                    itemsSection.push(line);
-                } else if (line.toLowerCase().includes('special instructions:') || 
-                          line.toLowerCase().includes('pickup time:') ||
-                          line.toLowerCase().includes('order taken via')) {
-                    currentSection = 'other';
-                    otherInfo.push(line);
-                } else if (currentSection === 'info') {
-                    customerInfo.push(line);
-                } else if (currentSection === 'items') {
-                    itemsSection.push(line);
-                } else {
-                    otherInfo.push(line);
-                }
-            }
-            
-            if (itemsSection.length === 0) {
-                itemsSection.push('Items:');
-            }
-            itemsSection.push(`- ${addedItems}`);
-            
-            if (updateData.new_total && updateData.new_total > 0) {
-                newTotal = updateData.new_total;
-            } else {
-                const priceMatch = modifications.match(/\$(\d+\.?\d*)/);
-                if (priceMatch) {
-                    const addedPrice = parseFloat(priceMatch[1]);
-                    newTotal = (existingOrder.total_amount || 0) + addedPrice;
-                }
-            }
-            
-            updatedOrderDetails = [
-                ...customerInfo,
-                ...itemsSection,
-                ...otherInfo.filter(line => !line.toLowerCase().includes('special instructions:'))
-            ].join('\n');
-            
-            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
-            if (!updatedOrderDetails.includes('Special Instructions:')) {
-                updatedOrderDetails += `\nSpecial Instructions: ${modificationNote}`;
-            } else {
-                updatedOrderDetails = updatedOrderDetails.replace(
-                    /Special Instructions:.*$/m,
-                    `Special Instructions: ${modificationNote}`
-                );
-            }
-            
-        } else if (modLower.includes('change') || modLower.includes('replace')) {
-            updatedOrderDetails = updatedOrderDetails.replace(/Items:[\s\S]*?(?=\n[A-Z]|\n$)/m, 
-                `Items:\n- ${modifications}`);
-            
-            if (updateData.new_total && updateData.new_total > 0) {
-                newTotal = updateData.new_total;
-            }
-            
-            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
-            updatedOrderDetails = updatedOrderDetails.replace(
-                /Special Instructions:.*$/m,
-                `Special Instructions: ${modificationNote}`
-            );
-        } else {
-            const modificationNote = `MODIFIED: ${modifications} (${new Date().toLocaleString()})`;
-            if (updatedOrderDetails.includes('Special Instructions:')) {
-                updatedOrderDetails = updatedOrderDetails.replace(
-                    /Special Instructions:.*$/m,
-                    `Special Instructions: ${modificationNote}`
-                );
-            } else {
-                updatedOrderDetails += `\nSpecial Instructions: ${modificationNote}`;
-            }
-            
-            if (updateData.new_total && updateData.new_total > 0) {
-                newTotal = updateData.new_total;
-            }
-        }
-        
-        console.log('Updated order details:', updatedOrderDetails);
-        console.log('New total:', newTotal);
-        
-        // Update the order in the database
-        const { data, error } = await supabase
-            .from('orders')
-            .update({
-                order_details: updatedOrderDetails,
-                special_instructions: `${modifications} - Modified at ${new Date().toLocaleString()}`,
-                total_amount: newTotal,
-                status: 'modified',
-                updated_at: new Date().toISOString()
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-order', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                order_id: orderId,
+                modifications: updateData.modifications,
+                new_total: updateData.new_total
             })
-            .eq('id', orderId)
-            .in('status', ['pending', 'modified'])
-            .select()
-            .single();
+        });
 
-        if (error) {
-            console.error('Error updating order in database:', error);
+        if (!response.ok) {
+            console.error('update-order Edge Function response not ok:', response.status);
             return null;
         }
 
-        console.log('Order updated successfully in database:', orderId);
-        console.log('Final updated order:', data);
-        return data;
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('update-order Edge Function returned error:', result.error);
+            return null;
+        }
+
+        console.log('Order updated successfully via Edge Function:', orderId);
+        return result.data;
     } catch (error) {
-        console.error('Error in updateOrder function:', error);
+        console.error('Error calling update-order Edge Function:', error);
         return null;
     }
 }
@@ -1164,23 +1076,26 @@ ENHANCED INSTRUCTIONS FOR NEW ORDERS:
    ${!restaurant.delivery_enabled ? 
        '- PICKUP ONLY: Explain we only offer pickup, no delivery service' :
        '- PICKUP: Standard pickup order\n   - DELIVERY: Must validate address and check delivery hours'}
-3. For DELIVERY orders (only if delivery_enabled is true):
-   - After getting their name and order items, ask: "What's your complete delivery address including zip code?"
-   - WAIT for the customer to provide an address that contains numbers, street name, and zip code
-   - When customer provides address, IMMEDIATELY call validate_delivery_address function with the EXACT address they said
-   - CRITICAL: If the function returns valid=true, IMMEDIATELY create the order with ORDER_CONFIRMED format
-   - If the function returns valid=false, explain the specific reason and offer pickup
+3. AFTER confirming pickup or delivery, ask: "What would you like to order today?"
+4. GET THE COMPLETE ORDER ITEMS before asking for address or confirming anything
+5. For DELIVERY orders (only if delivery_enabled is true):
+   - ONLY after getting name, order type, AND items, ask: "What's your complete delivery address including zip code?"
+   - When customer provides address, call validate_delivery_address with the EXACT address they said
+   - If function returns valid=true: IMMEDIATELY create ORDER_CONFIRMED format
+   - If function returns valid=false: explain the specific reason and offer pickup
    - NEVER ask for the address again if validation was successful
-4. For PICKUP orders:
-   - After getting their name, take the order items
-   - Confirm pickup time preferences
+6. For PICKUP orders:
+   - After getting name, order type, and items, ask about preferred pickup time
    - IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
 
-CRITICAL FUNCTION USAGE RULES:
-- validate_delivery_address function: ONLY call when you have a complete address with numbers and zip code
-- If the function returns "valid": true, the address is GOOD - proceed with order creation
-- If the function returns "valid": false, the address has problems - explain why and offer pickup
-- NEVER ignore function results - trust the validation response
+CRITICAL ORDER SEQUENCE:
+Step 1: Get customer name
+Step 2: Confirm pickup or delivery 
+Step 3: Get order items (what they want to eat)
+Step 4: Get address (delivery only) or pickup time (pickup only)
+Step 5: Create ORDER_CONFIRMED format
+
+NEVER SKIP STEP 3 - Always get the order items before asking for address!
 
 DELIVERY VALIDATION REQUIREMENTS:
 - ALWAYS use validate_delivery_address function for delivery orders
@@ -1264,13 +1179,13 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate if a delivery address is within the restaurant's delivery area. CRITICAL: When this function returns 'valid: true', the address is APPROVED and you should immediately proceed to create the order using ORDER_CONFIRMED format. Do NOT ask for the address again if validation succeeds.",
+                            description: "Validate delivery address ONLY after you have: 1) Customer name, 2) Order items, 3) Complete address with street number and zip code. When this returns 'valid: true', immediately create ORDER_CONFIRMED format. Do NOT call this function until customer has provided a real address.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "The complete delivery address the customer provided. Include street number, street name, city, state, and zip code. Example: '7805 Old Harford Road, Parkville, Maryland, 21234'"
+                                        description: "The exact complete address customer provided. Must include street number, street name, city, state, zip. Example: '7805 Old Hartford Road, Parkville, Maryland, 21234'"
                                     }
                                 },
                                 required: ["address"]
@@ -1525,6 +1440,35 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
 
                 case 'validate_delivery_address':
                     let address = parsedArgs.address;
+                    
+                    // Check if we have the prerequisites for address validation
+                    const recentConversation = conversationTranscript
+                        .filter(m => m.speaker === 'Customer')
+                        .slice(-10)
+                        .map(m => m.text)
+                        .join(' ');
+                    
+                    const hasOrderItems = recentConversation.toLowerCase().includes('pizza') || 
+                                         recentConversation.toLowerCase().includes('burger') ||
+                                         recentConversation.toLowerCase().includes('order') ||
+                                         recentConversation.toLowerCase().includes('want');
+                    
+                    console.log('Address validation prerequisites check:', {
+                        hasOrderItems,
+                        recentConversation: recentConversation.substring(0, 200)
+                    });
+                    
+                    if (!hasOrderItems && !address) {
+                        result = {
+                            valid: false,
+                            message: 'Please get the customer order items first, then ask for delivery address.',
+                            address: null,
+                            reason: 'missing_order_items',
+                            instruction: 'Ask customer what they would like to order before requesting address.'
+                        };
+                        console.log('Blocking address validation - no order items collected yet');
+                        break;
+                    }
                     
                     if (!address) {
                         console.log('No address in arguments, searching conversation for address...');
