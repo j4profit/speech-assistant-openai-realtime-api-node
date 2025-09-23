@@ -298,38 +298,48 @@ async function isWithinDeliveryHours(deliveryHours, currentTime = new Date()) {
     }
 }
 
-// Function to get restaurant data by phone number with all delivery settings
+// Function to get restaurant data by phone number using Edge Function
 async function getRestaurantByPhone(phoneNumber) {
     try {
-        const { data, error } = await supabase
-            .from('restaurants')
-            .select(`
-                *,
-                menu_items (
-                    id,
-                    name,
-                    description,
-                    price,
-                    category,
-                    available
-                )
-            `)
-            .eq('phone_number', phoneNumber)
-            .single();
+        console.log('Calling get-restaurant Edge Function for phone:', phoneNumber);
+        
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/get-restaurant', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                phone_number: phoneNumber
+            })
+        });
 
-        if (error) {
-            console.error('Error fetching restaurant:', error);
+        if (!response.ok) {
+            console.error('Edge Function response not ok:', response.status, response.statusText);
+            return null;
+        }
+
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('Edge Function returned error:', result.error);
+            return null;
+        }
+
+        const restaurant = result.data;
+        if (!restaurant) {
+            console.log('No restaurant found for phone:', phoneNumber);
             return null;
         }
 
         // Ensure delivery settings have defaults
         const restaurantWithDefaults = {
-            ...data,
-            delivery_enabled: data.delivery_enabled ?? false,
-            delivery_radius: data.delivery_radius ?? 5,
-            delivery_hours: data.delivery_hours ?? null,
-            delivery_time: data.delivery_time ?? 15,
-            preparation_time: data.preparation_time ?? 20
+            ...restaurant,
+            delivery_enabled: restaurant.delivery_enabled ?? false,
+            delivery_radius: restaurant.delivery_radius ?? 5,
+            delivery_hours: restaurant.delivery_hours ?? null,
+            delivery_time: restaurant.delivery_time ?? 15,
+            preparation_time: restaurant.preparation_time ?? 20
         };
 
         console.log('Restaurant loaded with delivery settings:', {
@@ -342,7 +352,7 @@ async function getRestaurantByPhone(phoneNumber) {
 
         return restaurantWithDefaults;
     } catch (error) {
-        console.error('Database error:', error);
+        console.error('Error calling get-restaurant Edge Function:', error);
         return null;
     }
 }
@@ -409,49 +419,42 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// Function to search for recent orders by phone number (only pending orders)
+// Function to search for recent orders using Edge Function
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
     try {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        console.log('Calling search-orders Edge Function for phone:', phoneNumber);
         
-        const { data, error } = await supabase
-            .from('orders')
-            .select(`
-                id,
-                customer_phone,
-                customer_name,
-                total_amount,
-                status,
-                order_details,
-                special_instructions,
-                order_type,
-                delivery_address,
-                created_at,
-                order_items (
-                    id,
-                    quantity,
-                    price,
-                    special_requests,
-                    menu_items (name, description, price)
-                )
-            `)
-            .eq('customer_phone', phoneNumber)
-            .eq('restaurant_id', restaurantId)
-            .eq('status', 'pending')
-            .gte('created_at', cutoffDate.toISOString())
-            .order('created_at', { ascending: false })
-            .limit(3);
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                phone_number: phoneNumber,
+                restaurant_id: restaurantId,
+                days_back: daysBack,
+                status: 'pending' // Only search for pending orders
+            })
+        });
 
-        if (error) {
-            console.error('Error searching orders:', error);
+        if (!response.ok) {
+            console.error('search-orders Edge Function response not ok:', response.status);
             return [];
         }
 
-        console.log(`Found ${data?.length || 0} pending orders for phone: ${phoneNumber}`);
-        return data || [];
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('search-orders Edge Function returned error:', result.error);
+            return [];
+        }
+
+        const orders = result.data || [];
+        console.log(`Found ${orders.length} pending orders for phone: ${phoneNumber}`);
+        return orders;
     } catch (error) {
-        console.error('Error searching orders:', error);
+        console.error('Error calling search-orders Edge Function:', error);
         return [];
     }
 }
@@ -655,10 +658,10 @@ async function updateOrder(orderId, updateData) {
     }
 }
 
-// Function to create customer message in database
+// Function to create customer message using Edge Function
 async function createCustomerMessage(messageData) {
     try {
-        console.log('Attempting to create customer message with data:', messageData);
+        console.log('Calling create-message Edge Function with data:', messageData);
         
         if (!messageData.restaurant_id) {
             console.error('Missing restaurant_id for customer message');
@@ -670,9 +673,13 @@ async function createCustomerMessage(messageData) {
             return null;
         }
         
-        const { data, error } = await supabase
-            .from('customer_messages')
-            .insert([{
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
                 restaurant_id: messageData.restaurant_id,
                 customer_phone: messageData.customer_phone,
                 customer_name: messageData.customer_name || 'Unknown',
@@ -681,24 +688,26 @@ async function createCustomerMessage(messageData) {
                 message_content: messageData.message_content || 'No message content provided',
                 call_sid: messageData.call_sid,
                 order_reference: messageData.order_reference,
-                priority: messageData.priority || 'normal',
-                status: 'new'
-            }])
-            .select()
-            .single();
+                priority: messageData.priority || 'normal'
+            })
+        });
 
-        if (error) {
-            console.error('Database error creating customer message:', error);
-            console.error('Error details:', JSON.stringify(error, null, 2));
+        if (!response.ok) {
+            console.error('create-message Edge Function response not ok:', response.status);
             return null;
         }
 
-        console.log('Customer message created successfully:', data.id);
-        console.log('Message details:', data);
-        return data;
+        const result = await response.json();
+        
+        if (result.error) {
+            console.error('create-message Edge Function returned error:', result.error);
+            return null;
+        }
+
+        console.log('Customer message created successfully via Edge Function:', result.data?.id);
+        return result.data;
     } catch (error) {
-        console.error('Error creating customer message:', error);
-        console.error('Stack trace:', error.stack);
+        console.error('Error calling create-message Edge Function:', error);
         return null;
     }
 }
@@ -716,10 +725,10 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Enhanced function to validate delivery address with comprehensive delivery controls
+// Enhanced function to validate delivery address using Edge Function
 async function validateDeliveryAddress(address, restaurant) {
     try {
-        console.log('Validating delivery address:', address);
+        console.log('Calling validate-delivery Edge Function with address:', address);
         console.log('Restaurant delivery settings:', {
             delivery_enabled: restaurant.delivery_enabled,
             delivery_radius: restaurant.delivery_radius,
@@ -727,90 +736,73 @@ async function validateDeliveryAddress(address, restaurant) {
             delivery_time: restaurant.delivery_time
         });
         
-        // PRIMARY CHECK: Is delivery enabled for this restaurant?
-        if (!restaurant.delivery_enabled) {
+        if (!address) {
             return {
                 valid: false,
-                message: `Sorry, ${restaurant.name} does not offer delivery service. We only offer pickup orders.`,
-                address: address,
-                reason: 'delivery_disabled'
+                message: 'No address provided for validation.',
+                address: null,
+                reason: 'no_address'
             };
         }
         
-        // SECONDARY CHECK: Are we within delivery hours?
-        if (restaurant.delivery_hours) {
-            const deliveryStatus = await isWithinDeliveryHours(restaurant.delivery_hours);
-            
-            if (!deliveryStatus.within) {
-                const nextWindow = deliveryStatus.next_window 
-                    ? ` Next delivery window starts at ${deliveryStatus.next_window.toLocaleTimeString()}.`
-                    : '';
-                
-                return {
-                    valid: false,
-                    message: `Delivery is only available during ${restaurant.delivery_hours}.${nextWindow} Please choose pickup instead or call back during delivery hours.`,
-                    address: address,
-                    reason: 'outside_delivery_hours',
-                    delivery_hours: restaurant.delivery_hours,
-                    next_available: deliveryStatus.next_window
-                };
-            }
-            
-            console.log('Within delivery hours - proceeding with address validation');
-        }
-        
-        // TERTIARY CHECK: Basic address validation
-        const addressParts = address.toLowerCase().split(/[\s,]+/);
-        const hasStreetNumber = /\d+/.test(address);
-        const hasZipCode = /\d{5}/.test(address);
-        
-        if (!hasStreetNumber || addressParts.length < 4) {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+                address: address,
+                restaurant_id: restaurant.id,
+                delivery_enabled: restaurant.delivery_enabled,
+                delivery_radius: restaurant.delivery_radius,
+                delivery_hours: restaurant.delivery_hours,
+                delivery_time: restaurant.delivery_time,
+                preparation_time: restaurant.preparation_time,
+                restaurant_address: restaurant.address,
+                restaurant_latitude: restaurant.latitude,
+                restaurant_longitude: restaurant.longitude
+            })
+        });
+
+        if (!response.ok) {
+            console.error('validate-delivery Edge Function response not ok:', response.status);
             return {
                 valid: false,
-                message: 'Please provide a complete address including street number, street name, city, state, and zip code.',
+                message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
                 address: address,
-                reason: 'incomplete_address'
+                reason: 'validation_service_error'
             };
         }
+
+        const result = await response.json();
         
-        // QUATERNARY CHECK: Delivery radius validation
-        if (restaurant.latitude && restaurant.longitude && restaurant.delivery_radius) {
-            // In production, you would use a geocoding API here
-            // For now, we'll do basic zip code validation
-            
-            const zipMatch = address.match(/\d{5}/);
-            if (zipMatch) {
-                const customerZip = zipMatch[0];
-                const restaurantZip = restaurant.address ? restaurant.address.match(/\d{5}/)?.[0] : null;
-                
-                // Basic check: if zip codes are very different, likely out of range
-                if (restaurantZip && Math.abs(parseInt(customerZip) - parseInt(restaurantZip)) > 100) {
-                    return {
-                        valid: false,
-                        message: `Sorry, that address appears to be outside our ${restaurant.delivery_radius} mile delivery area. Please choose pickup instead.`,
-                        address: address,
-                        reason: 'outside_delivery_radius',
-                        delivery_radius: restaurant.delivery_radius
-                    };
-                }
-            }
+        if (result.error) {
+            console.error('validate-delivery Edge Function returned error:', result.error);
+            return {
+                valid: false,
+                message: 'Unable to validate address. Please provide a complete address or choose pickup.',
+                address: address,
+                reason: 'validation_error'
+            };
         }
+
+        console.log('Address validation result from Edge Function:', result);
         
-        // Calculate delivery time estimate
-        const estimatedDeliveryTime = (restaurant.preparation_time || 20) + (restaurant.delivery_time || 15);
-        
-        // SUCCESS: Address is valid for delivery
+        // Return the result from the Edge Function
         return {
-            valid: true,
-            message: 'Address validated successfully for delivery',
+            valid: result.valid || false,
+            message: result.message || 'Address validation completed',
             address: address,
-            estimated_delivery_time: estimatedDeliveryTime,
-            delivery_radius: restaurant.delivery_radius,
-            delivery_fee_info: 'Delivery fees may apply' // Could be enhanced with actual fee calculation
+            reason: result.reason,
+            estimated_delivery_time: result.estimated_delivery_time,
+            delivery_radius: result.delivery_radius,
+            delivery_fee_info: result.delivery_fee_info,
+            next_available: result.next_available
         };
         
     } catch (error) {
-        console.error('Error validating delivery address:', error);
+        console.error('Error calling validate-delivery Edge Function:', error);
         return {
             valid: false,
             message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
@@ -1109,9 +1101,12 @@ ENHANCED INSTRUCTIONS FOR NEW ORDERS:
        '- PICKUP: Standard pickup order\n   - DELIVERY: Must validate address and check delivery hours'}
 3. For DELIVERY orders (only if delivery_enabled is true):
    - After getting their name and order items, ask for complete delivery address
-   - Use validate_delivery_address function with the full address
+   - When customer provides address, IMMEDIATELY call validate_delivery_address function
+   - CRITICAL: Pass the EXACT address the customer stated in the function call
+   - Example: If customer says "7800 Harford Road, Parkville, Maryland, 21234" 
+     call validate_delivery_address with address: "7800 Harford Road, Parkville, Maryland, 21234"
    - If address is VALID: IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
-   - If address is invalid, explain the issue and offer pickup instead
+   - If address is invalid, explain the specific issue and offer pickup instead
    - NEVER switch to pickup without customer's explicit agreement
 4. For PICKUP orders:
    - After getting their name, take the order items
@@ -1200,13 +1195,13 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate if a delivery address is within the restaurant's delivery area and delivery hours. REQUIRED for all delivery orders. Checks delivery_enabled, delivery_hours, delivery_radius, and address format.",
+                            description: "Validate if a delivery address is within the restaurant's delivery area and delivery hours. REQUIRED for all delivery orders. CRITICAL: Always pass the complete address that the customer provided as the 'address' parameter.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "Complete delivery address including street number, street name, city, state, and zip code"
+                                        description: "REQUIRED: The complete delivery address exactly as the customer stated it, including street number, street name, city, state, and zip code (e.g., '7800 Harford Road, Parkville, Maryland, 21234')"
                                     }
                                 },
                                 required: ["address"]
@@ -1466,26 +1461,53 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         console.log('No address in arguments, searching conversation for address...');
                         const recentCustomer = conversationTranscript
                             .filter(m => m.speaker === 'Customer')
-                            .slice(-3)
+                            .slice(-5) // Look at more recent messages
                             .map(m => m.text)
                             .join(' ');
                         
-                        const addressMatch = recentCustomer.match(/\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
-                        if (addressMatch) {
-                            address = recentCustomer;
-                            console.log('Found address in recent conversation:', address);
+                        console.log('Recent customer conversation for address search:', recentCustomer);
+                        
+                        // Enhanced address pattern matching
+                        const addressPatterns = [
+                            // Full address with numbers and common address words
+                            /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i,
+                            // Address with zip code
+                            /\d+\s+[\w\s,]+\d{5}/,
+                            // Any message with numbers, letters, and zip code pattern
+                            /\d+[\w\s,]+(?:maryland|md)[\w\s,]*\d{5}/i
+                        ];
+                        
+                        for (const pattern of addressPatterns) {
+                            const addressMatch = recentCustomer.match(pattern);
+                            if (addressMatch) {
+                                address = addressMatch[0].trim();
+                                console.log('Found address using pattern:', pattern, 'Result:', address);
+                                break;
+                            }
+                        }
+                        
+                        // If still no address found, try the full customer message
+                        if (!address && recentCustomer.includes(',') && /\d/.test(recentCustomer)) {
+                            address = recentCustomer.trim();
+                            console.log('Using full customer message as address:', address);
                         }
                     }
                     
                     console.log('Validating delivery address with enhanced controls:', address);
+                    console.log('Current conversation transcript:', JSON.stringify(conversationTranscript.slice(-3), null, 2));
                     
                     if (!address) {
                         result = { 
                             valid: false,
                             message: 'No address provided. Please provide a complete delivery address including street number, street name, city, state, and zip code.',
                             address: null,
-                            reason: 'no_address_provided'
+                            reason: 'no_address_provided',
+                            debug_info: {
+                                parsed_args: parsedArgs,
+                                recent_conversation: conversationTranscript.slice(-3).map(t => t.text)
+                            }
                         };
+                        console.log('Address validation failed - no address found:', result);
                         break;
                     }
                     
