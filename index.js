@@ -918,12 +918,13 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         
                     case 'response.function_call_done':
                         console.log('Function call completed:', response.name);
-                        handleFunctionCall(response);
+                        // Don't handle here to avoid duplicate calls
                         break;
                         
                     case 'conversation.item.created':
-                        if (response.item?.type === 'function_call') {
+                        if (response.item?.type === 'function_call' && response.item.call_id) {
                             console.log('Function call item created:', response.item.name);
+                            // Only handle if we have a call_id
                             handleFunctionCall(response.item);
                         }
                         break;
@@ -959,7 +960,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
         });
     }
 
-    // Handle function calls from OpenAI
+    // FIXED: Handle function calls from OpenAI - properly capture delivery address
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -967,19 +968,40 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
             let parsedArgs = {};
 
             console.log(`Executing function: ${name}`);
+            console.log('Raw function call object:', JSON.stringify(functionCall, null, 2));
 
+            // FIXED: Better argument parsing
             if (!args || args === '') {
+                console.log('No arguments provided, using defaults');
                 parsedArgs = {};
             } else if (typeof args === 'string') {
                 try {
-                    parsedArgs = JSON.parse(args);
+                    // Clean the string first - remove any extra whitespace or newlines
+                    const cleanedArgs = args.trim().replace(/\n/g, ' ').replace(/\s+/g, ' ');
+                    parsedArgs = JSON.parse(cleanedArgs);
                 } catch (e) {
                     console.error('Error parsing JSON arguments:', e);
-                    parsedArgs = { raw: args };
+                    console.log('Raw args string:', args);
+                    
+                    // Try to extract address from string directly if JSON parsing fails
+                    if (name === 'validate_delivery_address') {
+                        // Look for address pattern in the string
+                        const addressMatch = args.match(/["']?address["']?\s*:\s*["']([^"']+)["']/);
+                        if (addressMatch) {
+                            parsedArgs = { address: addressMatch[1] };
+                        } else {
+                            // If no JSON structure found, use the whole string as address
+                            parsedArgs = { address: args };
+                        }
+                    } else {
+                        parsedArgs = { raw: args };
+                    }
                 }
-            } else {
+            } else if (typeof args === 'object') {
                 parsedArgs = args;
             }
+
+            console.log('Parsed function arguments:', parsedArgs);
 
             switch (name) {
                 case 'search_recent_orders':
@@ -1043,41 +1065,87 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     break;
 
                 case 'validate_delivery_address':
+                    // FIXED: Properly handle address extraction
                     let address = parsedArgs.address;
                     
-                    if (!address) {
-                        const recentCustomer = conversationTranscript
-                            .filter(m => m.speaker === 'Customer')
-                            .slice(-3)
-                            .map(m => m.text)
-                            .join(' ');
+                    // If no address in arguments, try to find it from recent conversation
+                    if (!address || address === 'undefined' || address === undefined) {
+                        console.log('No valid address in arguments, searching conversation for address...');
                         
-                        const addressMatch = recentCustomer.match(/\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
-                        if (addressMatch) {
-                            address = recentCustomer;
+                        // Look in the last few customer messages for an address
+                        const recentCustomerMessages = conversationTranscript
+                            .filter(m => m.speaker === 'Customer')
+                            .slice(-5); // Look at last 5 customer messages
+                        
+                        console.log('Recent customer messages:', recentCustomerMessages);
+                        
+                        // Try to find address patterns in recent messages
+                        for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
+                            const msgText = recentCustomerMessages[i].text;
+                            console.log(`Checking message: "${msgText}"`);
+                            
+                            // Look for street addresses with numbers
+                            const streetPattern = /\d+\s+[\w\s]+(?:road|rd|street|st|avenue|ave|drive|dr|lane|ln|way|court|ct|place|pl|boulevard|blvd)/i;
+                            const hasStreetAddress = streetPattern.test(msgText);
+                            
+                            // Look for zip codes
+                            const hasZipCode = /\d{5}/.test(msgText);
+                            
+                            // Look for state abbreviations or full state names
+                            const hasState = /\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|Maryland|maryland)\b/i.test(msgText);
+                            
+                            // If message looks like it contains address components, use it
+                            if (hasStreetAddress || (hasZipCode && msgText.length > 10)) {
+                                address = msgText;
+                                console.log('Found potential address in conversation:', address);
+                                break;
+                            }
+                            
+                            // Also check if the message is just after "What's your delivery address?"
+                            if (i > 0 && conversationTranscript[conversationTranscript.indexOf(recentCustomerMessages[i]) - 1]?.text?.toLowerCase().includes('delivery address')) {
+                                address = msgText;
+                                console.log('Found address as response to delivery address question:', address);
+                                break;
+                            }
+                        }
+                        
+                        // If still no address found, check the most recent customer message specifically
+                        if (!address) {
+                            const lastCustomerMessage = recentCustomerMessages[recentCustomerMessages.length - 1];
+                            if (lastCustomerMessage) {
+                                console.log('Using last customer message as address:', lastCustomerMessage.text);
+                                address = lastCustomerMessage.text;
+                            }
                         }
                     }
                     
-                    console.log('Validating delivery address:', address);
+                    console.log('Final address to validate:', address);
                     
-                    if (!address) {
+                    if (!address || address === 'undefined') {
                         result = { 
                             valid: false,
-                            message: 'No address provided.',
-                            address: null
+                            message: 'I didn\'t catch your address. Could you please repeat your complete delivery address including street number, street name, city, state, and zip code?',
+                            address: null,
+                            needs_retry: true
                         };
                         break;
                     }
                     
+                    // Call the validation function
                     const validationResult = await validateDeliveryAddress(address, restaurant);
                     
+                    // FIXED: Store the address if validation was successful
                     if (validationResult.valid) {
-                        capturedDeliveryAddress = validationResult.address;
-                        console.log('DELIVERY ADDRESS CAPTURED:', capturedDeliveryAddress);
-                        validationResult.instruction = 'Address is valid! Output ORDER_CONFIRMED format now.';
+                        capturedDeliveryAddress = validationResult.address || address;
+                        console.log('DELIVERY ADDRESS CAPTURED AND VALIDATED:', capturedDeliveryAddress);
+                        
+                        // Add instruction to output ORDER_CONFIRMED format
+                        validationResult.instruction = 'CRITICAL: Address is valid! You MUST now output the ORDER_CONFIRMED format immediately with all the order details including this address: ' + capturedDeliveryAddress + ', THEN provide verbal confirmation to the customer. Without the ORDER_CONFIRMED format, the order will NOT be saved!';
+                        validationResult.captured_address = capturedDeliveryAddress;
                     }
                     
                     result = validationResult;
+                    console.log('Address validation result:', result);
                     break;
 
                 case 'cancel_order':
@@ -1149,6 +1217,21 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     result = { error: `Unknown function: ${name}` };
             }
 
+            // FIXED: Don't send response immediately to avoid race condition
+            // Wait for OpenAI to be ready
+            const waitForReady = () => {
+                return new Promise((resolve) => {
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        resolve();
+                    } else {
+                        setTimeout(() => waitForReady().then(resolve), 100);
+                    }
+                });
+            };
+
+            await waitForReady();
+
+            // Send the function result back to OpenAI
             const functionResponse = {
                 type: 'conversation.item.create',
                 item: {
@@ -1162,30 +1245,43 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                 openaiWs.send(JSON.stringify(functionResponse));
                 console.log('Function result sent back to OpenAI');
                 
+                // FIXED: Only trigger response if no error occurred
+                // Add a longer delay to ensure OpenAI processes the function result
                 setTimeout(() => {
-                    const responseMessage = {
-                        type: 'response.create'
-                    };
+                    // Check if OpenAI is ready for a new response
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const responseMessage = {
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text']
+                            }
+                        };
                         openaiWs.send(JSON.stringify(responseMessage));
+                        console.log('Triggered response generation');
                     }
-                }, 100);
+                }, 500); // Increased delay to 500ms
             }
 
         } catch (error) {
             console.error('Error handling function call:', error);
+            console.error('Stack trace:', error.stack);
             
+            // Send error response back to OpenAI
             const errorResponse = {
                 type: 'conversation.item.create',
                 item: {
                     type: 'function_call_output',
                     call_id: functionCall.call_id || 'unknown',
-                    output: JSON.stringify({ error: error.message })
+                    output: JSON.stringify({ 
+                        error: error.message,
+                        instruction: 'An error occurred. Please try again or ask the customer to repeat their information.'
+                    })
                 }
             };
 
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify(errorResponse));
+                console.log('Error response sent to OpenAI');
             }
         }
     }
