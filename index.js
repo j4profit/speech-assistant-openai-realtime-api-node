@@ -630,94 +630,33 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// Function to validate delivery address with direct database calls
+// Function to validate delivery address using edge function
 async function validateDeliveryAddress(address, restaurant) {
     try {
-        console.log('Validating delivery address:', address);
+        console.log('Validating delivery address via edge function:', address);
         
-        if (!address || !restaurant) {
-            return {
-                valid: false,
-                message: 'Address and restaurant information are required',
-                address: null
-            };
-        }
+        const { data, error } = await supabase.functions.invoke('validate-delivery', {
+            body: { 
+                address: address,
+                restaurant_id: restaurant.id
+            }
+        });
 
-        if (!restaurant.delivery_enabled) {
+        if (error) {
+            console.error('Edge function error:', error);
             return {
                 valid: false,
-                message: 'Delivery is not available for this restaurant',
+                message: 'Unable to validate address. Please provide a complete address or choose pickup.',
                 address: address
             };
         }
 
-        // Basic address validation
-        const hasStreetNumber = /\d+/.test(address);
-        const hasStreetName = /(street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|court|ct|place|pl|boulevard|blvd)/i.test(address);
-        const hasZipCode = /\d{5}/.test(address);
-        
-        if (!hasStreetNumber || !hasStreetName) {
-            return {
-                valid: false,
-                message: 'Please provide a complete street address with street number and name',
-                address: address,
-                needs_retry: true
-            };
-        }
-
-        // Check delivery zones if they exist
-        const { data: deliveryZones } = await supabase
-            .from('delivery_zones')
-            .select('*')
-            .eq('restaurant_id', restaurant.id)
-            .eq('active', true);
-
-        if (deliveryZones && deliveryZones.length > 0) {
-            // Check if address is in any delivery zone
-            let inDeliveryZone = false;
-            
-            for (const zone of deliveryZones) {
-                if (zone.zip_codes && hasZipCode) {
-                    const addressZip = address.match(/\d{5}/)?.[0];
-                    if (addressZip && zone.zip_codes.includes(addressZip)) {
-                        inDeliveryZone = true;
-                        break;
-                    }
-                }
-                
-                if (zone.cities && zone.cities.length > 0) {
-                    for (const city of zone.cities) {
-                        if (address.toLowerCase().includes(city.toLowerCase())) {
-                            inDeliveryZone = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (!inDeliveryZone) {
-                return {
-                    valid: false,
-                    message: `Sorry, we don't deliver to that area. Our delivery radius is ${restaurant.delivery_radius_miles || 5} miles from the restaurant.`,
-                    address: address
-                };
-            }
-        }
-
-        // If we get here, the address appears valid
-        return {
-            valid: true,
-            message: 'Address is valid for delivery',
-            address: address,
-            delivery_fee: restaurant.delivery_fee || 0,
-            estimated_time: '30-45 minutes'
-        };
-
+        return data;
     } catch (error) {
         console.error('Error validating delivery address:', error);
         return {
             valid: false,
-            message: 'Unable to validate address at this time',
+            message: 'Unable to validate address. Please provide a complete address or choose pickup.',
             address: address
         };
     }
