@@ -1165,18 +1165,22 @@ ENHANCED INSTRUCTIONS FOR NEW ORDERS:
        '- PICKUP ONLY: Explain we only offer pickup, no delivery service' :
        '- PICKUP: Standard pickup order\n   - DELIVERY: Must validate address and check delivery hours'}
 3. For DELIVERY orders (only if delivery_enabled is true):
-   - After getting their name and order items, ask for complete delivery address
-   - When customer provides address, IMMEDIATELY call validate_delivery_address function
-   - CRITICAL: Pass the EXACT address the customer stated in the function call
-   - Example: If customer says "7800 Harford Road, Parkville, Maryland, 21234" 
-     call validate_delivery_address with address: "7800 Harford Road, Parkville, Maryland, 21234"
-   - If address is VALID: IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
-   - If address is invalid, explain the specific issue and offer pickup instead
-   - NEVER switch to pickup without customer's explicit agreement
+   - After getting their name and order items, ask: "What's your complete delivery address including zip code?"
+   - WAIT for the customer to provide an address that contains numbers, street name, and zip code
+   - When customer provides address, IMMEDIATELY call validate_delivery_address function with the EXACT address they said
+   - CRITICAL: If the function returns valid=true, IMMEDIATELY create the order with ORDER_CONFIRMED format
+   - If the function returns valid=false, explain the specific reason and offer pickup
+   - NEVER ask for the address again if validation was successful
 4. For PICKUP orders:
    - After getting their name, take the order items
    - Confirm pickup time preferences
    - IMMEDIATELY output the ORDER_CONFIRMED format, THEN give verbal confirmation
+
+CRITICAL FUNCTION USAGE RULES:
+- validate_delivery_address function: ONLY call when you have a complete address with numbers and zip code
+- If the function returns "valid": true, the address is GOOD - proceed with order creation
+- If the function returns "valid": false, the address has problems - explain why and offer pickup
+- NEVER ignore function results - trust the validation response
 
 DELIVERY VALIDATION REQUIREMENTS:
 - ALWAYS use validate_delivery_address function for delivery orders
@@ -1260,13 +1264,13 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate if a delivery address is within the restaurant's delivery area and delivery hours. REQUIRED for all delivery orders. CRITICAL: Always pass the complete address that the customer provided as the 'address' parameter.",
+                            description: "Validate if a delivery address is within the restaurant's delivery area. CRITICAL: When this function returns 'valid: true', the address is APPROVED and you should immediately proceed to create the order using ORDER_CONFIRMED format. Do NOT ask for the address again if validation succeeds.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "REQUIRED: The complete delivery address exactly as the customer stated it, including street number, street name, city, state, and zip code (e.g., '7800 Harford Road, Parkville, Maryland, 21234')"
+                                        description: "The complete delivery address the customer provided. Include street number, street name, city, state, and zip code. Example: '7805 Old Harford Road, Parkville, Maryland, 21234'"
                                     }
                                 },
                                 required: ["address"]
@@ -1532,29 +1536,47 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         
                         console.log('Recent customer conversation for address search:', recentCustomer);
                         
-                        // Enhanced address pattern matching
+                        // Enhanced address pattern matching - look for the most recent address
                         const addressPatterns = [
                             // Full address with numbers and common address words
-                            /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i,
-                            // Address with zip code
+                            /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*(?:maryland|md)[\w\s,]*\d{5}/i,
+                            // Simplified road pattern with zip
+                            /\d+\s+[\w\s]+(?:road|rd)[\w\s,]*\d{5}/i,
+                            // Any address with zip code
                             /\d+\s+[\w\s,]+\d{5}/,
-                            // Any message with numbers, letters, and zip code pattern
-                            /\d+[\w\s,]+(?:maryland|md)[\w\s,]*\d{5}/i
+                            // Basic street address pattern
+                            /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i
                         ];
                         
                         for (const pattern of addressPatterns) {
                             const addressMatch = recentCustomer.match(pattern);
                             if (addressMatch) {
                                 address = addressMatch[0].trim();
+                                // Clean up the address
+                                address = address.replace(/\.$/, ''); // Remove trailing period
                                 console.log('Found address using pattern:', pattern, 'Result:', address);
                                 break;
                             }
                         }
                         
-                        // If still no address found, try the full customer message
-                        if (!address && recentCustomer.includes(',') && /\d/.test(recentCustomer)) {
-                            address = recentCustomer.trim();
-                            console.log('Using full customer message as address:', address);
+                        // If still no address found, check if the last customer message looks like an address
+                        if (!address) {
+                            const lastCustomerMessage = conversationTranscript
+                                .filter(m => m.speaker === 'Customer')
+                                .pop()?.text || '';
+                            
+                            // Check if it contains numbers, letters, and common address indicators
+                            if (/\d+/.test(lastCustomerMessage) && 
+                                /\d{5}/.test(lastCustomerMessage) &&
+                                (lastCustomerMessage.toLowerCase().includes('road') || 
+                                 lastCustomerMessage.toLowerCase().includes('street') ||
+                                 lastCustomerMessage.toLowerCase().includes('ave') ||
+                                 lastCustomerMessage.toLowerCase().includes('dr') ||
+                                 lastCustomerMessage.toLowerCase().includes('maryland') ||
+                                 lastCustomerMessage.toLowerCase().includes('md'))) {
+                                address = lastCustomerMessage.trim().replace(/\.$/, '');
+                                console.log('Using last customer message as address:', address);
+                            }
                         }
                     }
                     
@@ -1582,10 +1604,14 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         capturedDeliveryAddress = validationResult.address;
                         console.log('DELIVERY ADDRESS CAPTURED:', capturedDeliveryAddress);
                         
-                        validationResult.instruction = 'CRITICAL: Address is valid for delivery! You MUST now output the ORDER_CONFIRMED format immediately with all the order details, THEN provide verbal confirmation to the customer. Without the ORDER_CONFIRMED format, the order will NOT be saved!';
+                        validationResult.instruction = 'SUCCESS: Address is valid for delivery! Do NOT ask for the address again. Proceed immediately to ORDER_CONFIRMED format with all order details, then provide verbal confirmation to the customer.';
                         validationResult.delivery_time_info = `Estimated delivery time: ${validationResult.estimated_delivery_time || ((restaurant.preparation_time || 20) + (restaurant.delivery_time || 15))} minutes`;
+                        validationResult.action_required = 'CREATE_ORDER_NOW';
+                        validationResult.status = 'APPROVED';
                     } else {
                         console.log('Delivery address validation failed:', validationResult.reason);
+                        validationResult.action_required = 'ASK_FOR_PICKUP_OR_NEW_ADDRESS';
+                        validationResult.status = 'REJECTED';
                     }
                     
                     result = validationResult;
