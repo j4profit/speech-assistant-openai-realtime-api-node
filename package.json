@@ -1,11 +1,11 @@
 {
-  "name": "restaurant-ai-voice-agent",
+  "name": "Ring2Serv Voice Answering Service",
   "version": "1.0.0",
-  "description": "Multi-tenant OpenAI voice agent for restaurant ordering",
-  "main": "server.js",
+  "description": "Multi-tenant voice agent for restaurant ordering",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
