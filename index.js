@@ -53,6 +53,763 @@ app.post('/voice', async (req, res) => {
         call_started_at: new Date().toISOString(),
         twilio_data: req.body,
         restaurant_id: null
+    // Enhanced function call handler with delivery controls
+    async function handleFunctionCall(functionCall) {
+        try {
+            const { name, call_id, arguments: args } = functionCall;
+            let result = null;
+            let parsedArgs = {};
+
+            console.log(`Executing function: ${name}`);
+            console.log('Raw function call object:', JSON.stringify(functionCall, null, 2));
+
+            if (!args || args === '') {
+                console.log('No arguments provided, using defaults');
+                parsedArgs = {};
+            // Process message from AI transcript
+    async function processMessageFromTranscript(transcript) {
+        try {
+            if (messageProcessed) {
+                console.log('Message already processed, skipping duplicate');
+                return;
+            }
+            
+            console.log('Processing customer message from transcript...');
+            console.log('Full transcript:', transcript);
+            
+            if (!transcript.includes('MESSAGE_CONFIRMED')) {
+                console.log('MESSAGE_CONFIRMED not found in transcript');
+                return;
+            }
+            
+            if (!transcript.includes('MESSAGE_END')) {
+                console.log('MESSAGE_END not found in transcript - message may be incomplete');
+                return;
+            }
+            
+            let messageSection = '';
+            
+            let startIdx = transcript.indexOf('MESSAGE_CONFIRMED:');
+            if (startIdx === -1) {
+                startIdx = transcript.indexOf('MESSAGE_CONFIRMED');
+                if (startIdx !== -1) {
+                    startIdx += 'MESSAGE_CONFIRMED'.length;
+                }
+            } else {
+                startIdx += 'MESSAGE_CONFIRMED:'.length;
+            }
+            
+            const endIdx = transcript.indexOf('MESSAGE_END');
+            
+            if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+                messageSection = transcript.substring(startIdx, endIdx).trim();
+                console.log('Extracted message section:', messageSection);
+            } else {
+                console.log('Could not extract valid message section');
+                console.log('Start index:', startIdx, 'End index:', endIdx);
+                return;
+            }
+            
+            const messageData = parseMessageData(messageSection);
+            
+            if (!messageData.customer_name && !messageData.message_content) {
+                console.log('Message lacks required data (name or content), skipping');
+                return;
+            }
+            
+            messageData.restaurant_id = restaurant.id;
+            messageData.customer_phone = customerPhone;
+            messageData.call_sid = callSid;
+            
+            console.log('Final message data to save:', messageData);
+            
+            const message = await createCustomerMessage(messageData);
+            if (message) {
+                console.log('Customer message saved successfully with ID:', message.id);
+                messageProcessed = true;
+                
+                if (callSid) {
+                    await updateCallLog(callSid, { 
+                        conversation_transcript: JSON.stringify(conversationTranscript)
+                    });
+                }
+            } else {
+                console.error('Failed to save customer message to database');
+            }
+        } catch (error) {
+            console.error('Error processing customer message:', error);
+            console.error('Stack trace:', error.stack);
+        }
+    }
+
+    // Parse message data from transcript
+    function parseMessageData(messageText) {
+        const lines = messageText.split('\n').map(line => line.trim()).filter(line => line);
+        
+        const messageData = {
+            customer_name: '',
+            message_type: 'general',
+            subject: '',
+            message_content: '',
+            priority: 'normal'
+        };
+        
+        for (const line of lines) {
+            const cleanLine = line.replace(/\*\*/g, '').replace(/^-\s*/, '');
+            
+            if (cleanLine.toLowerCase().includes('customer name:')) {
+                messageData.customer_name = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('message type:')) {
+                messageData.message_type = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('subject:')) {
+                messageData.subject = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('message:') && !cleanLine.toLowerCase().includes('message type:')) {
+                messageData.message_content = cleanLine.split(':').slice(1).join(':').trim();
+            } else if (cleanLine.toLowerCase().includes('priority:')) {
+                messageData.priority = cleanLine.split(':').slice(1).join(':').trim();
+            }
+        }
+        
+        Object.keys(messageData).forEach(key => {
+            if (typeof messageData[key] === 'string') {
+                messageData[key] = messageData[key].replace(/\*\*/g, '').trim();
+            }
+        });
+        
+        console.log('Parsed message data:', messageData);
+        return messageData;
+    }
+
+    // Enhanced process order from AI transcript with delivery controls
+    async function processOrderFromTranscript(transcript) {
+        try {
+            if (isModificationCall) {
+                console.log('BLOCKING ORDER CREATION - This is a modification call, not a new order');
+                return;
+            }
+            
+            const fullConversation = conversationTranscript.map(msg => msg.text).join(' ').toLowerCase();
+            const hasModificationContext = 
+                fullConversation.includes('fix my') ||
+                fullConversation.includes('change my order') || 
+                fullConversation.includes('modify my order') || 
+                fullConversation.includes('update my order') ||
+                fullConversation.includes('add another') ||
+                fullConversation.includes('add to my order') ||
+                fullConversation.includes('cancel my order') ||
+                fullConversation.includes('found a pending order') ||
+                fullConversation.includes('found 1 pending order') ||
+                fullConversation.includes('your existing order');
+            
+            if (hasModificationContext) {
+                console.log('BLOCKING ORDER CREATION - Modification context detected in conversation');
+                return;
+            }
+            
+            if (recentOrders && recentOrders.length > 0) {
+                console.log('BLOCKING ORDER CREATION - Recent orders exist from search, should be modifying instead');
+                return;
+            }
+            
+            if (orderProcessed) {
+                console.log('Order already processed, skipping duplicate');
+                return;
+            }
+            
+            console.log('Processing NEW order from transcript...');
+            
+            if (transcript.includes('ORDER_CONFIRMED:') && transcript.includes('ORDER_END')) {
+                orderProcessed = true;
+                console.log('Order processing started, flag set to prevent duplicates');
+                
+                const orderSection = transcript.substring(
+                    transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
+                    transcript.indexOf('ORDER_END')
+                ).trim();
+                
+                console.log('Found structured order:', orderSection);
+                
+                let customerName = '';
+                let items = '';
+                let specialInstructions = '';
+                let orderType = 'pickup';
+                let deliveryAddress = null;
+                let readyTime = '';
+                let totalAmount = 0;
+                
+                const lines = orderSection.split('\n').map(line => line.trim());
+                
+                for (const line of lines) {
+                    if (line.startsWith('- Customer Name:') || line.startsWith('Customer Name:')) {
+                        customerName = line.substring(line.indexOf(':') + 1).trim();
+                        customerName = customerName.replace(/\[.*?\]/g, '').trim();
+                    } else if (line.startsWith('- Order Type:') || line.startsWith('Order Type:')) {
+                        orderType = line.substring(line.indexOf(':') + 1).trim().toLowerCase();
+                    } else if (line.startsWith('- Delivery Address:') || line.startsWith('Delivery Address:')) {
+                        const addr = line.substring(line.indexOf(':') + 1).trim();
+                        if (addr && addr.toLowerCase() !== 'n/a' && addr !== 'N/A') {
+                            deliveryAddress = addr;
+                        } else if (orderType === 'delivery' && capturedDeliveryAddress) {
+                            deliveryAddress = capturedDeliveryAddress;
+                            console.log('Using captured delivery address:', deliveryAddress);
+                        }
+                    } else if (line.startsWith('- Items:') || line.startsWith('Items:')) {
+                        items = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Special Instructions:') || line.startsWith('Special Instructions:')) {
+                        specialInstructions = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Ready Time:') || line.startsWith('Ready Time:') || 
+                              line.startsWith('- Pickup Time:') || line.startsWith('Pickup Time:')) {
+                        readyTime = line.substring(line.indexOf(':') + 1).trim();
+                    } else if (line.startsWith('- Total:') || line.startsWith('Total:')) {
+                        totalAmount = extractTotal(line);
+                    }
+                }
+                
+                // Enhanced validation for delivery orders
+                if (orderType === 'delivery') {
+                    // Check if restaurant supports delivery
+                    if (!restaurant.delivery_enabled) {
+                        console.error('BLOCKING ORDER CREATION - Attempted delivery order for restaurant without delivery enabled');
+                        orderProcessed = false;
+                        return;
+                    }
+                    
+                    // Check if we have a validated delivery address
+                    if (!deliveryAddress) {
+                        console.error('BLOCKING ORDER CREATION - Delivery order without valid delivery address');
+                        orderProcessed = false;
+                        return;
+                    }
+                    
+                    // Check delivery hours
+                    if (restaurant.delivery_hours) {
+                        const deliveryStatus = await isWithinDeliveryHours(restaurant.delivery_hours);
+                        if (!deliveryStatus.within) {
+                            console.error('BLOCKING ORDER CREATION - Attempted delivery order outside delivery hours');
+                            orderProcessed = false;
+                            return;
+                        }
+                    }
+                }
+                
+                if (!customerName || customerName === 'Not provided' || customerName === '[name if provided]') {
+                    console.log('WARNING: Customer name not captured properly');
+                    const nameConversation = conversationTranscript.filter(m => m.speaker === 'Customer');
+                    for (const msg of nameConversation) {
+                        const nameMatch = msg.text.match(/(?:my name is|this is|i'm|i am)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+                        if (nameMatch) {
+                            customerName = nameMatch[1];
+                            console.log('Found customer name from conversation:', customerName);
+                            break;
+                        }
+                    }
+                }
+                
+                // Calculate ready time with enhanced delivery controls
+                const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
+                
+                // Build comprehensive order details with delivery information
+                const formattedOrderDetails = `Customer: ${customerName || 'Not provided'}
+Phone: ${customerPhone}
+Order Type: ${orderType}
+${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress || 'Not provided'}` : 'Pickup'}
+${orderType === 'delivery' ? `Estimated Delivery Time: ${timing.totalMinutes} minutes (${timing.preparationMinutes}min prep + ${timing.deliveryMinutes}min delivery)` : `Estimated Pickup Time: ${timing.preparationMinutes} minutes`}
+Items: ${items || 'No items specified'}
+Special Instructions: ${specialInstructions || 'None'}
+Ready Time: ${readyTime || timing.readyTimeString}
+Order taken via AI phone system`;
+
+                const orderData = {
+                    restaurant_id: restaurant.id,
+                    customer_phone: customerPhone,
+                    customer_name: customerName || null,
+                    total_amount: totalAmount || extractTotal(orderSection) || 0,
+                    order_type: orderType,
+                    delivery_address: deliveryAddress,
+                    order_details: formattedOrderDetails,
+                    special_instructions: specialInstructions || '',
+                    call_sid: callSid,
+                    items: []
+                };
+
+                console.log('Final order data to save with delivery controls:', orderData);
+
+                const order = await createOrder(orderData);
+                if (order) {
+                    console.log('NEW order saved successfully with ID:', order.id);
+                    console.log('Order type:', order.order_type);
+                    if (order.order_type === 'delivery') {
+                        console.log('Delivery address:', order.delivery_address);
+                        console.log('Estimated delivery time:', timing.totalMinutes, 'minutes');
+                    }
+                    
+                    capturedDeliveryAddress = null;
+                    
+                    if (callSid) {
+                        await updateCallLog(callSid, { order_id: order.id });
+                    }
+                } else {
+                    orderProcessed = false;
+                    console.log('Order creation failed, resetting flag');
+                }
+            }
+        } catch (error) {
+            console.error('Error processing order:', error);
+            orderProcessed = false;
+        }
+    }
+
+    // Extract total amount from text
+    function extractTotal(text) {
+        try {
+            const totalMatch = text.match(/Total:\s*\$(\d+\.?\d*)/);
+            if (totalMatch) {
+                return parseFloat(totalMatch[1]);
+            }
+            
+            const dollarPattern = /\$(\d+\.?\d*)/g;
+            const matches = text.match(dollarPattern);
+            
+            if (matches && matches.length > 0) {
+                let sum = 0;
+                for (let i = 0; i < matches.length; i++) {
+                    const amount = matches[i].substring(1);
+                    sum += parseFloat(amount);
+                }
+                return sum;
+            }
+            
+            return 0;
+        } catch (err) {
+            console.error('Error in extractTotal:', err);
+            return 0;
+        }
+    }
+
+    // Process call end
+    async function processCallEnd() {
+        try {
+            console.log('=== CALL END PROCESSING START ===');
+            console.log('Order already processed:', orderProcessed);
+            console.log('Message already processed:', messageProcessed);
+            console.log('Was modification call:', isModificationCall);
+            
+            if (callSid) {
+                const transcript = JSON.stringify(conversationTranscript);
+                await updateCallLog(callSid, { 
+                    conversation_transcript: transcript
+                });
+                console.log('Call log updated with conversation transcript');
+            }
+            
+            console.log('=== CALL END PROCESSING COMPLETE - No fallback orders created ===');
+            
+        } catch (error) {
+            console.error('Error in processCallEnd:', error);
+        }
+        return null;
+    }
+    
+    // Handle WebSocket messages from Twilio
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message);
+            
+            switch (data.event) {
+                case 'connected':
+                    console.log('Twilio connected');
+                    break;
+                    
+                case 'start':
+                    streamSid = data.start.streamSid;
+                    
+                    const calledNumber = data.start.customParameters?.Called || 
+                                       data.start.customParameters?.To;
+                    
+                    const fromNumber = data.start.customParameters?.From ||
+                                      data.start.customParameters?.Caller;
+                    
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
+                    
+                    console.log('Stream started:', streamSid);
+                    console.log('Called number:', calledNumber);
+                    console.log('From number:', fromNumber);
+                    console.log('Call ID:', callId);
+                    
+                    initializeOpenAI(calledNumber, fromNumber, callId);
+                    break;
+                    
+                case 'media':
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const audioData = {
+                            type: 'input_audio_buffer.append',
+                            audio: data.media.payload
+                        };
+                        openaiWs.send(JSON.stringify(audioData));
+                    }
+                    break;
+                    
+                case 'stop':
+                    console.log('Stream stopped');
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.close();
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Error processing Twilio message:', error);
+        }
+    });
+    
+    ws.on('close', async () => {
+        console.log('Twilio connection closed');
+        
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
+        
+        await processCallEnd();
+        
+        if (callSid) {
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration
+            };
+            
+            await updateCallLog(callSid, updateData);
+            console.log(`Call completed. Duration: ${callDuration} seconds`);
+        }
+        
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('Twilio WebSocket error:', error);
+    });
+});
+
+wss.on('error', (error) => {
+    console.error('WebSocket Server error:', error);
+});
+
+server.listen(port, '0.0.0.0', () => {
+    console.log(`Restaurant AI System with Enhanced Delivery Controls running on port ${port}`);
+    console.log(`Ready to take orders and messages via phone calls`);
+    console.log(`WebSocket ready for Twilio Media Streams`);
+    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
+    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+    console.log(`Delivery controls enabled for restaurant management`);
+}); else if (typeof args === 'string') {
+                try {
+                    parsedArgs = JSON.parse(args);
+                } catch (e) {
+                    console.error('Error parsing JSON arguments, using as string:', e);
+                    parsedArgs = { raw: args };
+                }
+            } else {
+                parsedArgs = args;
+            }
+
+            console.log('Parsed function arguments:', parsedArgs);
+
+            switch (name) {
+                case 'search_recent_orders':
+                    const phoneNumber = parsedArgs.phone_number || customerPhone;
+                    console.log('Searching PENDING orders for phone:', phoneNumber);
+                    
+                    if (!phoneNumber) {
+                        result = { error: 'No phone number available to search orders' };
+                        break;
+                    }
+                    
+                    const orders = await searchRecentOrders(phoneNumber, restaurant.id);
+                    recentOrders = orders;
+                    
+                    if (orders.length > 0) {
+                        const recentCustomerText = conversationTranscript
+                            .filter(m => m.speaker === 'Customer')
+                            .slice(-5)
+                            .map(m => m.text)
+                            .join(' ')
+                            .toLowerCase();
+                        
+                        const modificationTriggers = [
+                            'fix', 'change', 'modify', 'update', 'adjust',
+                            'add to', 'add another', 'correct', 'edit',
+                            'cancel', 'remove', 'delete', 'alter'
+                        ];
+                        
+                        const hasModificationIntent = modificationTriggers.some(trigger => 
+                            recentCustomerText.includes(trigger)
+                        );
+                        
+                        if (hasModificationIntent) {
+                            isModificationCall = true;
+                            console.log('MODIFICATION CALL DETECTED - Found orders + modification intent');
+                        }
+                    }
+                    
+                    result = {
+                        orders: orders.map(order => ({
+                            id: order.id,
+                            created_at: new Date(order.created_at).toLocaleDateString(),
+                            status: order.status,
+                            total: order.total_amount,
+                            order_type: order.order_type,
+                            delivery_address: order.delivery_address,
+                            items: order.order_items?.map(item => ({
+                                name: item.menu_items?.name || 'Item',
+                                quantity: item.quantity,
+                                price: item.price,
+                                special_requests: item.special_requests
+                            })) || [],
+                            customer_name: order.customer_name,
+                            order_details: order.order_details
+                        })),
+                        count: orders.length,
+                        phone_searched: phoneNumber,
+                        message: orders.length === 0 
+                            ? 'No pending orders found. I can take a message for the restaurant about your order issue.' 
+                            : `Found ${orders.length} pending order(s). Please tell me what changes you'd like to make.`,
+                        modification_required: orders.length > 0 ? true : false
+                    };
+                    console.log(`Found ${orders.length} pending orders for ${phoneNumber}`);
+                    break;
+
+                case 'validate_delivery_address':
+                    console.log('=== ADDRESS VALIDATION FUNCTION CALLED ===');
+                    console.log('Parsed arguments:', parsedArgs);
+                    
+                    let address = parsedArgs.address;
+                    
+                    // If no address in arguments, try to extract from conversation
+                    if (!address) {
+                        console.log('No address in function arguments, extracting from conversation...');
+                        address = extractAddressFromConversation(conversationTranscript);
+                        console.log('Extracted address from conversation:', address);
+                    }
+                    
+                    // If still no address, ask for it
+                    if (!address) {
+                        result = {
+                            valid: false,
+                            message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.',
+                            address: null,
+                            reason: 'no_address_provided',
+                            instruction: 'Ask customer for their complete delivery address.'
+                        };
+                        console.log('Address validation failed - no address found');
+                        break;
+                    }
+                    
+                    // Check if restaurant supports delivery
+                    if (!restaurant.delivery_enabled) {
+                        result = {
+                            valid: false,
+                            message: 'We only offer pickup orders. Delivery is not available.',
+                            address: address,
+                            reason: 'delivery_not_enabled',
+                            instruction: 'Offer pickup instead of delivery.'
+                        };
+                        console.log('Address validation failed - delivery not enabled');
+                        break;
+                    }
+                    
+                    console.log('Validating delivery address:', address);
+                    console.log('Restaurant delivery settings:', {
+                        delivery_enabled: restaurant.delivery_enabled,
+                        delivery_radius: restaurant.delivery_radius,
+                        delivery_hours: restaurant.delivery_hours,
+                        delivery_time: restaurant.delivery_time
+                    });
+                    
+                    const validationResult = await validateDeliveryAddress(address, restaurant);
+                    
+                    if (validationResult.valid) {
+                        capturedDeliveryAddress = address;
+                        console.log('DELIVERY ADDRESS VALIDATED AND CAPTURED:', capturedDeliveryAddress);
+                        
+                        // Enhanced successful validation response
+                        validationResult.instruction = 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately.';
+                        validationResult.delivery_time_info = `Estimated delivery time: ${validationResult.estimated_delivery_time || ((restaurant.preparation_time || 20) + (restaurant.delivery_time || 15))} minutes`;
+                        validationResult.action_required = 'CREATE_ORDER_NOW';
+                        validationResult.status = 'APPROVED';
+                        validationResult.confirmed_address = address;
+                    } else {
+                        console.log('Delivery address validation failed:', validationResult.reason);
+                        validationResult.action_required = 'OFFER_PICKUP_INSTEAD';
+                        validationResult.status = 'REJECTED';
+                    }
+                    
+                    result = validationResult;
+                    console.log('Final address validation result:', result);
+                    break;
+
+                case 'cancel_order':
+                    isModificationCall = true;
+                    let cancelOrderId = parsedArgs.order_id;
+                    const cancelReason = parsedArgs.reason || 'Customer requested cancellation';
+                    
+                    if (!cancelOrderId && recentOrders && recentOrders.length > 0) {
+                        console.log('WARNING: No order ID provided, attempting to use most recent order from search');
+                        cancelOrderId = recentOrders[0].id;
+                        
+                        result = {
+                            warning: 'No order ID was provided. Using the most recent order from search results.',
+                            retry_instruction: 'Please always extract and pass the order ID from search results when calling cancel_order.'
+                        };
+                    }
+                    
+                    if (!cancelOrderId) {
+                        result = { 
+                            error: 'No order ID provided and no recent orders found. You must first use search_recent_orders, then extract the order ID from the results.',
+                            instruction: 'Call search_recent_orders first, then use the "id" field from the results when calling cancel_order.'
+                        };
+                        console.error('Cancel order called without order ID and no recent orders available');
+                        break;
+                    }
+                    
+                    console.log(`Attempting to cancel order: ${cancelOrderId}`);
+                    const cancelResult = await cancelOrder(cancelOrderId, cancelReason);
+                    
+                    result = {
+                        success: !!cancelResult,
+                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order - order may not be pending or may not exist',
+                        order_id: cancelOrderId,
+                        status: cancelResult ? 'cancelled' : 'failed'
+                    };
+                    console.log(`Order cancellation result for ${cancelOrderId}:`, result.success);
+                    break;
+
+                case 'update_order':
+                    isModificationCall = true;
+                    let orderId = parsedArgs.order_id;
+                    let modifications = parsedArgs.modifications || 'Order modification requested';
+                    let newTotal = parsedArgs.new_total || 0;
+                    
+                    if (!orderId && recentOrders && recentOrders.length > 0) {
+                        console.log('WARNING: No order ID provided, attempting to use most recent order from search');
+                        orderId = recentOrders[0].id;
+                        
+                        result = {
+                            warning: 'No order ID was provided. Using the most recent order from search results.',
+                            retry_instruction: 'Please always extract and pass the order ID from search results when calling update_order.',
+                            attempting_with_id: orderId
+                        };
+                        
+                        if (orderId) {
+                            const updateData = {
+                                modifications: modifications,
+                                new_total: newTotal,
+                                restaurant_menu: restaurant.menu_items
+                            };
+                            
+                            const updateResult = await updateOrder(orderId, updateData);
+                            
+                            if (updateResult) {
+                                console.log('ORDER MODIFICATION SUCCESSFUL - Database updated');
+                            }
+                            
+                            result = {
+                                ...result,
+                                success: !!updateResult,
+                                message: updateResult 
+                                    ? `Order modified successfully. ${modifications}. New total: ${updateResult.total_amount}` 
+                                    : 'Failed to modify order',
+                                order_id: orderId,
+                                modifications: modifications,
+                                new_total: updateResult ? updateResult.total_amount : newTotal,
+                                status: updateResult ? 'modified' : 'failed',
+                                database_updated: !!updateResult
+                            };
+                            console.log(`Order modification result for ${orderId}:`, result.success);
+                            break;
+                        }
+                    }
+                    
+                    if (!orderId) {
+                        result = { 
+                            error: 'No order ID provided and no recent orders found. You must first use search_recent_orders, then extract the order ID from the results.'
+                        };
+                        console.error('Update order called without order ID and no recent orders available');
+                        break;
+                    }
+                    
+                    console.log(`Attempting to update order: ${orderId}`);
+                    console.log(`Modifications requested: ${modifications}`);
+                    console.log(`New total provided: ${newTotal}`);
+                    
+                    const updateData = {
+                        modifications: modifications,
+                        new_total: newTotal,
+                        restaurant_menu: restaurant.menu_items
+                    };
+                    
+                    const updateResult = await updateOrder(orderId, updateData);
+                    
+                    if (updateResult) {
+                        console.log('ORDER MODIFICATION SUCCESSFUL - Database updated');
+                    }
+                    
+                    result = {
+                        success: !!updateResult,
+                        message: updateResult 
+                            ? `Order modified successfully. ${modifications}. New total: ${updateResult.total_amount}` 
+                            : 'Failed to modify order - order may not be pending or may not exist',
+                        order_id: orderId,
+                        modifications: modifications,
+                        new_total: updateResult ? updateResult.total_amount : newTotal,
+                        status: updateResult ? 'modified' : 'failed',
+                        database_updated: !!updateResult
+                    };
+                    console.log(`Order modification result for ${orderId}:`, result.success);
+                    break;
+
+                default:
+                    result = { error: `Unknown function: ${name}` };
+            }
+
+            // Send the function result back to OpenAI
+            const functionResponse = {
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: call_id,
+                    output: JSON.stringify(result)
+                }
+            };
+
+            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify(functionResponse));
+                console.log('Function result sent back to OpenAI');
+                
+                setTimeout(() => {
+                    const responseMessage = {
+                        type: 'response.create'
+                    };
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.send(JSON.stringify(responseMessage));
+                    }
+                }, 100);
+            }
+
+        } catch (error) {
+            console.error('Error handling function call:', error);
+            
+            const errorResponse = {
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: functionCall.call_id || 'unknown',
+                    output: JSON.stringify({ error: error.message })
+                }
+            };
+
+            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify(errorResponse));
+            }
+        }
     };
     
     // Look up restaurant to get restaurant_id for the call log
@@ -312,7 +1069,114 @@ async function getRestaurantByPhone(phoneNumber) {
             body: JSON.stringify({
                 phone_number: phoneNumber
             })
+        openaiWs.on('message', (data) => {
+            try {
+                const response = JSON.parse(data);
+                
+                switch (response.type) {
+                    case 'response.audio.delta':
+                        if (streamSid && ws.readyState === WebSocket.OPEN) {
+                            const mediaMessage = {
+                                event: 'media',
+                                streamSid: streamSid,
+                                media: {
+                                    payload: response.delta
+                                }
+                            };
+                            ws.send(JSON.stringify(mediaMessage));
+                        }
+                        break;
+                        
+                    case 'response.audio_transcript.done':
+                        console.log('AI said:', response.transcript);
+                        
+                        conversationTranscript.push({
+                            timestamp: new Date().toISOString(),
+                            speaker: 'AI',
+                            text: response.transcript
+                        });
+                        
+                        if (response.transcript.includes('MESSAGE_CONFIRMED') || 
+                            (accumulatedMessageText && !messageProcessed)) {
+                            console.log('Accumulating message text...');
+                            accumulatedMessageText += response.transcript + '\n';
+                            
+                            if (accumulatedMessageText.includes('MESSAGE_CONFIRMED') && 
+                                accumulatedMessageText.includes('MESSAGE_END')) {
+                                console.log('Complete MESSAGE detected, processing...');
+                                processMessageFromTranscript(accumulatedMessageText);
+                                accumulatedMessageText = '';
+                            }
+                        } else if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall) {
+                            processOrderFromTranscript(response.transcript);
+                        }
+                        break;
+                        
+                    case 'conversation.item.input_audio_transcription.completed':
+                        console.log('Customer said:', response.transcript);
+                        
+                        conversationTranscript.push({
+                            timestamp: new Date().toISOString(),
+                            speaker: 'Customer',
+                            text: response.transcript
+                        });
+                        break;
+                        
+                    case 'input_audio_buffer.speech_started':
+                        console.log('Customer started speaking');
+                        break;
+                        
+                    case 'input_audio_buffer.speech_stopped':
+                        console.log('Customer stopped speaking');
+                        break;
+                        
+                    case 'response.done':
+                        console.log('AI response complete');
+                        break;
+                        
+                    case 'response.function_call_done':
+                        console.log('Function call completed:', response.name);
+                        handleFunctionCall(response);
+                        break;
+                        
+                    case 'conversation.item.created':
+                        if (response.item?.type === 'function_call') {
+                            console.log('Function call item created:', response.item.name);
+                            handleFunctionCall(response.item);
+                        }
+                        break;
+                        
+                    case 'error':
+                        console.error('OpenAI error:', response.error);
+                        break;
+                        
+                    case 'session.updated':
+                        console.log('OpenAI session configured for', restaurant.name);
+                        
+                        const greetingMessage = {
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text'],
+                                instructions: `Immediately say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                            }
+                        };
+                        openaiWs.send(JSON.stringify(greetingMessage));
+                        console.log('Sending immediate greeting...');
+                        break;
+                }
+            } catch (error) {
+                console.error('Error processing OpenAI message:', error);
+            }
         });
+        
+        openaiWs.on('error', (error) => {
+            console.error('OpenAI WebSocket error:', error);
+        });
+        
+        openaiWs.on('close', () => {
+            console.log('OpenAI connection closed');
+        });
+    }
 
         if (!response.ok) {
             console.error('Edge Function response not ok:', response.status, response.statusText);
