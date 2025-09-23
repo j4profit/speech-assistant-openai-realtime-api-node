@@ -38,7 +38,7 @@ app.post('/voice', async (req, res) => {
     // Extract call data from Twilio webhook
     const callData = {
         call_sid: req.body.CallSid,
-        from_number: req.body.From || req.body.Caller,
+        from_number: req.body.From || req.body.Caller || '9999999999',
         to_number: req.body.Called || req.body.To,
         call_status: req.body.CallStatus,
         call_direction: req.body.Direction,
@@ -69,7 +69,7 @@ app.post('/voice', async (req, res) => {
     <Connect>
         <Stream url="wss://${req.get('host')}/media-stream">
             <Parameter name="Called" value="${req.body.Called || req.body.To}" />
-            <Parameter name="From" value="${req.body.From || req.body.Caller}" />
+            <Parameter name="From" value="${req.body.From || req.body.Caller || '9999999999'}" />
             <Parameter name="CallSid" value="${req.body.CallSid}" />
         </Stream>
     </Connect>
@@ -566,7 +566,7 @@ async function createOrder(orderData) {
             .from('orders')
             .insert([{
                 restaurant_id: orderData.restaurant_id,
-                customer_phone: orderData.customer_phone,
+                customer_phone: orderData.customer_phone || '9999999999',
                 customer_name: orderData.customer_name,
                 total_amount: orderData.total_amount,
                 status: 'pending',
@@ -666,7 +666,8 @@ wss.on('connection', (ws, req) => {
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
         
-        const phoneToLookup = calledNumber || '+14108880091';
+        // UPDATED: Changed fallback from +14108880091 to +19999999999
+        const phoneToLookup = calledNumber || '+19999999999';
         console.log('Using phone number for lookup:', phoneToLookup);
         
         restaurant = await getRestaurantByPhone(phoneToLookup);
@@ -677,7 +678,7 @@ wss.on('connection', (ws, req) => {
         }
 
         console.log('Restaurant loaded:', restaurant.name);
-        customerPhone = fromNumber;
+        customerPhone = fromNumber || '9999999999';
         callSid = callId;
 
         const menuText = formatMenuForAI(restaurant.menu_items);
@@ -744,7 +745,7 @@ Step 5: THEN provide verbal confirmation to customer
 
 ORDER_CONFIRMED:
 - Customer Name: [actual name provided]
-- Phone: ${customerPhone || '[provided phone]'}
+- Phone: ${customerPhone || '9999999999'}
 - Order Type: [delivery or pickup]
 - Delivery Address: [FULL address for delivery, or "N/A" for pickup]
 - Items: [detailed list with quantities and prices]
@@ -1005,11 +1006,11 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
 
             switch (name) {
                 case 'search_recent_orders':
-                    const phoneNumber = parsedArgs.phone_number || customerPhone;
+                    const phoneNumber = parsedArgs.phone_number || customerPhone || '9999999999';
                     console.log('Searching PENDING orders for phone:', phoneNumber);
                     
-                    if (!phoneNumber) {
-                        result = { error: 'No phone number available to search orders' };
+                    if (!phoneNumber || phoneNumber === '9999999999') {
+                        result = { error: 'No valid phone number available to search orders' };
                         break;
                     }
                     
@@ -1326,7 +1327,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
             }
             
             messageData.restaurant_id = restaurant.id;
-            messageData.customer_phone = customerPhone;
+            messageData.customer_phone = customerPhone || '9999999999';
             messageData.call_sid = callSid;
             
             const message = await createCustomerMessage(messageData);
@@ -1363,7 +1364,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
             if (cleanLine.toLowerCase().includes('customer name:')) {
                 messageData.customer_name = cleanLine.split(':').slice(1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('message type:')) {
-                messageData.message_type = cleanLine.split(':').slice(1).join(':').trim();
+                messageData.message_type = cleanLine.split(':').slice1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('subject:')) {
                 messageData.subject = cleanLine.split(':').slice(1).join(':').trim();
             } else if (cleanLine.toLowerCase().includes('message:') && !cleanLine.toLowerCase().includes('message type:')) {
@@ -1470,7 +1471,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                 const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
                 
                 const formattedOrderDetails = `Customer: ${customerName || 'Not provided'}
-Phone: ${customerPhone}
+Phone: ${customerPhone || '9999999999'}
 Order Type: ${orderType}
 ${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress || 'Not provided'}` : 'Pickup'}
 Items: ${items || 'No items specified'}
@@ -1480,7 +1481,7 @@ Order taken via AI phone system`;
                 
                 const orderData = {
                     restaurant_id: restaurant.id,
-                    customer_phone: customerPhone,
+                    customer_phone: customerPhone || '9999999999',
                     customer_name: customerName || null,
                     total_amount: totalAmount || extractTotal(orderSection) || 0,
                     order_type: orderType,
@@ -1577,7 +1578,7 @@ Order taken via AI phone system`;
                                        data.start.customParameters?.To;
                     
                     const fromNumber = data.start.customParameters?.From ||
-                                      data.start.customParameters?.Caller;
+                                      data.start.customParameters?.Caller || '9999999999';
                     
                     const callId = data.start.customParameters?.CallSid || data.start.callSid;
                     
