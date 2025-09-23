@@ -1357,18 +1357,17 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     // Call the validation function
                     const validationResult = await validateDeliveryAddress(address, restaurant);
                     
-                    // FIXED: Store the address if validation was successful
+                    // Store the address if validation was successful
                     if (validationResult.valid) {
                         capturedDeliveryAddress = validationResult.address || address;
                         console.log('DELIVERY ADDRESS CAPTURED AND VALIDATED:', capturedDeliveryAddress);
                         
-                        // Add instruction to output ORDER_CONFIRMED format
-                        validationResult.instruction = 'CRITICAL: Address is valid! You MUST now output the ORDER_CONFIRMED format immediately with all the order details including this address: ' + capturedDeliveryAddress + ', THEN provide verbal confirmation to the customer. Without the ORDER_CONFIRMED format, the order will NOT be saved!';
+                        // Clean result without unnecessary instructions
                         validationResult.captured_address = capturedDeliveryAddress;
                     }
                     
                     result = validationResult;
-                    console.log('Address validation result:', result);
+                    console.log('Address validation result:', result.valid ? 'Valid' : 'Invalid');
                     break;
 
                 case 'cancel_order':
