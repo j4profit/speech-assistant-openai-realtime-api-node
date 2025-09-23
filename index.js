@@ -1197,13 +1197,13 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address ONLY after you have: 1) Customer name, 2) Order items, 3) Complete address with street number and zip code. When this returns 'valid: true', immediately create ORDER_CONFIRMED format. Do NOT call this function until customer has provided a real address.",
+                            description: "ONLY call this function when customer has provided a complete street address with numbers and zip code. Do NOT call if customer only gave their name or if they haven't provided an address yet. Wait for actual address like '7805 Old Hartford Road, Parkville, Maryland, 21234' before calling.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "The exact complete address customer provided. Must include street number, street name, city, state, zip. Example: '7805 Old Hartford Road, Parkville, Maryland, 21234'"
+                                        description: "Complete delivery address with street number, street name, city, state, zip code. Example: '7805 Old Hartford Road, Parkville, Maryland, 21234'"
                                     }
                                 },
                                 required: ["address"]
@@ -1459,7 +1459,7 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                 case 'validate_delivery_address':
                     let address = parsedArgs.address;
                     
-                    // Check if we have the prerequisites for address validation
+                    // Enhanced prerequisite checks to prevent premature validation
                     const recentConversation = conversationTranscript
                         .filter(m => m.speaker === 'Customer')
                         .slice(-10)
@@ -1469,13 +1469,25 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                     const hasOrderItems = recentConversation.toLowerCase().includes('pizza') || 
                                          recentConversation.toLowerCase().includes('burger') ||
                                          recentConversation.toLowerCase().includes('order') ||
-                                         recentConversation.toLowerCase().includes('want');
+                                         recentConversation.toLowerCase().includes('delivery');
+                    
+                    // Check if customer has actually provided an address-like response
+                    const lastCustomerMessage = conversationTranscript
+                        .filter(m => m.speaker === 'Customer')
+                        .pop()?.text || '';
+                    
+                    const looksLikeAddress = /\d+\s+[\w\s]+(road|street|avenue|drive|way|lane|blvd|ave|rd|st|dr|ln)[\w\s,]*\d{5}/i.test(lastCustomerMessage);
+                    const hasAddressNumbers = /\d+/.test(lastCustomerMessage) && /\d{5}/.test(lastCustomerMessage);
                     
                     console.log('Address validation prerequisites check:', {
                         hasOrderItems,
+                        looksLikeAddress,
+                        hasAddressNumbers,
+                        lastCustomerMessage: lastCustomerMessage.substring(0, 100),
                         recentConversation: recentConversation.substring(0, 200)
                     });
                     
+                    // Block validation if customer hasn't provided an actual address
                     if (!hasOrderItems && !address) {
                         result = {
                             valid: false,
@@ -1488,25 +1500,35 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                         break;
                     }
                     
+                    // NEW: Block validation if last customer message doesn't look like an address
+                    if (!address && !looksLikeAddress && !hasAddressNumbers) {
+                        result = {
+                            valid: false,
+                            message: 'Customer has not provided a complete address yet. Wait for them to give street number, street name, city, state, and zip code.',
+                            address: null,
+                            reason: 'customer_has_not_provided_address_yet',
+                            instruction: 'Do not call this function until customer provides an actual address like "123 Main Street, City, State, 12345". Customer just gave their name or other info, not an address.',
+                            last_customer_said: lastCustomerMessage
+                        };
+                        console.log('Blocking address validation - customer has not provided an address yet, they said:', lastCustomerMessage);
+                        break;
+                    }
+                    
                     if (!address) {
                         console.log('No address in arguments, searching conversation for address...');
                         const recentCustomer = conversationTranscript
                             .filter(m => m.speaker === 'Customer')
-                            .slice(-5) // Look at more recent messages
+                            .slice(-5)
                             .map(m => m.text)
                             .join(' ');
                         
                         console.log('Recent customer conversation for address search:', recentCustomer);
                         
-                        // Enhanced address pattern matching - look for the most recent address
+                        // Enhanced address pattern matching
                         const addressPatterns = [
-                            // Full address with numbers and common address words
                             /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*(?:maryland|md)[\w\s,]*\d{5}/i,
-                            // Simplified road pattern with zip
                             /\d+\s+[\w\s]+(?:road|rd)[\w\s,]*\d{5}/i,
-                            // Any address with zip code
                             /\d+\s+[\w\s,]+\d{5}/,
-                            // Basic street address pattern
                             /\d+\s+[\w\s]+(?:street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*/i
                         ];
                         
@@ -1514,29 +1536,26 @@ Keep responses conversational and VERY BRIEF for phone calls.`;
                             const addressMatch = recentCustomer.match(pattern);
                             if (addressMatch) {
                                 address = addressMatch[0].trim();
-                                // Clean up the address
-                                address = address.replace(/\.$/, ''); // Remove trailing period
+                                address = address.replace(/\.$/, '');
                                 console.log('Found address using pattern:', pattern, 'Result:', address);
                                 break;
                             }
                         }
                         
-                        // If still no address found, check if the last customer message looks like an address
                         if (!address) {
-                            const lastCustomerMessage = conversationTranscript
+                            const lastMessage = conversationTranscript
                                 .filter(m => m.speaker === 'Customer')
                                 .pop()?.text || '';
                             
-                            // Check if it contains numbers, letters, and common address indicators
-                            if (/\d+/.test(lastCustomerMessage) && 
-                                /\d{5}/.test(lastCustomerMessage) &&
-                                (lastCustomerMessage.toLowerCase().includes('road') || 
-                                 lastCustomerMessage.toLowerCase().includes('street') ||
-                                 lastCustomerMessage.toLowerCase().includes('ave') ||
-                                 lastCustomerMessage.toLowerCase().includes('dr') ||
-                                 lastCustomerMessage.toLowerCase().includes('maryland') ||
-                                 lastCustomerMessage.toLowerCase().includes('md'))) {
-                                address = lastCustomerMessage.trim().replace(/\.$/, '');
+                            if (/\d+/.test(lastMessage) && 
+                                /\d{5}/.test(lastMessage) &&
+                                (lastMessage.toLowerCase().includes('road') || 
+                                 lastMessage.toLowerCase().includes('street') ||
+                                 lastMessage.toLowerCase().includes('ave') ||
+                                 lastMessage.toLowerCase().includes('dr') ||
+                                 lastMessage.toLowerCase().includes('maryland') ||
+                                 lastMessage.toLowerCase().includes('md'))) {
+                                address = lastMessage.trim().replace(/\.$/, '');
                                 console.log('Using last customer message as address:', address);
                             }
                         }
