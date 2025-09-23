@@ -1,4 +1,64 @@
-// Restaurant AI Ordering System with Edge Functions Integration
+// Function to get restaurant data with direct database calls
+async function getRestaurantByPhone(phoneNumber) {
+    try {
+        console.log('Looking up restaurant for phone:', phoneNumber);
+
+        if (!phoneNumber || phoneNumber === '9999999999') {
+            console.log('Invalid phone number provided');
+            return null;
+        }
+
+        // Query restaurant using phone_number column
+        const { data: restaurant, error } = await supabase
+            .from('restaurants')
+            .select('*')
+            .eq('phone_number', phoneNumber)
+            .single();
+
+        console.log('Restaurant lookup result:', restaurant);
+        console.log('Restaurant lookup error:', error);
+
+        if (error || !restaurant) {
+            console.log('Restaurant not found:', error?.message || 'No data returned');
+            
+            // Let's see all restaurants to debug
+            const { data: allRestaurants } = await supabase
+                .from('restaurants')
+                .select('id, name, phone_number')
+                .limit(5);
+            
+            console.log('Sample restaurants in database:', allRestaurants);
+            return null;
+        }
+
+        // Try to get menu items separately to avoid relationship issues
+        try {
+            console.log('Fetching menu items for restaurant:', restaurant.id);
+            const { data: menuItems, error: menuError } = await supabase
+                .from('menu_items')
+                .select('*')
+                .eq('restaurant_id', restaurant.id);
+
+            if (menuItems && !menuError) {
+                restaurant.menu_items = menuItems.map(item => ({
+                    ...item,
+                    category: 'General' // Default category for now
+                }));
+                console.log(`Found ${menuItems.length} menu items`);
+            } else {
+                console.log('Menu items error or none found:', menuError);
+                restaurant.menu_items = [];
+            }
+        } catch (menuErr) {
+            console.log('Exception getting menu items:', menuErr);
+            restaurant.menu_items = [];
+        }
+
+        console.log('Restaurant found:', restaurant.name);
+        return restaurant;
+
+    } catch (error) {
+        console.error('Error fetching restaurant:', error);// Restaurant AI Ordering System with Edge Functions Integration
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -151,90 +211,97 @@ async function getRestaurantByPhone(phoneNumber) {
             return null;
         }
 
-        // First, let's check if we can connect to the database at all
-        console.log('Testing database connection...');
+        // First, let's see what columns actually exist
+        console.log('Checking what columns exist in restaurants table...');
         
-        // Query ALL restaurants first to see what's in the database
-        const { data: allRestaurants, error: allError } = await supabase
+        // Try different possible column names for phone
+        const possiblePhoneColumns = ['phone', 'phone_number', 'contact_phone', 'number'];
+        let restaurant = null;
+        let workingPhoneColumn = null;
+
+        // First try to get any restaurant to see the structure
+        const { data: sampleRestaurants, error: sampleError } = await supabase
             .from('restaurants')
-            .select('id, name, phone, status');
+            .select('*')
+            .limit(1);
 
-        console.log('All restaurants in database:', allRestaurants);
-        console.log('Database connection error (if any):', allError);
+        console.log('Sample restaurant data:', sampleRestaurants);
+        console.log('Sample error:', sampleError);
 
-        // Now try the specific phone lookup
-        const { data: restaurant, error } = await supabase
-            .from('restaurants')
-            .select(`
-                *,
-                menu_categories(
-                    id,
-                    name,
-                    description,
-                    sort_order,
-                    active
-                ),
-                menu_items(
-                    id,
-                    name,
-                    description,
-                    price,
-                    available,
-                    category_id,
-                    preparation_time,
-                    dietary_info,
-                    modifiers,
-                    sort_order,
-                    menu_categories(name)
-                )
-            `)
-            .eq('phone', phoneNumber)
-            .single();
+        if (sampleRestaurants && sampleRestaurants.length > 0) {
+            console.log('Restaurant table columns:', Object.keys(sampleRestaurants[0]));
+        }
 
-        console.log('Specific restaurant lookup result:', restaurant);
-        console.log('Specific restaurant lookup error:', error);
+        // Try different phone column names
+        for (const phoneCol of possiblePhoneColumns) {
+            try {
+                console.log(`Trying phone column: ${phoneCol}`);
+                const { data: result, error } = await supabase
+                    .from('restaurants')
+                    .select('*')
+                    .eq(phoneCol, phoneNumber)
+                    .single();
 
-        if (error) {
-            console.log('Database error details:', {
-                message: error.message,
-                details: error.details,
-                hint: error.hint,
-                code: error.code
-            });
+                if (!error && result) {
+                    console.log(`Found restaurant using column: ${phoneCol}`);
+                    restaurant = result;
+                    workingPhoneColumn = phoneCol;
+                    break;
+                } else if (error) {
+                    console.log(`Error with column ${phoneCol}:`, error.message);
+                }
+            } catch (err) {
+                console.log(`Exception with column ${phoneCol}:`, err.message);
+                continue;
+            }
+        }
+
+        if (!restaurant) {
+            console.log('No restaurant found with any phone column variations');
             
-            // Try a simpler query without joins
-            console.log('Trying simpler query...');
-            const { data: simpleResult, error: simpleError } = await supabase
+            // Let's try a broader search - maybe the phone format is different
+            const { data: allRestaurants, error: allError } = await supabase
                 .from('restaurants')
-                .select('*')
-                .eq('phone', phoneNumber)
-                .single();
-                
-            console.log('Simple query result:', simpleResult);
-            console.log('Simple query error:', simpleError);
+                .select('*');
+
+            console.log('All restaurants in database:', allRestaurants);
             
-            if (simpleResult) {
-                console.log('Restaurant found with simple query, using that');
-                return simpleResult;
+            if (allRestaurants && allRestaurants.length > 0) {
+                console.log('Available restaurants:', allRestaurants.map(r => ({
+                    id: r.id,
+                    name: r.name,
+                    phone_related_fields: Object.keys(r).filter(key => 
+                        key.toLowerCase().includes('phone') || 
+                        key.toLowerCase().includes('number') ||
+                        key.toLowerCase().includes('contact')
+                    ).map(key => ({ [key]: r[key] }))
+                })));
             }
             
             return null;
         }
 
-        if (!restaurant) {
-            console.log('No restaurant found for phone number:', phoneNumber);
-            return null;
-        }
+        // Try to get menu items separately to avoid relationship issues
+        try {
+            console.log('Fetching menu items for restaurant:', restaurant.id);
+            const { data: menuItems, error: menuError } = await supabase
+                .from('menu_items')
+                .select('*')
+                .eq('restaurant_id', restaurant.id);
 
-        // Format menu items with categories
-        if (restaurant.menu_items) {
-            restaurant.menu_items = restaurant.menu_items
-                .filter(item => item.available)
-                .map(item => ({
+            if (menuItems && !menuError) {
+                restaurant.menu_items = menuItems.map(item => ({
                     ...item,
-                    category: item.menu_categories?.name || 'Other'
-                }))
-                .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+                    category: 'General' // Default category for now
+                }));
+                console.log(`Found ${menuItems.length} menu items`);
+            } else {
+                console.log('Menu items error or none found:', menuError);
+                restaurant.menu_items = [];
+            }
+        } catch (menuErr) {
+            console.log('Exception getting menu items:', menuErr);
+            restaurant.menu_items = [];
         }
 
         console.log('Restaurant found:', restaurant.name);
