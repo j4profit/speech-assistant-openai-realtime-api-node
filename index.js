@@ -58,7 +58,11 @@ async function getRestaurantByPhone(phoneNumber) {
         return restaurant;
 
     } catch (error) {
-        console.error('Error fetching restaurant:', error);// Restaurant AI Ordering System with Edge Functions Integration
+        console.error('Error fetching restaurant:', error);
+        console.error('Error stack:', error.stack);
+        return null;
+    }
+}// Restaurant AI Ordering System with Edge Functions Integration
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
