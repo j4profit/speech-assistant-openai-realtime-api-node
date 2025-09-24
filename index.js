@@ -1,7 +1,8 @@
-// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - FIXED VERSION
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+const twilio = require('twilio');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -10,11 +11,22 @@ const port = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const BASE_URL = process.env.BASE_URL;
 
 if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
     console.error('Missing required environment variables');
     console.error('Required: OPENAI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY');
     process.exit(1);
+}
+
+// Initialize Twilio for hangup functionality
+const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? 
+    twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
+
+if (!twilioClient) {
+    console.warn('Twilio credentials not provided - hangup functionality will be limited');
 }
 
 // Initialize Supabase client (only for Edge Function calls)
@@ -32,8 +44,217 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // =============================================================================
+// UNIVERSAL HANGUP FUNCTION
+// =============================================================================
+
+/**
+ * Universal hangup function that can be called from anywhere in the system
+ * @param {string} callSid - The Twilio Call SID
+ * @param {Object} options - Hangup options
+ * @param {string} options.message - Custom goodbye message (optional)
+ * @param {string} options.method - 'immediate' or 'graceful' (default: 'graceful')
+ * @param {string} options.reason - Reason for hangup for logging
+ * @param {Object} options.orderData - Order data for confirmation messages (optional)
+ * @param {Object} options.restaurant - Restaurant data for personalized messages (optional)
+ * @param {number} options.delay - Delay in milliseconds before hangup (default: 0)
+ * @returns {Promise<Object>} - Result object with success status
+ */
+async function hangup(callSid, options = {}) {
+    if (!callSid) {
+        console.error('hangup() called without callSid');
+        return { success: false, error: 'Missing callSid' };
+    }
+
+    if (!twilioClient) {
+        console.error('hangup() called but Twilio client not configured');
+        return { success: false, error: 'Twilio not configured' };
+    }
+
+    // Default options
+    const {
+        message = null,
+        method = 'graceful',
+        reason = 'system_initiated',
+        orderData = null,
+        restaurant = null,
+        delay = 0
+    } = options;
+
+    console.log(`Hangup initiated: ${callSid} - Method: ${method}, Reason: ${reason}`);
+
+    try {
+        // Apply delay if specified
+        if (delay > 0) {
+            console.log(`Delaying hangup by ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        // Immediate hangup via REST API
+        if (method === 'immediate') {
+            const call = await twilioClient.calls(callSid).update({
+                status: 'completed'
+            });
+            
+            console.log(`Call terminated immediately: ${callSid}`);
+            return {
+                success: true,
+                method: 'immediate',
+                reason: reason,
+                call_sid: callSid
+            };
+        }
+
+        // Graceful hangup with TwiML
+        if (method === 'graceful') {
+            let finalMessage = message;
+
+            // Generate appropriate message if not provided
+            if (!finalMessage) {
+                if (orderData && restaurant) {
+                    // Order completion message
+                    if (orderData.order_type === 'delivery') {
+                        finalMessage = `Perfect! Your order number ${orderData.id} has been confirmed. We'll deliver your food to ${orderData.delivery_address || 'your address'} in approximately ${orderData.estimated_time || '30'} minutes. Thank you for choosing ${restaurant.name}!`;
+                    } else {
+                        finalMessage = `Great! Your pickup order number ${orderData.id} has been confirmed. Your food will be ready in approximately ${orderData.estimated_time || '25'} minutes at ${restaurant.name}. Thank you!`;
+                    }
+                } else if (restaurant) {
+                    // Restaurant-specific goodbye
+                    finalMessage = `Thank you for calling ${restaurant.name}. Have a wonderful day!`;
+                } else if (reason === 'error') {
+                    // Error message
+                    finalMessage = 'We apologize for the technical difficulty. Please try calling again.';
+                } else if (reason === 'order_cancelled') {
+                    // Cancellation message
+                    finalMessage = 'Your order has been cancelled successfully. Thank you for calling!';
+                } else if (reason === 'order_modified') {
+                    // Modification message
+                    finalMessage = 'Your order has been updated successfully. Thank you for calling!';
+                } else {
+                    // Default goodbye
+                    finalMessage = 'Thank you for calling. Have a great day!';
+                }
+            }
+
+            // Store the TwiML for the hangup endpoint
+            global.pendingHangupTwiML = global.pendingHangupTwiML || {};
+            global.pendingHangupTwiML[callSid] = {
+                message: finalMessage,
+                timestamp: new Date().toISOString()
+            };
+
+            // Redirect call to hangup endpoint
+            const hangupUrl = `${BASE_URL || 'https://your-domain.com'}/hangup-twiml?call_sid=${callSid}`;
+            const call = await twilioClient.calls(callSid).update({
+                url: hangupUrl,
+                method: 'POST'
+            });
+
+            console.log(`Call redirected to graceful hangup: ${callSid}`);
+            console.log(`Hangup message: ${finalMessage}`);
+
+            return {
+                success: true,
+                method: 'graceful',
+                reason: reason,
+                message: finalMessage,
+                call_sid: callSid
+            };
+        }
+
+        // Invalid method
+        console.error(`Invalid hangup method: ${method}`);
+        return { success: false, error: `Invalid method: ${method}` };
+
+    } catch (error) {
+        console.error(`Hangup failed for call ${callSid}:`, error);
+        return { 
+            success: false, 
+            error: error.message,
+            call_sid: callSid 
+        };
+    }
+}
+
+// Convenience hangup functions
+async function hangupAfterOrder(callSid, orderData, restaurant, delay = 3000) {
+    return await hangup(callSid, {
+        method: 'graceful',
+        reason: 'order_completed',
+        orderData: orderData,
+        restaurant: restaurant,
+        delay: delay
+    });
+}
+
+async function hangupAfterCancellation(callSid, restaurant, delay = 2000) {
+    return await hangup(callSid, {
+        method: 'graceful',
+        reason: 'order_cancelled',
+        restaurant: restaurant,
+        delay: delay
+    });
+}
+
+async function hangupAfterModification(callSid, restaurant, delay = 2000) {
+    return await hangup(callSid, {
+        method: 'graceful',
+        reason: 'order_modified',
+        restaurant: restaurant,
+        delay: delay
+    });
+}
+
+async function hangupOnError(callSid, errorMessage = null, immediate = false) {
+    return await hangup(callSid, {
+        method: immediate ? 'immediate' : 'graceful',
+        reason: 'error',
+        message: errorMessage || 'We apologize for the technical difficulty. Please try calling again.'
+    });
+}
+
+async function hangupOnCustomerRequest(callSid, restaurant) {
+    return await hangup(callSid, {
+        method: 'graceful',
+        reason: 'customer_request',
+        restaurant: restaurant
+    });
+}
+
+async function hangupOnTimeout(callSid, restaurant) {
+    return await hangup(callSid, {
+        method: 'graceful',
+        reason: 'timeout',
+        restaurant: restaurant,
+        message: `Thank you for calling ${restaurant?.name || 'us'}. If you need further assistance, please call back.`
+    });
+}
+
+// =============================================================================
 // HTTP ENDPOINTS
 // =============================================================================
+
+// Hangup TwiML endpoint
+app.post('/hangup-twiml', (req, res) => {
+    const callSid = req.query.call_sid || req.body.CallSid;
+    
+    let message = 'Thank you for calling. Goodbye!';
+    
+    // Retrieve stored message
+    if (global.pendingHangupTwiML?.[callSid]) {
+        message = global.pendingHangupTwiML[callSid].message;
+        // Clean up stored TwiML
+        delete global.pendingHangupTwiML[callSid];
+    }
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">${message}</Say>
+    <Hangup/>
+</Response>`;
+    
+    res.type('text/xml');
+    res.send(twiml);
+});
 
 // Twilio webhook endpoint for incoming calls
 app.post('/voice', async (req, res) => {
@@ -105,6 +326,7 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         openai_configured: !!OPENAI_API_KEY,
         supabase_configured: !!(SUPABASE_URL && SUPABASE_ANON_KEY),
+        twilio_configured: !!twilioClient,
         uptime: process.uptime()
     });
 });
@@ -812,6 +1034,8 @@ wss.on('connection', (ws, req) => {
         
         if (!restaurant) {
             console.error('Restaurant not found for phone:', phoneToLookup);
+            // Hangup on error if no restaurant found
+            await hangupOnError(callId, 'Sorry, we are unable to process your call at this time. Please try again later.');
             return;
         }
 
@@ -902,7 +1126,9 @@ ORDER_END
 - Order type (pickup or delivery)
 - Items ordered
 - For delivery: validated address
-- For pickup: just the above items`;
+- For pickup: just the above items
+
+**CALL COMPLETION**: After successfully completing an order or resolving a customer issue, use the hangup_call function to end the call gracefully.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -991,6 +1217,25 @@ ORDER_END
                                 },
                                 required: ["customer_name", "message_content"]
                             }
+                        },
+                        {
+                            type: "function",
+                            name: "hangup_call",
+                            description: "End the call gracefully with a custom message after completing the customer's request",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    message: { 
+                                        type: "string", 
+                                        description: "Goodbye message to say before hanging up" 
+                                    },
+                                    reason: {
+                                        type: "string",
+                                        description: "Reason for hangup: order_complete, order_cancelled, order_modified, customer_request, etc."
+                                    }
+                                },
+                                required: ["message"]
+                            }
                         }
                     ]
                 }
@@ -1049,6 +1294,23 @@ ORDER_END
                                     call_status: 'active'
                                 });
                             }, 2000);
+                        }
+
+                        // Check for natural conversation endings and suggest hangup
+                        const endingPhrases = [
+                            'thank you for calling',
+                            'have a great day',
+                            'is there anything else',
+                            'your order is confirmed'
+                        ];
+                        
+                        if (endingPhrases.some(phrase => response.transcript.toLowerCase().includes(phrase))) {
+                            // Set a timeout to hangup if no response from customer
+                            setTimeout(async () => {
+                                if (callSid && ws.readyState === WebSocket.OPEN && !orderProcessed) {
+                                    await hangupOnCustomerRequest(callSid, restaurant);
+                                }
+                            }, 8000); // 8 second timeout
                         }
                         break;
                         
@@ -1158,6 +1420,12 @@ ORDER_END
                         
                     case 'error':
                         console.error('OpenAI error:', response.error);
+                        // Hangup on OpenAI errors
+                        setTimeout(async () => {
+                            if (callSid) {
+                                await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
+                            }
+                        }, 1000);
                         break;
                         
                     case 'session.updated':
@@ -1178,11 +1446,20 @@ ORDER_END
                 }
             } catch (error) {
                 console.error('Error processing OpenAI message:', error);
+                // Hangup on processing errors
+                setTimeout(async () => {
+                    if (callSid) {
+                        await hangupOnError(callSid);
+                    }
+                }, 1000);
             }
         });
         
-        openaiWs.on('error', (error) => {
+        openaiWs.on('error', async (error) => {
             console.error('OpenAI WebSocket error:', error);
+            if (callSid) {
+                await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
+            }
         });
         
         openaiWs.on('close', () => {
@@ -1190,7 +1467,7 @@ ORDER_END
         });
     }
 
-    // Enhanced function call handler with pending and non-pending order processing
+    // Enhanced function call handler with hangup integration
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1216,6 +1493,27 @@ ORDER_END
             console.log('Parsed function arguments:', parsedArgs);
 
             switch (name) {
+                case 'hangup_call':
+                    console.log('AI requested hangup:', parsedArgs);
+                    const hangupMessage = parsedArgs.message || 'Thank you for calling. Have a great day!';
+                    const hangupReason = parsedArgs.reason || 'ai_initiated';
+                    
+                    // Hangup with the provided message and reason
+                    const hangupResult = await hangup(callSid, {
+                        method: 'graceful',
+                        reason: hangupReason,
+                        message: hangupMessage,
+                        restaurant: restaurant,
+                        delay: 1000 // Give a moment for the AI to finish speaking
+                    });
+                    
+                    result = {
+                        success: hangupResult.success,
+                        message: 'Call will be terminated',
+                        reason: hangupReason
+                    };
+                    break;
+
                 case 'search_recent_orders':
                     // Always try caller ID first, then provided number
                     let phoneNumber = customerPhone; // Start with caller ID
@@ -1467,6 +1765,13 @@ ORDER_END
                         message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order',
                         order_id: cancelOrderId
                     };
+
+                    // Auto-hangup after successful cancellation
+                    if (cancelResult) {
+                        setTimeout(async () => {
+                            await hangupAfterCancellation(callSid, restaurant);
+                        }, 3000);
+                    }
                     break;
 
                 case 'update_order':
@@ -1499,6 +1804,13 @@ ORDER_END
                         order_id: orderId,
                         modifications: parsedArgs.modifications
                     };
+
+                    // Auto-hangup after successful modification
+                    if (updateResult) {
+                        setTimeout(async () => {
+                            await hangupAfterModification(callSid, restaurant);
+                        }, 3000);
+                    }
                     break;
 
                 case 'send_message_to_restaurant':
@@ -1531,6 +1843,17 @@ ORDER_END
                             message: 'Your message has been sent to the restaurant. Since they are quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible.',
                             message_id: messageResult.message_id || messageResult.data?.id
                         };
+
+                        // Auto-hangup after sending message
+                        setTimeout(async () => {
+                            await hangup(callSid, {
+                                method: 'graceful',
+                                reason: 'message_sent',
+                                restaurant: restaurant,
+                                message: `Your message has been sent to ${restaurant.name}. They will contact you as soon as possible. Thank you for calling!`,
+                                delay: 2000
+                            });
+                        }, 1000);
                     } else {
                         result = {
                             success: false,
@@ -1581,10 +1904,17 @@ ORDER_END
                     }
                 }));
             }
+
+            // Hangup on critical function call errors
+            if (callSid && error.message.includes('critical')) {
+                setTimeout(async () => {
+                    await hangupOnError(callSid);
+                }, 1000);
+            }
         }
     }
 
-    // Enhanced order processing with better validation
+    // Enhanced order processing with automatic hangup
     async function processOrderFromTranscript(transcript) {
         try {
             if (isModificationCall || orderProcessed) {
@@ -1719,14 +2049,33 @@ ORDER_END
                     if (callSid) {
                         await updateCallLog(callSid, { order_id: order.id });
                     }
+
+                    // AUTO-HANGUP after successful order creation
+                    setTimeout(async () => {
+                        await hangupAfterOrder(callSid, {
+                            id: order.id,
+                            order_type: order.order_type,
+                            delivery_address: order.delivery_address,
+                            estimated_time: timing.totalMinutes
+                        }, restaurant);
+                    }, 4000); // Give AI time to speak confirmation
+
                 } else {
                     console.log('Order creation failed, resetting flag');
                     orderProcessed = false;
+                    // Hangup on order creation failure
+                    setTimeout(async () => {
+                        await hangupOnError(callSid, 'Sorry, there was an issue processing your order. Please call back.');
+                    }, 2000);
                 }
             }
         } catch (error) {
             console.error('Error processing order:', error);
             orderProcessed = false;
+            // Hangup on processing errors
+            setTimeout(async () => {
+                await hangupOnError(callSid);
+            }, 1000);
         }
     }
     
@@ -1781,6 +2130,12 @@ ORDER_END
             }
         } catch (error) {
             console.error('Error processing Twilio message:', error);
+            // Hangup on Twilio message processing errors
+            setTimeout(async () => {
+                if (callSid) {
+                    await hangupOnError(callSid);
+                }
+            }, 1000);
         }
     });
     
@@ -1823,8 +2178,12 @@ ORDER_END
         }
     });
     
-    ws.on('error', (error) => {
+    ws.on('error', async (error) => {
         console.error('Twilio WebSocket error:', error);
+        // Hangup on WebSocket errors
+        if (callSid) {
+            await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
+        }
     });
 });
 
@@ -1854,6 +2213,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`WebSocket ready for Twilio Media Streams`);
     console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
     console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+    console.log(`Twilio configured: ${!!twilioClient}`);
     console.log(`Multi-tenant delivery controls enabled`);
     console.log(`Enhanced address validation and error handling active`);
     console.log(`All Edge Functions integrated and active`);
@@ -1864,6 +2224,8 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`FIXED: Order type detection and processing`);
     console.log(`NEW: Message system for non-pending orders instead of phone calls`);
     console.log(`NEW: Auto-search orders when modification keywords detected`);
+    console.log(`NEW: Universal hangup system with automatic call completion`);
+    console.log(`NEW: Graceful error handling with appropriate hangups`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
