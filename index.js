@@ -285,7 +285,7 @@ async function updateCallLog(callSid, updateData) {
             })
         });
 
-        if !response.ok) {
+        if (!response.ok) {
             console.error('update-call-log Edge Function response not ok:', response.status);
             return null;
         }
