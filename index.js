@@ -1,4 +1,11 @@
-// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
+// Initialize Supabase client (only for Edge Function calls)
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Create HTTP server and WebSocket server
+const server = require('http').createServer(app);
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/media// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
