@@ -32,6 +32,10 @@ if (!twilioClient) {
 // Initialize Supabase client (only for Edge Function calls)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Global state management
+const activeCalls = new Map();
+const activeResponses = new Map(); // Track active OpenAI responses
+
 // Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
 const wss = new WebSocket.Server({ 
@@ -1370,7 +1374,10 @@ After successfully completing an order, cancellation, modification, or sending a
                     ]
                 }
             };
-            openaiWs.send(JSON.stringify(sessionUpdate));
+            
+            // Store WebSocket reference for safe API calls
+            ws.callSid = callId;
+            safeOpenAICall(ws, openaiWs, 'session.update', sessionUpdate.session);
         });
         
         openaiWs.on('message', (data) => {
@@ -1530,7 +1537,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: `Your call was processed by RING 2 Serve! Thank you for calling ${restaurant.name}. Have a great day!`
+                                        message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
                             }, 2000); // Increased delay to let AI finish speaking
@@ -1541,19 +1548,28 @@ After successfully completing an order, cancellation, modification, or sending a
                             console.log('Customer wants to modify order, auto-searching...');
                             initialOrderSearchCompleted = true;
                             
+                            // Prevent duplicate searches if already in progress
+                            if (activeResponses.has(callSid)) {
+                                console.log('Skipping auto-search - response already in progress');
+                                return;
+                            }
+                            
                             // Trigger automatic search using caller ID
                             setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN && !activeResponses.has(callSid)) {
                                     // Send function call to search with caller ID
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'conversation.item.create',
+                                    const success = safeOpenAICall(ws, openaiWs, 'conversation.item.create', {
                                         item: {
                                             type: 'function_call',
                                             name: 'search_recent_orders',
                                             call_id: 'auto_search_' + Date.now(),
                                             arguments: JSON.stringify({}) // Use caller ID automatically
                                         }
-                                    }));
+                                    });
+                                    
+                                    if (!success) {
+                                        console.log('Auto-search skipped due to active response');
+                                    }
                                 }
                             }, 500);
                         }
@@ -1590,6 +1606,8 @@ After successfully completing an order, cancellation, modification, or sending a
                         
                     case 'response.done':
                         console.log('AI response complete');
+                        // Clear active response tracking
+                        activeResponses.delete(callSid);
                         break;
                         
                     case 'response.function_call_done':
@@ -1606,28 +1624,38 @@ After successfully completing an order, cancellation, modification, or sending a
                         
                     case 'error':
                         console.error('OpenAI error:', response.error);
-                        // Hangup on OpenAI errors
-                        setTimeout(async () => {
-                            if (callSid) {
-                                await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
-                            }
-                        }, 1000);
+                        // Clear active response tracking on error
+                        activeResponses.delete(callSid);
+                        
+                        // Handle specific error types
+                        if (response.error?.code === 'conversation_already_has_active_response') {
+                            console.log('Ignoring overlapping response error - this is handled by our safety mechanism');
+                        } else {
+                            // Hangup on other OpenAI errors
+                            setTimeout(async () => {
+                                if (callSid) {
+                                    await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
+                                }
+                            }, 1000);
+                        }
                         break;
                         
                     case 'session.updated':
                         console.log('OpenAI session configured');
+                        // Clear any previous response state
+                        activeResponses.delete(callSid);
+                        
                         // Send initial greeting
                         setTimeout(() => {
-                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN && !activeResponses.has(callSid)) {
+                                safeOpenAICall(ws, openaiWs, 'response.create', {
                                     response: {
                                         modalities: ['audio', 'text'],
                                         instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
                                     }
-                                }));
+                                });
                             }
-                        }, 500);
+                        }, 1000);
                         break;
                 }
             } catch (error) {
@@ -2031,21 +2059,22 @@ After successfully completing an order, cancellation, modification, or sending a
 
             // Send result back to OpenAI
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                openaiWs.send(JSON.stringify({
-                    type: 'conversation.item.create',
+                const success = safeOpenAICall(ws, openaiWs, 'conversation.item.create', {
                     item: {
                         type: 'function_call_output',
                         call_id: call_id,
                         output: JSON.stringify(result)
                     }
-                }));
+                });
                 
-                // Trigger response generation
-                setTimeout(() => {
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.send(JSON.stringify({ type: 'response.create' }));
-                    }
-                }, 200);
+                if (success) {
+                    // Trigger response generation after a short delay
+                    setTimeout(() => {
+                        if (openaiWs && openaiWs.readyState === WebSocket.OPEN && !activeResponses.has(callSid)) {
+                            safeOpenAICall(ws, openaiWs, 'response.create');
+                        }
+                    }, 300);
+                }
             }
 
         } catch (error) {
@@ -2306,6 +2335,12 @@ After successfully completing an order, cancellation, modification, or sending a
     
     ws.on('close', async () => {
         console.log('Twilio connection closed');
+        
+        // Clean up response state
+        if (callSid) {
+            activeResponses.delete(callSid);
+            activeCalls.delete(callSid);
+        }
         
         const callEndTime = new Date();
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
