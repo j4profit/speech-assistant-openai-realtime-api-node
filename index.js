@@ -1529,7 +1529,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: `This call was processed by Ring-2-Serve! Thank you for calling ${restaurant.name}. Have a great day!`
+                                        message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
                             }, 1500);
