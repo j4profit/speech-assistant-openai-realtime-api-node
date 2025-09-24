@@ -1034,12 +1034,56 @@ wss.on('connection', (ws, req) => {
     let customerName = null; // Track customer name throughout call
     let currentOrderType = null; // Track whether pickup or delivery
     let collectedItems = []; // Track items being ordered
+    let lastCustomerActivity = new Date(); // Track last customer activity
+    let inactivityTimeout = null; // Timeout for customer inactivity
+    let waitingForCustomerResponse = false; // Track if we asked "are you still there"
     
     // Address validation state tracking
     let addressValidationCompleted = false;
     let lastValidationResult = null;
     let lastValidatedAddress = null;
     let addressValidationPending = false;
+
+    // Function to reset customer activity timer
+    function resetCustomerActivityTimer() {
+        lastCustomerActivity = new Date();
+        
+        // Clear existing timeout
+        if (inactivityTimeout) {
+            clearTimeout(inactivityTimeout);
+        }
+        
+        // Set new timeout for customer inactivity (30 seconds)
+        inactivityTimeout = setTimeout(async () => {
+            if (callSid && ws.readyState === WebSocket.OPEN && !waitingForCustomerResponse) {
+                console.log('Customer inactive for 30 seconds - asking if still there');
+                waitingForCustomerResponse = true;
+                
+                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                    openaiWs.send(JSON.stringify({
+                        type: 'response.create',
+                        response: {
+                            modalities: ['audio', 'text'],
+                            instructions: 'Say: "Are you still there? I want to make sure I can help you with anything else you need."'
+                        }
+                    }));
+                    
+                    // Set final timeout - if no response after "are you still there", hang up
+                    setTimeout(async () => {
+                        if (callSid && ws.readyState === WebSocket.OPEN && waitingForCustomerResponse) {
+                            console.log('No response after asking "are you still there" - hanging up');
+                            await hangup(callSid, {
+                                method: 'graceful',
+                                reason: 'customer_unresponsive',
+                                restaurant: restaurant,
+                                message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                            });
+                        }
+                    }, 15000); // 15 second final timeout
+                }
+            }
+        }, 30000); // 30 second inactivity timeout
+    }
 
     // Initialize OpenAI connection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -1069,6 +1113,9 @@ wss.on('connection', (ws, req) => {
         
         openaiWs.on('open', () => {
             console.log('Connected to OpenAI Realtime API');
+            
+            // Start customer activity timer when OpenAI connects
+            resetCustomerActivityTimer();
             
             const instructions = `You are an AI assistant for ${restaurant.name}. 
 
@@ -1352,16 +1399,10 @@ After successfully completing an order, cancellation, modification, or sending a
                                             instructions: 'Say: "You\'re all set! Is there anything else I can help you with today?"'
                                         }
                                     }));
-                                    
-                                    // Set timeout for no response - hangup after 8 seconds of silence
-                                    setTimeout(async () => {
-                                        if (callSid && ws.readyState === WebSocket.OPEN && !activeOpenAIResponses.has(callSid)) {
-                                            console.log('No response to "anything else" - hanging up');
-                                            await hangup(callSid, {
-                                                method: 'graceful',
-                                                reason: 'no_response_to_anything_else',
-                                                restaurant: restaurant,
-                                                message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                }
+                            }, 1500);
+                        }
+                        break;                                message: `Thank you for calling ${restaurant.name}. Have a great day!`
                                             });
                                         }
                                     }, 8000);
@@ -2229,6 +2270,11 @@ After successfully completing an order, cancellation, modification, or sending a
     
     ws.on('close', async () => {
         console.log('Twilio connection closed');
+        
+        // Clear inactivity timeout when call ends
+        if (inactivityTimeout) {
+            clearTimeout(inactivityTimeout);
+        }
         
         const callEndTime = new Date();
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
