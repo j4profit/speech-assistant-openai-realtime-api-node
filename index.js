@@ -1513,7 +1513,7 @@ After successfully completing an order, cancellation, modification, or sending a
                         }
                         
                         // Check if customer is responding "no" to "anything else" question
-                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all set|no thank you|no thanks)\b/i;
+                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah)\b/i;
                         const lastAIMessage = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
                             .slice(-1)[0]?.text || '';
@@ -1525,6 +1525,7 @@ After successfully completing an order, cancellation, modification, or sending a
                             // Customer said no to anything else, hangup gracefully
                             setTimeout(async () => {
                                 if (callSid && ws.readyState === WebSocket.OPEN) {
+                                    console.log('Executing hangup for customer finished response');
                                     await hangup(callSid, {
                                         method: 'graceful',
                                         reason: 'customer_finished',
@@ -1532,7 +1533,8 @@ After successfully completing an order, cancellation, modification, or sending a
                                         message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
-                            }, 1500);
+                            }, 2000); // Increased delay to let AI finish speaking
+                            return; // Stop processing this message further
                         }
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
                         if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
