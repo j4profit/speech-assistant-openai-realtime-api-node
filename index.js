@@ -97,20 +97,29 @@ app.post('/voice', async (req, res) => {
     res.send(twiml);
 });
 
-// Health check endpoint
+// Health check endpoint - responds immediately
 app.get('/health', (req, res) => {
-    res.json({ 
+    res.status(200).json({ 
         status: 'healthy',
+        port: process.env.PORT || 3000,
+        timestamp: new Date().toISOString(),
         openai_configured: !!OPENAI_API_KEY,
         supabase_configured: !!(SUPABASE_URL && SUPABASE_ANON_KEY),
-        timestamp: new Date().toISOString() 
+        uptime: process.uptime()
     });
+});
+
+// Simple ping endpoint for port detection
+app.get('/ping', (req, res) => {
+    res.status(200).send('pong');
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
-    res.json({ 
+    res.status(200).json({ 
         message: 'Restaurant AI Ordering and Messaging System',
+        status: 'running',
+        port: process.env.PORT || 3000,
         websocket_url: `wss://${req.get('host')}/media-stream`,
         server_time: new Date().toISOString()
     });
@@ -742,19 +751,24 @@ CRITICAL ORDER FLOW (Follow this EXACT sequence):
 4. FOR PICKUP: Get their order items, then create ORDER_CONFIRMED
 5. Create ORDER_CONFIRMED format IMMEDIATELY after getting all required info
 
-DELIVERY ADDRESS PROCESS - CRITICAL RULES:
-- ONLY call validate_delivery_address AFTER customer provides what looks like a complete address
-- Do NOT call validation functions when just asking for address
-- Wait for customer response that contains street numbers, street names, and zip codes
-- If customer says something that doesn't look like an address, ask again
-- ONLY validate when you receive something like "123 Main St, City, State, 12345"
+DELIVERY ADDRESS VALIDATION - CRITICAL TIMING RULES:
+- NEVER call validate_delivery_address immediately after asking "Could you provide your address?"
+- ONLY call validate_delivery_address AFTER you receive and READ the customer's address response
+- Wait to see what the customer actually says before deciding to validate
+- The customer must provide something that looks like: "123 Main Street, City, State, 12345"
+- Do NOT validate if customer just says "okay" or "yes" or asks questions
+
+STEP-BY-STEP ADDRESS PROCESS:
+1. Ask: "Could you please provide the delivery address?"
+2. WAIT for customer response
+3. READ what customer said
+4. IF it looks like a complete address → call validate_delivery_address
+5. IF it doesn't look like an address → ask again politely
+6. After successful validation → create ORDER_CONFIRMED
 
 CONVERSATION EXAMPLES:
 Customer: "I want to put a delivery order in"
 AI: "Great! May I have your name, please?" (DON'T ask about delivery again!)
-
-Customer: "I'd like to order for pickup"  
-AI: "Perfect! May I have your name, please?" (DON'T ask about pickup again!)
 
 ORDER_CONFIRMED FORMAT (Create THIS EXACT format - no asterisks):
 ORDER_CONFIRMED:
@@ -768,14 +782,13 @@ ORDER_CONFIRMED:
 - Ready Time: [estimated minutes]
 ORDER_END
 
-CRITICAL RULES:
-- NEVER ask for delivery/pickup preference if customer already mentioned it
-- NEVER call validate_delivery_address until customer actually provides an address
-- NEVER repeat questions customer already answered
-- LISTEN carefully to what customer says about delivery/pickup
-- CREATE ORDER_CONFIRMED immediately after address validation (delivery) or after items (pickup)
-- Use exact "ORDER_CONFIRMED:" format without asterisks or other formatting
-- Be efficient and natural`;
+CRITICAL FUNCTION CALL RULES:
+- Do NOT call any functions immediately after asking a question
+- ALWAYS wait for and process the customer's response first
+- Only call validate_delivery_address when you have an actual address to validate
+- If unsure, ask the customer to clarify rather than calling functions prematurely
+
+CRITICAL TIMING RULE: Never call functions immediately after asking for information. Always wait for the customer's response first.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1425,16 +1438,59 @@ CRITICAL RULES:
 // SERVER STARTUP
 // =============================================================================
 
+// Ensure port is properly configured
+const PORT = process.env.PORT || 3000;
+console.log('Configured to run on port:', PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
 wss.on('error', (error) => {
     console.error('WebSocket Server error:', error);
 });
 
-server.listen(port, '0.0.0.0', () => {
-    console.log(`Restaurant AI System running on port ${port}`);
+// Start server with explicit error handling and immediate port binding
+server.listen(PORT, '0.0.0.0', (error) => {
+    if (error) {
+        console.error('Server failed to start:', error);
+        process.exit(1);
+    }
+    
+    console.log(`Restaurant AI System running on port ${PORT}`);
+    console.log(`Server address: http://0.0.0.0:${PORT}`);
     console.log(`Ready to take orders and messages via phone calls`);
     console.log(`WebSocket ready for Twilio Media Streams`);
     console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
     console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
     console.log(`Multi-tenant delivery controls enabled`);
     console.log(`Enhanced address validation and error handling active`);
+    
+    // Immediately log that the server is ready for connections
+    console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+    console.error('Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use`);
+    } else if (error.code === 'EACCES') {
+        console.error(`Permission denied to bind to port ${PORT}`);
+    }
+    process.exit(1);
+});
+
+// Handle process termination gracefully
+process.on('SIGTERM', () => {
+    console.log('Received SIGTERM, shutting down gracefully');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('Received SIGINT, shutting down gracefully');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
 });
