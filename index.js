@@ -263,7 +263,9 @@ async function hangup(callSid, options = {}) {
             };
 
             // Redirect call to hangup endpoint
-            const hangupUrl = `${BASE_URL || 'https://your-domain.com'}/hangup-twiml?call_sid=${callSid}`;
+            const hangupUrl = BASE_URL ? 
+                `${BASE_URL}/hangup-twiml?call_sid=${callSid}` : 
+                `https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com/hangup-twiml?call_sid=${callSid}`;
             const call = await twilioClient.calls(callSid).update({
                 url: hangupUrl,
                 method: 'POST'
@@ -1522,12 +1524,14 @@ After successfully completing an order, cancellation, modification, or sending a
                             
                             // Customer said no to anything else, hangup gracefully
                             setTimeout(async () => {
-                                await hangup(callSid, {
-                                    method: 'graceful',
-                                    reason: 'customer_finished',
-                                    restaurant: restaurant,
-                                    message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
-                                });
+                                if (callSid && ws.readyState === WebSocket.OPEN) {
+                                    await hangup(callSid, {
+                                        method: 'graceful',
+                                        reason: 'customer_finished',
+                                        restaurant: restaurant,
+                                        message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
+                                    });
+                                }
                             }, 1500);
                         }
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
