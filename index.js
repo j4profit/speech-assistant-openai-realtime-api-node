@@ -738,9 +738,16 @@ CRITICAL ORDER FLOW (Follow this EXACT sequence):
    - If customer says "delivery", "deliver", "delivered", "put a delivery order" → DELIVERY CONFIRMED, skip to step 3
    - If customer says "pickup", "pick up", "pick it up" → PICKUP CONFIRMED, skip to step 4  
    - If unclear, ask: "Would you like this for pickup or delivery?"
-3. FOR DELIVERY: Get their order items, then get complete address and validate
+3. FOR DELIVERY: Get their order items first, then get complete address
 4. FOR PICKUP: Get their order items, then create ORDER_CONFIRMED
 5. Create ORDER_CONFIRMED format IMMEDIATELY after getting all required info
+
+DELIVERY ADDRESS PROCESS - CRITICAL RULES:
+- ONLY call validate_delivery_address AFTER customer provides what looks like a complete address
+- Do NOT call validation functions when just asking for address
+- Wait for customer response that contains street numbers, street names, and zip codes
+- If customer says something that doesn't look like an address, ask again
+- ONLY validate when you receive something like "123 Main St, City, State, 12345"
 
 CONVERSATION EXAMPLES:
 Customer: "I want to put a delivery order in"
@@ -748,12 +755,6 @@ AI: "Great! May I have your name, please?" (DON'T ask about delivery again!)
 
 Customer: "I'd like to order for pickup"  
 AI: "Perfect! May I have your name, please?" (DON'T ask about pickup again!)
-
-DELIVERY ADDRESS PROCESS:
-- Only ask for address AFTER getting items for delivery orders
-- Must get: street number, street name, city, state, zip code
-- Call validate_delivery_address("complete address") with EXACT address
-- After successful validation, CREATE ORDER_CONFIRMED immediately
 
 ORDER_CONFIRMED FORMAT (Create THIS EXACT format - no asterisks):
 ORDER_CONFIRMED:
@@ -769,6 +770,7 @@ ORDER_END
 
 CRITICAL RULES:
 - NEVER ask for delivery/pickup preference if customer already mentioned it
+- NEVER call validate_delivery_address until customer actually provides an address
 - NEVER repeat questions customer already answered
 - LISTEN carefully to what customer says about delivery/pickup
 - CREATE ORDER_CONFIRMED immediately after address validation (delivery) or after items (pickup)
@@ -806,13 +808,13 @@ CRITICAL RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address for the restaurant - REQUIRED for all delivery orders",
+                            description: "Validate delivery address - ONLY call this when customer has provided what looks like a complete address with street number, street name, city, state, zip",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: { 
                                         type: "string", 
-                                        description: "Complete delivery address with street number, street name, city, state, and zip code" 
+                                        description: "Complete delivery address that customer just provided - must include street number, street name, city, state, and zip code" 
                                     }
                                 },
                                 required: ["address"]
@@ -1030,13 +1032,19 @@ CRITICAL RULES:
                     
                     const hasAddressInfo = /\d+.*?(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr|maryland|md)/i.test(lastMessage);
                     
+                    console.log('Address validation check:', {
+                        hasAddressInfo,
+                        lastMessage,
+                        extractedAddress: address
+                    });
+                    
                     if (!address || address.trim().length < 10 || !hasAddressInfo) {
                         console.log('Customer has not provided address yet. Last message:', lastMessage);
                         result = {
                             valid: false,
-                            message: 'Please provide your complete delivery address including street number, street name, city, state, and zip code.',
+                            message: 'I need your complete delivery address. Please provide the street number, street name, city, state, and zip code.',
                             needs_complete_address: true,
-                            instruction: 'Customer has not provided delivery address yet. Ask for complete address.'
+                            instruction: 'Customer has not provided delivery address yet. Wait for them to provide it before calling this function again.'
                         };
                         addressValidationInProgress = false;
                         break;
@@ -1063,7 +1071,7 @@ CRITICAL RULES:
                         
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery. NOW ask what items they want to order. After getting items, create ORDER_CONFIRMED format immediately.',
+                            instruction: 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately with all the information you have collected.',
                             status: 'APPROVED',
                             confirmed_address: address,
                             proceed_to_order: true
