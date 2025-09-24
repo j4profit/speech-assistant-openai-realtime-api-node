@@ -1,16 +1,4 @@
-// Initialize Supabase client (only for Edge Function calls)
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// Create HTTP server and WebSocket server
-const server = require('http').createServer(app);
-const wss = new WebSocket.Server({ 
-    server,
-    path: '/media-stream'
-});
-
-// Middleware
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -47,6 +35,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Global state management
 const activeCalls = new Map();
 const activeResponses = new Map(); // Track active OpenAI responses
+const activeOpenAIResponses = new Map(); // FIXED: Added missing variable
 
 // Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
@@ -258,7 +247,7 @@ async function hangup(callSid, options = {}) {
                     finalMessage = `Thank you for calling ${restaurant.name}. Have a wonderful day!`;
                 } else if (reason === 'error') {
                     // Error message
-                    finalMessage = 'We apologize for the technical difficulty. Please try calling again.';
+                    finalMessage = 'We apologize for the technical difficulty. Please try calling back later.';
                 } else if (reason === 'order_cancelled') {
                     // Cancellation message
                     finalMessage = 'Your order has been cancelled successfully. Thank you for calling!';
@@ -488,49 +477,40 @@ app.get('/', (req, res) => {
 // API endpoint to get recent orders - using Edge Function
 app.get('/orders', async (req, res) => {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
+        const { data, error } = await supabase.functions.invoke('search-orders', {
+            body: {
                 limit: 50,
                 order_by: 'created_at',
                 order_direction: 'desc'
-            })
+            }
         });
-
-        if (!response.ok) {
-            return res.status(500).json({ error: 'Failed to fetch orders' });
-        }
-
-        const result = await response.json();
-        res.json({ orders: result.data || [] });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// API endpoint to get customer messages - you'll need to implement this Edge Function
-app.get('/messages', async (req, res) => {
-    try {
-        // Note: You may need to create a search-messages Edge Function for this
-        // For now, using direct query but should be replaced with Edge Function
-        const { data, error } = await supabase
-            .from('customer_messages')
-            .select(`
-                *,
-                restaurants(name, delivery_enabled, delivery_hours)
-            `)
-            .order('created_at', { ascending: false })
-            .limit(50);
 
         if (error) {
             return res.status(500).json({ error: error.message });
         }
 
-        res.json({ messages: data });
+        res.json({ orders: data?.orders || [] });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API endpoint to get customer messages - using Edge Function
+app.get('/messages', async (req, res) => {
+    try {
+        const { data, error } = await supabase.functions.invoke('get-messages', {
+            body: {
+                limit: 50,
+                order_by: 'created_at',
+                order_direction: 'desc'
+            }
+        });
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ messages: data?.messages || [] });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -545,30 +525,16 @@ async function getRestaurantByPhone(phoneNumber) {
     try {
         console.log('Calling get-restaurant Edge Function for phone:', phoneNumber);
         
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/get-restaurant', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
-                phone_number: phoneNumber
-            })
+        const { data, error } = await supabase.functions.invoke('get-restaurant', {
+            body: { phone_number: phoneNumber }
         });
 
-        if (!response.ok) {
-            console.error('Edge Function response not ok:', response.status);
+        if (error) {
+            console.error('Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        
-        if (result.error) {
-            console.error('Edge Function returned error:', result.error);
-            return null;
-        }
-
-        const restaurant = result.data;
+        const restaurant = data;
         if (!restaurant) {
             console.log('No restaurant found for phone:', phoneNumber);
             return null;
@@ -601,29 +567,17 @@ async function getRestaurantByPhone(phoneNumber) {
 // Create call log using Edge Function
 async function createCallLog(callData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-call-log', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(callData)
+        const { data, error } = await supabase.functions.invoke('create-call-log', {
+            body: callData
         });
 
-        if (!response.ok) {
-            console.error('create-call-log Edge Function response not ok:', response.status);
+        if (error) {
+            console.error('create-call-log Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        
-        if (result.error) {
-            console.error('create-call-log Edge Function returned error:', result.error);
-            return null;
-        }
-
-        console.log('Call log created:', result.data?.id);
-        return result.data;
+        console.log('Call log created:', data?.id);
+        return data;
     } catch (error) {
         console.error('Error calling create-call-log Edge Function:', error);
         return null;
@@ -633,25 +587,19 @@ async function createCallLog(callData) {
 // Update call log using Edge Function
 async function updateCallLog(callSid, updateData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-call-log', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
+        const { data, error } = await supabase.functions.invoke('update-call-log', {
+            body: {
                 call_sid: callSid,
                 ...updateData
-            })
+            }
         });
 
-        if (!response.ok) {
-            console.error('update-call-log Edge Function response not ok:', response.status);
+        if (error) {
+            console.error('update-call-log Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        return result.data;
+        return data;
     } catch (error) {
         console.error('Error calling update-call-log Edge Function:', error);
         return null;
@@ -663,30 +611,20 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
     try {
         console.log('Searching orders for phone:', phoneNumber, 'restaurant:', restaurantId, 'status filter:', statusFilter);
         
-        const requestBody = {
-            phone_number: phoneNumber,
-            restaurant_id: restaurantId,
-            days_back: daysBack
-        };
-
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(requestBody)
+        const { data, error } = await supabase.functions.invoke('search-orders', {
+            body: {
+                phone_number: phoneNumber,
+                restaurant_id: restaurantId,
+                days_back: daysBack
+            }
         });
 
-        if (!response.ok) {
-            console.error('search-orders Edge Function failed:', response.status);
+        if (error) {
+            console.error('search-orders Edge Function failed:', error);
             return [];
         }
 
-        const result = await response.json();
-        console.log('Search orders result:', result);
-        
-        const orders = result.orders || [];
+        const orders = data?.orders || [];
         console.log(`Found ${orders.length} orders for phone ${phoneNumber}`);
         
         return orders;
@@ -699,24 +637,19 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
 // Cancel order using Edge Function
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/cancel-order', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
+        const { data, error } = await supabase.functions.invoke('cancel-order', {
+            body: {
                 order_id: orderId,
                 reason: reason
-            })
+            }
         });
 
-        if (!response.ok) {
+        if (error) {
+            console.error('cancel-order Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        return result.data;
+        return data;
     } catch (error) {
         console.error('Error calling cancel-order Edge Function:', error);
         return null;
@@ -726,25 +659,20 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
 // Update order using Edge Function
 async function updateOrder(orderId, updateData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-order', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
+        const { data, error } = await supabase.functions.invoke('update-order', {
+            body: {
                 order_id: orderId,
                 modifications: updateData.modifications,
                 new_total: updateData.new_total
-            })
+            }
         });
 
-        if (!response.ok) {
+        if (error) {
+            console.error('update-order Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        return result.data;
+        return data;
     } catch (error) {
         console.error('Error calling update-order Edge Function:', error);
         return null;
@@ -765,44 +693,23 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
         
-        const requestData = {
-            address: address.trim(),
-            restaurant_id: restaurant.id,
-            delivery_enabled: restaurant.delivery_enabled,
-            delivery_radius: restaurant.delivery_radius,
-            delivery_hours: restaurant.delivery_hours,
-            delivery_time: restaurant.delivery_time,
-            preparation_time: restaurant.preparation_time,
-            restaurant_address: restaurant.address,
-            restaurant_latitude: restaurant.latitude,
-            restaurant_longitude: restaurant.longitude
-        };
-
-        console.log('Sending validation request:', requestData);
-        
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(requestData)
+        const { data, error } = await supabase.functions.invoke('validate-delivery', {
+            body: {
+                address: address.trim(),
+                restaurant_id: restaurant.id,
+                delivery_enabled: restaurant.delivery_enabled,
+                delivery_radius: restaurant.delivery_radius,
+                delivery_hours: restaurant.delivery_hours,
+                delivery_time: restaurant.delivery_time,
+                preparation_time: restaurant.preparation_time,
+                restaurant_address: restaurant.address,
+                restaurant_latitude: restaurant.latitude,
+                restaurant_longitude: restaurant.longitude
+            }
         });
 
-        if (!response.ok) {
-            console.error('Delivery validation API error:', response.status, response.statusText);
-            return {
-                valid: false,
-                message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
-                address: address
-            };
-        }
-
-        const result = await response.json();
-        console.log('Validation result:', result);
-        
-        if (result.error) {
-            console.error('Validation error:', result.error);
+        if (error) {
+            console.error('validate-delivery Edge Function returned error:', error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
@@ -811,12 +718,12 @@ async function validateDeliveryAddress(address, restaurant) {
         }
 
         return {
-            valid: result.valid || false,
-            message: result.message || 'Address validation completed',
+            valid: data?.valid || false,
+            message: data?.message || 'Address validation completed',
             address: address,
-            estimated_delivery_time: result.estimated_delivery_time,
-            delivery_radius: result.delivery_radius,
-            reason: result.reason
+            estimated_delivery_time: data?.estimated_delivery_time,
+            delivery_radius: data?.delivery_radius,
+            reason: data?.reason
         };
         
     } catch (error) {
@@ -830,34 +737,22 @@ async function validateDeliveryAddress(address, restaurant) {
     }
 }
 
-// Create order using Edge Function instead of direct Supabase call
+// Create order using Edge Function
 async function createOrder(orderData) {
     try {
         console.log('Creating order using Edge Function:', orderData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-order', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(orderData)
+        const { data, error } = await supabase.functions.invoke('create-order', {
+            body: orderData
         });
 
-        if (!response.ok) {
-            console.error('create-order Edge Function response not ok:', response.status);
+        if (error) {
+            console.error('create-order Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        
-        if (result.error) {
-            console.error('create-order Edge Function returned error:', result.error);
-            return null;
-        }
-
-        console.log('Order created successfully:', result.data?.id);
-        return result.data;
+        console.log('Order created successfully:', data?.id);
+        return data;
     } catch (error) {
         console.error('Error calling create-order Edge Function:', error);
         return null;
@@ -869,29 +764,17 @@ async function createCustomerMessage(messageData) {
     try {
         console.log('Creating customer message using Edge Function:', messageData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(messageData)
+        const { data, error } = await supabase.functions.invoke('create-message', {
+            body: messageData
         });
 
-        if (!response.ok) {
-            console.error('create-message Edge Function response not ok:', response.status);
+        if (error) {
+            console.error('create-message Edge Function returned error:', error);
             return null;
         }
 
-        const result = await response.json();
-        
-        if (result.error) {
-            console.error('create-message Edge Function returned error:', result.error);
-            return null;
-        }
-
-        console.log('Customer message created successfully:', result.data?.id || result.message_id);
-        return result.data || result;
+        console.log('Customer message created successfully:', data?.id || data?.message_id);
+        return data;
     } catch (error) {
         console.error('Error calling create-message Edge Function:', error);
         return null;
@@ -927,23 +810,17 @@ async function createRestaurantMessage(customerPhone, customerName, restaurant, 
 
         console.log('Creating restaurant message:', messageData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify(messageData)
+        const { data, error } = await supabase.functions.invoke('create-message', {
+            body: messageData
         });
 
-        if (!response.ok) {
-            console.error('Restaurant message creation failed:', response.status);
+        if (error) {
+            console.error('Restaurant message creation failed:', error);
             return null;
         }
 
-        const result = await response.json();
-        console.log('Restaurant message created successfully:', result.message_id || result.data?.id);
-        return result;
+        console.log('Restaurant message created successfully:', data?.message_id || data?.id);
+        return data;
     } catch (error) {
         console.error('Error creating restaurant message:', error);
         return null;
@@ -1167,11 +1044,10 @@ wss.on('connection', (ws, req) => {
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
         
-        const phoneToLookup = calledNumber || '+14108880091';
-        restaurant = await getRestaurantByPhone(phoneToLookup);
+        restaurant = await getRestaurantByPhone(calledNumber);
         
         if (!restaurant) {
-            console.error('Restaurant not found for phone:', phoneToLookup);
+            console.error('Restaurant not found for phone:', calledNumber);
             // Hangup on error if no restaurant found
             await hangupOnError(callId, 'Sorry, we are unable to process your call at this time. Please try again later.');
             return;
@@ -1478,7 +1354,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                     
                                     // Set timeout for no response - hangup after 8 seconds of silence
                                     setTimeout(async () => {
-                                        if (callSid && ws.readyState === WebSocket.OPEN) {
+                                        if (callSid && ws.readyState === WebSocket.OPEN && !activeOpenAIResponses.has(callSid)) {
                                             console.log('No response to "anything else" - hanging up');
                                             await hangup(callSid, {
                                                 method: 'graceful',
@@ -1606,6 +1482,7 @@ After successfully completing an order, cancellation, modification, or sending a
                         
                     case 'response.done':
                         console.log('AI response complete');
+                        activeOpenAIResponses.delete(callSid);
                         break;
                         
                     case 'response.function_call_done':
@@ -1651,6 +1528,10 @@ After successfully completing an order, cancellation, modification, or sending a
                                 }));
                             }
                         }, 500);
+                        break;
+
+                    case 'response.created':
+                        activeOpenAIResponses.set(callSid, true);
                         break;
                 }
             } catch (error) {
@@ -2036,7 +1917,7 @@ After successfully completing an order, cancellation, modification, or sending a
                         result = {
                             success: true,
                             message: 'Your message has been sent to the restaurant. Since they are quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible.',
-                            message_id: messageResult.message_id || messageResult.data?.id
+                            message_id: messageResult.message_id || messageResult.id
                         };
                     } else {
                         result = {
