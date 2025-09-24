@@ -1427,9 +1427,27 @@ After successfully completing an order, cancellation, modification, or sending a
                                         message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
-                            }, 2000); // Increased delay to let AI finish speaking
+                            }, 2000);
                             return; // Stop processing this message further
                         }
+
+                        // Check for hangup phrases that suggest customer wants to end call
+                        const hangupPhrases = /\b(goodbye|bye|talk to you later|gotta go|have to go|thanks bye|thank you bye)\b/i;
+                        if (hangupPhrases.test(customerMessage)) {
+                            console.log('Customer indicated they want to end the call');
+                            setTimeout(async () => {
+                                if (callSid && ws.readyState === WebSocket.OPEN) {
+                                    await hangup(callSid, {
+                                        method: 'graceful',
+                                        reason: 'customer_initiated_goodbye',
+                                        restaurant: restaurant,
+                                        message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                    });
+                                }
+                            }, 2000);
+                            return;
+                        }
+
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
                         if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
                             console.log('Customer wants to modify order, auto-searching...');
