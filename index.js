@@ -698,6 +698,11 @@ wss.on('connection', (ws, req) => {
     let capturedDeliveryAddress = null;
     let addressValidationInProgress = false;
     let callData = null; // Store original call data for updates
+    
+    // **CRITICAL FIX** - Add address validation state tracking
+    let addressValidationCompleted = false;
+    let lastValidationResult = null;
+    let lastValidatedAddress = null;
 
     // Initialize OpenAI connection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -741,6 +746,13 @@ ${!restaurant.delivery_enabled ?
 
 ${menuText}
 
+**CRITICAL ADDRESS VALIDATION TIMING RULES:**
+1. NEVER call validate_delivery_address function immediately after asking for address
+2. ONLY call validate_delivery_address AFTER the customer provides what looks like a complete address
+3. If validation succeeds (returns valid: true, proceed_to_order: true), CREATE ORDER_CONFIRMED format IMMEDIATELY
+4. Do NOT ask for address confirmation after successful validation
+5. Do NOT call the function multiple times for the same address
+
 CRITICAL ORDER FLOW (Follow this EXACT sequence):
 1. Get customer name first
 2. SMART Order Type Detection:
@@ -753,7 +765,7 @@ CRITICAL ORDER FLOW (Follow this EXACT sequence):
 
 DELIVERY ADDRESS VALIDATION - CRITICAL TIMING RULES:
 - NEVER call validate_delivery_address immediately after asking "Could you provide your address?"
-- ONLY call validate_delivery_address AFTER you receive and READ the customer's address response
+- ONLY call validate_delivery_address AFTER you receive and read the customer's address response
 - Wait to see what the customer actually says before deciding to validate
 - The customer must provide something that looks like: "123 Main Street, City, State, 12345"
 - Do NOT validate if customer just says "okay" or "yes" or asks questions
@@ -821,7 +833,7 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address - ONLY call this when customer has provided what looks like a complete address with street number, street name, city, state, zip",
+                            description: "Validate delivery address - ONLY call this when customer has provided what looks like a complete address with street number, street name, city, state, zip. DO NOT call immediately after asking for address.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -1028,6 +1040,18 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                     break;
 
                 case 'validate_delivery_address':
+                    // **CRITICAL FIX** - Prevent multiple validations and handle caching
+                    if (addressValidationInProgress) {
+                        console.log('Validation already in progress, skipping...');
+                        result = {
+                            valid: false,
+                            message: 'Please wait while we validate your address.',
+                            needs_complete_address: false,
+                            instruction: 'Address validation is already in progress.'
+                        };
+                        break;
+                    }
+
                     addressValidationInProgress = true;
                     let address = parsedArgs.address;
                     
@@ -1036,6 +1060,20 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                         console.log('No address in function call, extracting from conversation...');
                         address = extractAddressFromConversation(conversationTranscript);
                         console.log('Extracted address from conversation:', address);
+                    }
+                    
+                    // **KEY FIX** - Check if this is the same address we just validated successfully
+                    if (address === lastValidatedAddress && addressValidationCompleted && lastValidationResult?.valid) {
+                        console.log('Address already validated successfully, returning cached result');
+                        result = {
+                            ...lastValidationResult,
+                            instruction: 'SUCCESS! Address is already validated. Create ORDER_CONFIRMED format immediately with all the information you have collected.',
+                            status: 'APPROVED',
+                            confirmed_address: address,
+                            proceed_to_order: true
+                        };
+                        addressValidationInProgress = false;
+                        break;
                     }
                     
                     // Check if customer actually provided address info vs just said "delivered" or similar
@@ -1080,6 +1118,11 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                     
                     if (validationResult.valid) {
                         capturedDeliveryAddress = address;
+                        // **CRITICAL FIX** - Cache successful validation
+                        addressValidationCompleted = true;
+                        lastValidationResult = validationResult;
+                        lastValidatedAddress = address;
+                        
                         console.log('DELIVERY ADDRESS VALIDATED SUCCESSFULLY:', address);
                         
                         result = {
@@ -1091,6 +1134,11 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                         };
                     } else {
                         console.log('Address validation failed:', validationResult.message);
+                        // **CRITICAL FIX** - Cache failed validation too
+                        addressValidationCompleted = false;
+                        lastValidationResult = validationResult;
+                        lastValidatedAddress = address;
+                        
                         result = {
                             ...validationResult,
                             instruction: 'Address validation failed. Ask customer for a complete address or suggest pickup.'
@@ -1318,8 +1366,11 @@ CRITICAL TIMING RULE: Never call functions immediately after asking for informat
                         console.log('Delivery address:', order.delivery_address);
                     }
                     
-                    // Clear captured address after successful order
+                    // **CRITICAL FIX** - Clear validation state after successful order
                     capturedDeliveryAddress = null;
+                    addressValidationCompleted = false;
+                    lastValidationResult = null;
+                    lastValidatedAddress = null;
                     
                     // Update call log with order ID
                     if (callSid) {
