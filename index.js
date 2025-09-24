@@ -466,7 +466,7 @@ async function validateDeliveryAddress(address, restaurant) {
     }
 }
 
-// **FIXED** - Create order using Edge Function instead of direct Supabase call
+// Create order using Edge Function instead of direct Supabase call
 async function createOrder(orderData) {
     try {
         console.log('Creating order using Edge Function:', orderData);
@@ -500,7 +500,7 @@ async function createOrder(orderData) {
     }
 }
 
-// **NEW** - Create customer message using Edge Function
+// Create customer message using Edge Function
 async function createCustomerMessage(messageData) {
     try {
         console.log('Creating customer message using Edge Function:', messageData);
@@ -972,7 +972,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         
                         const customerMessage = response.transcript.trim();
                         
-                        // **NEW** - Auto-search for orders when customer mentions modification
+                        // Auto-search for orders when customer mentions modification
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
                         if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
                             console.log('Customer wants to modify order, auto-searching...');
@@ -1003,7 +1003,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                             addressValidationPending = true;
                         }
 
-                        // **NEW** - Create customer message record
+                        // Create customer message record
                         if (restaurant && customerMessage && customerMessage.length > 3) {
                             const messageData = {
                                 restaurant_id: restaurant.id,
@@ -1079,7 +1079,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
         });
     }
 
-    // **UPDATED** - Enhanced function call handler with automatic caller ID lookup
+    // Enhanced function call handler with automatic caller ID lookup
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1106,7 +1106,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
 
             switch (name) {
                 case 'search_recent_orders':
-                    // **CRITICAL IMPROVEMENT** - Always try caller ID first, then provided number
+                    // Always try caller ID first, then provided number
                     let phoneNumber = customerPhone; // Start with caller ID
                     
                     // Only use provided phone number if it's different from caller ID
@@ -1492,7 +1492,6 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
 
                 console.log('Creating order with data:', orderData);
                 
-                // **FIXED** - Using Edge Function instead of direct Supabase call
                 const order = await createOrder(orderData);
                 if (order) {
                     console.log('NEW order saved successfully with ID:', order.id);
@@ -1683,4 +1682,4 @@ process.on('SIGINT', () => {
         console.log('Server closed');
         process.exit(0);
     });
-});`
+});
