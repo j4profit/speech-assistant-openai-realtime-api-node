@@ -1693,3 +1693,158 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
             switch (data.event) {
                 case 'connected':
                     console.log('Twilio connected');
+                    break;
+                    
+                case 'start':
+                    streamSid = data.start.streamSid;
+                    const calledNumber = data.start.customParameters?.Called || data.start.customParameters?.To;
+                    const fromNumber = data.start.customParameters?.From || data.start.customParameters?.Caller;
+                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
+                    
+                    console.log('Stream started:', streamSid);
+                    console.log('Called number:', calledNumber);
+                    console.log('From number (caller ID):', fromNumber);
+                    console.log('Call ID:', callId);
+                    
+                    // Store call data for later updates
+                    callData = {
+                        call_sid: callId,
+                        from_number: fromNumber,
+                        to_number: calledNumber,
+                        stream_sid: streamSid,
+                        call_started_at: new Date().toISOString()
+                    };
+                    
+                    initializeOpenAI(calledNumber, fromNumber, callId);
+                    break;
+                    
+                case 'media':
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.send(JSON.stringify({
+                            type: 'input_audio_buffer.append',
+                            audio: data.media.payload
+                        }));
+                    }
+                    break;
+                    
+                case 'stop':
+                    console.log('Stream stopped');
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        openaiWs.close();
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Error processing Twilio message:', error);
+        }
+    });
+    
+    ws.on('close', async () => {
+        console.log('Twilio connection closed');
+        
+        const callEndTime = new Date();
+        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
+        
+        if (callSid) {
+            // Prepare comprehensive call log update with all required fields
+            const updateData = {
+                call_ended_at: callEndTime.toISOString(),
+                call_duration: callDuration,
+                conversation_transcript: JSON.stringify(conversationTranscript),
+                stream_sid: streamSid,
+                call_status: 'completed'
+            };
+
+            // Add additional fields if we have them from the original webhook
+            if (callData) {
+                updateData.call_started_at = callData.call_started_at;
+                updateData.from_number = callData.from_number;
+                updateData.to_number = callData.to_number;
+            }
+
+            console.log('Updating call log with complete data:', {
+                call_sid: callSid,
+                call_duration: callDuration,
+                conversation_items: conversationTranscript.length,
+                call_ended_at: callEndTime.toISOString()
+            });
+
+            await updateCallLog(callSid, updateData);
+            console.log(`Call completed. Duration: ${callDuration} seconds`);
+        }
+        
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('Twilio WebSocket error:', error);
+    });
+});
+
+// =============================================================================
+// SERVER STARTUP
+// =============================================================================
+
+// Ensure port is properly configured
+const PORT = process.env.PORT || 3000;
+console.log('Configured to run on port:', PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
+wss.on('error', (error) => {
+    console.error('WebSocket Server error:', error);
+});
+
+// Start server with explicit error handling and immediate port binding
+server.listen(PORT, '0.0.0.0', (error) => {
+    if (error) {
+        console.error('Server failed to start:', error);
+        process.exit(1);
+    }
+    
+    console.log(`Restaurant AI System running on port ${PORT}`);
+    console.log(`Server address: https://0.0.0.0:${PORT}`);
+    console.log(`Ready to take orders and messages via phone calls`);
+    console.log(`WebSocket ready for Twilio Media Streams`);
+    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
+    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
+    console.log(`Multi-tenant delivery controls enabled`);
+    console.log(`Enhanced address validation and error handling active`);
+    console.log(`All Edge Functions integrated and active`);
+    console.log(`FIXED: Automatic caller ID lookup for order modifications`);
+    console.log(`FIXED: Only PENDING orders can be modified or cancelled`);
+    console.log(`NEW: Message system for non-pending orders instead of phone calls`);
+    console.log(`NEW: Auto-search orders when modification keywords detected`);
+    
+    // Immediately log that the server is ready for connections
+    console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+    console.error('Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use`);
+    } else if (error.code === 'EACCES') {
+        console.error(`Permission denied to bind to port ${PORT}`);
+    }
+    process.exit(1);
+});
+
+// Handle process termination gracefully
+process.on('SIGTERM', () => {
+    console.log('Received SIGTERM, shutting down gracefully');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('Received SIGINT, shutting down gracefully');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
+});
