@@ -55,7 +55,13 @@ app.post('/voice', async (req, res) => {
         to_zip: req.body.ToZip || req.body.CalledZip,
         call_started_at: new Date().toISOString(),
         twilio_data: req.body,
-        restaurant_id: null
+        restaurant_id: null,
+        // Initialize fields that will be updated later
+        call_ended_at: null,
+        call_duration: null,
+        conversation_transcript: null,
+        stream_sid: null,
+        order_id: null
     };
     
     // Look up restaurant to get restaurant_id for the call log
@@ -64,7 +70,16 @@ app.post('/voice', async (req, res) => {
         callData.restaurant_id = restaurant.id;
     }
     
-    // Create initial call log
+    console.log('Creating call log with complete webhook data:', {
+        call_sid: callData.call_sid,
+        from_number: callData.from_number,
+        to_number: callData.to_number,
+        to_city: callData.to_city,
+        to_zip: callData.to_zip,
+        restaurant_id: callData.restaurant_id
+    });
+    
+    // Create initial call log with all webhook data
     await createCallLog(callData);
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -673,6 +688,7 @@ wss.on('connection', (ws, req) => {
     let isModificationCall = false;
     let capturedDeliveryAddress = null;
     let addressValidationInProgress = false;
+    let callData = null; // Store original call data for updates
 
     // Initialize OpenAI connection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -861,6 +877,23 @@ CRITICAL RULES:
                         // Process order only after successful validation and not during modification calls
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
+                        }
+                        
+                        // Also update call log with order ID when order is successfully created
+                        if (response.transcript.includes('ORDER_CONFIRMED:') && callSid) {
+                            setTimeout(async () => {
+                                // Give time for order creation to complete
+                                const conversationText = conversationTranscript
+                                    .map(msg => `${msg.speaker}: ${msg.text}`)
+                                    .join('\n');
+                                
+                                await updateCallLog(callSid, {
+                                    conversation_transcript: JSON.stringify(conversationTranscript),
+                                    conversation_text: conversationText,
+                                    has_order: true,
+                                    call_status: 'active'
+                                });
+                            }, 2000);
                         }
                         break;
                         
@@ -1303,6 +1336,15 @@ CRITICAL RULES:
                     console.log('From number:', fromNumber);
                     console.log('Call ID:', callId);
                     
+                    // Store call data for later updates
+                    callData = {
+                        call_sid: callId,
+                        from_number: fromNumber,
+                        to_number: calledNumber,
+                        stream_sid: streamSid,
+                        call_started_at: new Date().toISOString()
+                    };
+                    
                     initializeOpenAI(calledNumber, fromNumber, callId);
                     break;
                     
@@ -1334,11 +1376,30 @@ CRITICAL RULES:
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
         
         if (callSid) {
-            await updateCallLog(callSid, {
-                conversation_transcript: JSON.stringify(conversationTranscript),
+            // Prepare comprehensive call log update with all required fields
+            const updateData = {
                 call_ended_at: callEndTime.toISOString(),
-                call_duration: callDuration
+                call_duration: callDuration,
+                conversation_transcript: JSON.stringify(conversationTranscript),
+                stream_sid: streamSid,
+                call_status: 'completed'
+            };
+
+            // Add additional fields if we have them from the original webhook
+            if (callData) {
+                updateData.call_started_at = callData.call_started_at;
+                updateData.from_number = callData.from_number;
+                updateData.to_number = callData.to_number;
+            }
+
+            console.log('Updating call log with complete data:', {
+                call_sid: callSid,
+                call_duration: callDuration,
+                conversation_items: conversationTranscript.length,
+                call_ended_at: callEndTime.toISOString()
             });
+
+            await updateCallLog(callSid, updateData);
             console.log(`Call completed. Duration: ${callDuration} seconds`);
         }
         
