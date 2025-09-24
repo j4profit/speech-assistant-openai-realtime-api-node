@@ -299,8 +299,10 @@ async function updateCallLog(callSid, updateData) {
 }
 
 // Search for recent orders using Edge Function
-async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
+async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 30) {
     try {
+        console.log('Searching orders for phone:', phoneNumber, 'restaurant:', restaurantId);
+        
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
             method: 'POST',
             headers: {
@@ -316,10 +318,13 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7) {
         });
 
         if (!response.ok) {
+            console.error('search-orders Edge Function failed:', response.status);
             return [];
         }
 
         const result = await response.json();
+        console.log('Search orders result:', result);
+        
         return result.data || [];
     } catch (error) {
         console.error('Error calling search-orders Edge Function:', error);
@@ -731,6 +736,7 @@ wss.on('connection', (ws, req) => {
     let capturedDeliveryAddress = null;
     let addressValidationInProgress = false;
     let callData = null; // Store original call data for updates
+    let initialOrderSearchCompleted = false; // Track if we've done initial search
     
     // Address validation state tracking
     let addressValidationCompleted = false;
@@ -779,6 +785,13 @@ ${!restaurant.delivery_enabled ?
     'You can offer both pickup and delivery options.'}
 
 ${menuText}
+
+**CRITICAL ORDER MODIFICATION FLOW:**
+When customer mentions wanting to change/modify/cancel an order:
+1. AUTOMATICALLY call search_recent_orders WITHOUT asking for phone number first
+2. The system will automatically search using their caller ID (${customerPhone})
+3. ONLY if no orders are found, then ask: "I don't see any recent orders from this number. What phone number did you use when placing the order?"
+4. If orders ARE found, immediately tell them about their order(s) and ask what they'd like to change
 
 **CRITICAL ADDRESS VALIDATION TIMING RULES - MUST FOLLOW EXACTLY:**
 
@@ -844,11 +857,14 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         {
                             type: "function",
                             name: "search_recent_orders",
-                            description: "Search for recent pending orders by customer's phone number",
+                            description: "Search for recent pending orders. The system automatically uses the caller's phone number first. Only provide phone_number parameter if customer gives a different number.",
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    phone_number: { type: "string", description: "Customer's phone number" }
+                                    phone_number: { 
+                                        type: "string", 
+                                        description: "Phone number to search for orders - only use if customer provides a different number than their caller ID"
+                                    }
                                 },
                                 required: []
                             }
@@ -954,8 +970,32 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                             text: response.transcript
                         });
                         
-                        // Check if customer provided address and trigger validation
                         const customerMessage = response.transcript.trim();
+                        
+                        // **NEW** - Auto-search for orders when customer mentions modification
+                        const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
+                        if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
+                            console.log('Customer wants to modify order, auto-searching...');
+                            initialOrderSearchCompleted = true;
+                            
+                            // Trigger automatic search using caller ID
+                            setTimeout(() => {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    // Send function call to search with caller ID
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'conversation.item.create',
+                                        item: {
+                                            type: 'function_call',
+                                            name: 'search_recent_orders',
+                                            call_id: 'auto_search_' + Date.now(),
+                                            arguments: JSON.stringify({}) // Use caller ID automatically
+                                        }
+                                    }));
+                                }
+                            }, 500);
+                        }
+                        
+                        // Check if customer provided address and trigger validation
                         const hasAddressPattern = /\d+.*?(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr|maryland|md)/i.test(customerMessage);
                         
                         if (hasAddressPattern && !addressValidationInProgress && !addressValidationPending) {
@@ -1039,14 +1079,14 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
         });
     }
 
-    // Enhanced function call handler with better error handling and validation
+    // **UPDATED** - Enhanced function call handler with automatic caller ID lookup
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
             let result = null;
             let parsedArgs = {};
 
-            console.log(`Executing function: ${name}`);
+            console.log(`Executing function: ${name} with args:`, args);
 
             // Parse arguments more robustly
             if (!args || args === '') {
@@ -1066,25 +1106,69 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
 
             switch (name) {
                 case 'search_recent_orders':
-                    const phoneNumber = parsedArgs.phone_number || customerPhone;
+                    // **CRITICAL IMPROVEMENT** - Always try caller ID first, then provided number
+                    let phoneNumber = customerPhone; // Start with caller ID
+                    
+                    // Only use provided phone number if it's different from caller ID
+                    if (parsedArgs.phone_number && parsedArgs.phone_number !== customerPhone) {
+                        phoneNumber = parsedArgs.phone_number;
+                        console.log('Using provided phone number instead of caller ID:', phoneNumber);
+                    } else {
+                        console.log('Using caller ID for order search:', phoneNumber);
+                    }
+                    
+                    if (!phoneNumber) {
+                        result = {
+                            orders: [],
+                            count: 0,
+                            message: 'Phone number required to search for orders.',
+                            error: 'No phone number available'
+                        };
+                        break;
+                    }
+                    
                     const orders = await searchRecentOrders(phoneNumber, restaurant.id);
                     recentOrders = orders;
                     
-                    result = {
-                        orders: orders.map(order => ({
-                            id: order.id,
-                            total: order.total_amount,
-                            order_type: order.order_type,
-                            delivery_address: order.delivery_address,
-                            items: order.order_items?.map(item => ({
-                                name: item.menu_items?.name || 'Item',
-                                quantity: item.quantity,
-                                price: item.price
-                            })) || []
-                        })),
-                        count: orders.length,
-                        message: orders.length === 0 ? 'No pending orders found.' : `Found ${orders.length} pending order(s).`
-                    };
+                    console.log(`Found ${orders.length} orders for phone ${phoneNumber}`);
+                    
+                    if (orders.length === 0 && phoneNumber === customerPhone) {
+                        // No orders found with caller ID - suggest asking for different number
+                        result = {
+                            orders: [],
+                            count: 0,
+                            message: 'No pending orders found for this phone number. If you placed the order using a different phone number, please let me know what number you used.',
+                            phone_searched: phoneNumber,
+                            suggest_different_number: true
+                        };
+                    } else {
+                        result = {
+                            orders: orders.map(order => ({
+                                id: order.id,
+                                total: order.total_amount,
+                                order_type: order.order_type,
+                                delivery_address: order.delivery_address,
+                                status: order.status,
+                                created_at: order.created_at,
+                                customer_name: order.customer_name,
+                                items: order.order_items?.map(item => ({
+                                    name: item.menu_items?.name || 'Item',
+                                    quantity: item.quantity,
+                                    price: item.price
+                                })) || []
+                            })),
+                            count: orders.length,
+                            message: orders.length === 0 ? 
+                                'No pending orders found for this phone number.' : 
+                                `Found ${orders.length} pending order(s).`,
+                            phone_searched: phoneNumber
+                        };
+                    }
+                    
+                    // Mark as modification call if orders found
+                    if (orders.length > 0) {
+                        isModificationCall = true;
+                    }
                     break;
 
                 case 'validate_delivery_address':
@@ -1457,7 +1541,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                     
                     console.log('Stream started:', streamSid);
                     console.log('Called number:', calledNumber);
-                    console.log('From number:', fromNumber);
+                    console.log('From number (caller ID):', fromNumber);
                     console.log('Call ID:', callId);
                     
                     // Store call data for later updates
@@ -1566,6 +1650,8 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`Multi-tenant delivery controls enabled`);
     console.log(`Enhanced address validation and error handling active`);
     console.log(`All Edge Functions integrated and active`);
+    console.log(`FIXED: Automatic caller ID lookup for order modifications`);
+    console.log(`NEW: Auto-search orders when modification keywords detected`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
@@ -1597,4 +1683,4 @@ process.on('SIGINT', () => {
         console.log('Server closed');
         process.exit(0);
     });
-});
+});`
