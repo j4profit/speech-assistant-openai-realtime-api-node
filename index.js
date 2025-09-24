@@ -534,7 +534,8 @@ async function getRestaurantByPhone(phoneNumber) {
             return null;
         }
 
-        const restaurant = data;
+        // FIX: The restaurant data is nested in data.data
+        const restaurant = data?.data;
         if (!restaurant) {
             console.log('No restaurant found for phone:', phoneNumber);
             return null;
