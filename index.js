@@ -1128,7 +1128,15 @@ ORDER_END
 - For delivery: validated address
 - For pickup: just the above items
 
-**CALL COMPLETION**: After successfully completing an order or resolving a customer issue, use the hangup_call function to end the call gracefully.`;
+**CALL COMPLETION FLOW**: 
+After successfully completing an order, cancellation, modification, or sending a message:
+1. Confirm the completed action
+2. Ask: "You're all set! Is there anything else I can help you with today?"  
+3. If customer says "no", "nothing", "that's all", etc. - the system will automatically hang up gracefully
+4. If customer asks for something else - help them with their new request
+5. If no response for 8 seconds - automatically hang up with goodbye message
+
+**IMPORTANT**: Do NOT use the hangup_call function after completing orders/tasks. Let the natural "anything else" flow handle call completion.`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1296,21 +1304,45 @@ ORDER_END
                             }, 2000);
                         }
 
-                        // Check for natural conversation endings and suggest hangup
-                        const endingPhrases = [
-                            'thank you for calling',
-                            'have a great day',
-                            'is there anything else',
-                            'your order is confirmed'
+                        // Check for completion phrases that should trigger "anything else" flow
+                        const completionPhrases = [
+                            'your order is confirmed',
+                            'order has been confirmed',
+                            'your order has been cancelled',
+                            'order cancelled successfully',
+                            'order has been updated',
+                            'message has been sent',
+                            'your all set',
+                            "you're all set"
                         ];
                         
-                        if (endingPhrases.some(phrase => response.transcript.toLowerCase().includes(phrase))) {
-                            // Set a timeout to hangup if no response from customer
-                            setTimeout(async () => {
-                                if (callSid && ws.readyState === WebSocket.OPEN && !orderProcessed) {
-                                    await hangupOnCustomerRequest(callSid, restaurant);
+                        if (completionPhrases.some(phrase => response.transcript.toLowerCase().includes(phrase))) {
+                            // Trigger "anything else" flow after order/task completion
+                            setTimeout(() => {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
+                                    console.log('Triggering "anything else" flow after completion');
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create',
+                                        response: {
+                                            modalities: ['audio', 'text'],
+                                            instructions: 'Say: "You\'re all set! Is there anything else I can help you with today?"'
+                                        }
+                                    }));
+                                    
+                                    // Set timeout for no response - hangup after 8 seconds of silence
+                                    setTimeout(async () => {
+                                        if (callSid && ws.readyState === WebSocket.OPEN) {
+                                            console.log('No response to "anything else" - hanging up');
+                                            await hangup(callSid, {
+                                                method: 'graceful',
+                                                reason: 'no_response_to_anything_else',
+                                                restaurant: restaurant,
+                                                message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                            });
+                                        }
+                                    }, 8000);
                                 }
-                            }, 8000); // 8 second timeout
+                            }, 1500); // Give a moment after completion statement
                         }
                         break;
                         
@@ -1350,7 +1382,26 @@ ORDER_END
                             }
                         }
                         
-                        // Auto-search for orders when customer mentions modification
+                        // Check if customer is responding "no" to "anything else" question
+                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all set|no thank you|no thanks)\b/i;
+                        const lastAIMessage = conversationTranscript
+                            .filter(msg => msg.speaker === 'AI')
+                            .slice(-1)[0]?.text || '';
+                        
+                        if (anythingElseResponses.test(customerMessage) && 
+                            lastAIMessage.toLowerCase().includes('anything else')) {
+                            console.log('Customer responded "no" to anything else question - initiating hangup');
+                            
+                            // Customer said no to anything else, hangup gracefully
+                            setTimeout(async () => {
+                                await hangup(callSid, {
+                                    method: 'graceful',
+                                    reason: 'customer_finished',
+                                    restaurant: restaurant,
+                                    message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
+                                });
+                            }, 1500);
+                        }
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
                         if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
                             console.log('Customer wants to modify order, auto-searching...');
@@ -2050,15 +2101,19 @@ ORDER_END
                         await updateCallLog(callSid, { order_id: order.id });
                     }
 
-                    // AUTO-HANGUP after successful order creation
-                    setTimeout(async () => {
-                        await hangupAfterOrder(callSid, {
-                            id: order.id,
-                            order_type: order.order_type,
-                            delivery_address: order.delivery_address,
-                            estimated_time: timing.totalMinutes
-                        }, restaurant);
-                    }, 4000); // Give AI time to speak confirmation
+                    // AUTO-HANGUP replaced with "ANYTHING ELSE" flow after successful order creation
+                    setTimeout(() => {
+                        if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
+                            console.log('Order completed - triggering "anything else" flow');
+                            openaiWs.send(JSON.stringify({
+                                type: 'response.create',
+                                response: {
+                                    modalities: ['audio', 'text'],
+                                    instructions: 'Say: "You\'re all set! Is there anything else I can help you with today?"'
+                                }
+                            }));
+                        }
+                    }, 3000); // Give AI time to confirm order first
 
                 } else {
                     console.log('Order creation failed, resetting flag');
