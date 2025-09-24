@@ -5,7 +5,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const server = require('http').createServer(app);
 const wss = new WebSocket.Server({ 
     server,
-    path: '/media// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
+    path: '/media-stream'
+});
+
+// Middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent with Universal Hangup
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -1382,9 +1387,6 @@ After successfully completing an order, cancellation, modification, or sending a
                 }
             };
             
-            // Store WebSocket reference for CallSid
-            callSid = callId;
-            
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
         
@@ -1556,32 +1558,18 @@ After successfully completing an order, cancellation, modification, or sending a
                             console.log('Customer wants to modify order, auto-searching...');
                             initialOrderSearchCompleted = true;
                             
-                            // Prevent duplicate searches
-                            if (activeOpenAIResponses.has(callSid)) {
-                                console.log('Skipping auto-search - OpenAI response already in progress');
-                                return;
-                            }
-                            
-                            // Mark response as active to prevent collisions
-                            activeOpenAIResponses.set(callSid, true);
-                            
                             // Trigger automatic search using caller ID
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    try {
-                                        openaiWs.send(JSON.stringify({
-                                            type: 'conversation.item.create',
-                                            item: {
-                                                type: 'function_call',
-                                                name: 'search_recent_orders',
-                                                call_id: 'auto_search_' + Date.now(),
-                                                arguments: JSON.stringify({})
-                                            }
-                                        }));
-                                    } catch (error) {
-                                        console.error('Auto-search error:', error);
-                                        activeOpenAIResponses.delete(callSid);
-                                    }
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'conversation.item.create',
+                                        item: {
+                                            type: 'function_call',
+                                            name: 'search_recent_orders',
+                                            call_id: 'auto_search_' + Date.now(),
+                                            arguments: JSON.stringify({}) // Use caller ID automatically
+                                        }
+                                    }));
                                 }
                             }, 500);
                         }
@@ -1618,8 +1606,6 @@ After successfully completing an order, cancellation, modification, or sending a
                         
                     case 'response.done':
                         console.log('AI response complete');
-                        // Clear active response tracking to prevent collisions
-                        if (callSid) activeOpenAIResponses.delete(callSid);
                         break;
                         
                     case 'response.function_call_done':
@@ -1636,46 +1622,35 @@ After successfully completing an order, cancellation, modification, or sending a
                         
                     case 'error':
                         console.error('OpenAI error:', response.error);
-                        // Clear active response tracking on error
-                        if (callSid) activeOpenAIResponses.delete(callSid);
                         
-                        // Handle specific error types without hanging up
+                        // Handle specific error types
                         if (response.error?.code === 'conversation_already_has_active_response') {
-                            console.log('Response collision detected - ignoring (handled by our collision prevention)');
+                            console.log('Response collision detected - ignoring (these are expected)');
                         } else {
                             console.error('Unexpected OpenAI error:', response.error);
-                            // Only hangup on critical errors, not response collisions
-                            if (response.error?.code !== 'conversation_already_has_active_response') {
-                                setTimeout(async () => {
-                                    if (callSid) {
-                                        await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
-                                    }
-                                }, 2000);
-                            }
+                            // Hangup on critical errors only
+                            setTimeout(async () => {
+                                if (callSid) {
+                                    await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
+                                }
+                            }, 1000);
                         }
                         break;
                         
                     case 'session.updated':
                         console.log('OpenAI session configured');
-                        
-                        // Send initial greeting with collision prevention
+                        // Send initial greeting
                         setTimeout(() => {
-                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN && !activeOpenAIResponses.has(callSid)) {
-                                activeOpenAIResponses.set(callSid, true);
-                                try {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
-                                        }
-                                    }));
-                                } catch (error) {
-                                    console.error('Initial greeting error:', error);
-                                    activeOpenAIResponses.delete(callSid);
-                                }
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                openaiWs.send(JSON.stringify({
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['audio', 'text'],
+                                        instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                                    }
+                                }));
                             }
-                        }, 1000);
+                        }, 500);
                         break;
                 }
             } catch (error) {
@@ -2088,20 +2063,12 @@ After successfully completing an order, cancellation, modification, or sending a
                     }
                 }));
                 
-                // Mark response as active before triggering response generation
-                activeOpenAIResponses.set(callSid, true);
-                
-                // Trigger response generation with collision prevention
+                // Trigger response generation
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        try {
-                            openaiWs.send(JSON.stringify({ type: 'response.create' }));
-                        } catch (error) {
-                            console.error('Response create error:', error);
-                            activeOpenAIResponses.delete(callSid);
-                        }
+                        openaiWs.send(JSON.stringify({ type: 'response.create' }));
                     }
-                }, 300);
+                }, 200);
             }
 
         } catch (error) {
@@ -2363,11 +2330,6 @@ After successfully completing an order, cancellation, modification, or sending a
     ws.on('close', async () => {
         console.log('Twilio connection closed');
         
-        // Clean up response state to prevent memory leaks
-        if (callSid) {
-            activeOpenAIResponses.delete(callSid);
-        }
-        
         const callEndTime = new Date();
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
         
@@ -2399,7 +2361,6 @@ After successfully completing an order, cancellation, modification, or sending a
             console.log(`Call completed. Duration: ${callDuration} seconds`);
         }
         
-        // Properly close OpenAI connection
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }
