@@ -1,4 +1,4 @@
-// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - ALL EDGE FUNCTIONS
+// Restaurant AI Ordering System - Complete Multi-Tenant Voice Agent - FIXED VERSION
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -793,6 +793,9 @@ wss.on('connection', (ws, req) => {
     let addressValidationInProgress = false;
     let callData = null; // Store original call data for updates
     let initialOrderSearchCompleted = false; // Track if we've done initial search
+    let customerName = null; // Track customer name throughout call
+    let currentOrderType = null; // Track whether pickup or delivery
+    let collectedItems = []; // Track items being ordered
     
     // Address validation state tracking
     let addressValidationCompleted = false;
@@ -856,50 +859,50 @@ When customer mentions wanting to change/modify/cancel an order:
 5. If only NON-PENDING orders are found, automatically create a message to the restaurant and inform customer
 6. If customer wants to leave additional details or has other concerns, use send_message_to_restaurant function
 
-**CRITICAL ADDRESS VALIDATION TIMING RULES - MUST FOLLOW EXACTLY:**
+**NEW ORDER FLOW - FOLLOW THIS EXACT SEQUENCE:**
 
-1. NEVER call validate_delivery_address function immediately after asking for address
-2. NEVER call validate_delivery_address until customer provides address details  
-3. When customer provides address, IMMEDIATELY call validate_delivery_address function
-4. If validation succeeds, IMMEDIATELY create ORDER_CONFIRMED format - DO NOT ask for confirmation
-5. DO NOT say "It seems there might be an issue" when validation is successful
+1. **CUSTOMER NAME FIRST**: Always ask "Can I get your name for the order?" before anything else for new orders
 
-**EXACT CONVERSATION FLOW:**
-- Ask: "Could you please provide the delivery address?"
-- Customer provides address: "7805 Old Harford Road, Parkville, Maryland, 21234"
-- IMMEDIATELY call validate_delivery_address function
-- If validation returns valid: true, proceed_to_order: true → CREATE ORDER_CONFIRMED FORMAT IMMEDIATELY
-- DO NOT ask customer to confirm address after successful validation
-
-**FORBIDDEN PHRASES AFTER SUCCESSFUL VALIDATION:**
-- "It seems there might be an issue with the address"
-- "Could you please confirm the address"
-- "Let's make sure we have all the details"
-- "Is this address correct?"
-
-CRITICAL ORDER FLOW (Follow this EXACT sequence):
-1. Get customer name first
-2. SMART Order Type Detection:
-   - If customer says "delivery", "deliver", "delivered", "put a delivery order" → DELIVERY CONFIRMED, skip to step 3
-   - If customer says "pickup", "pick up", "pick it up" → PICKUP CONFIRMED, skip to step 4  
+2. **ORDER TYPE DETECTION**: 
+   - If customer says "delivery", "deliver", "delivered", "delivery order" → DELIVERY CONFIRMED, skip to step 3
+   - If customer says "pickup", "pick up", "pick it up", "pickup order" → PICKUP CONFIRMED, skip to step 4  
    - If unclear, ask: "Would you like this for pickup or delivery?"
-3. FOR DELIVERY: Get their order items first, then get complete address
-4. FOR PICKUP: Get their order items, then create ORDER_CONFIRMED
-5. Create ORDER_CONFIRMED format IMMEDIATELY after getting all required info
 
-ORDER_CONFIRMED FORMAT (Create THIS EXACT format - no asterisks):
+3. **FOR DELIVERY ORDERS**:
+   - Get order items FIRST
+   - THEN ask for delivery address: "What's your delivery address?"
+   - When customer provides address, IMMEDIATELY call validate_delivery_address
+   - If validation succeeds, create ORDER_CONFIRMED immediately
+   - If validation fails, ask for corrected address or suggest pickup
+
+4. **FOR PICKUP ORDERS**:
+   - Get order items
+   - NEVER call validate_delivery_address for pickup orders
+   - Create ORDER_CONFIRMED immediately after getting items
+
+**CRITICAL VALIDATION RULES:**
+- NEVER call validate_delivery_address for pickup orders
+- ONLY call validate_delivery_address when order type is "delivery" AND customer has provided an address
+- DO NOT call validate_delivery_address until customer provides address details
+
+**ORDER_CONFIRMED FORMAT** (Create THIS EXACT format when ready):
 ORDER_CONFIRMED:
-- Customer Name: [name]
+- Customer Name: [actual customer name]
 - Phone: ${customerPhone || '[phone]'}
 - Order Type: [delivery or pickup]
-- Delivery Address: [complete validated address or N/A for pickup]
+- Delivery Address: [complete validated address for delivery, or N/A for pickup]
 - Items: [items with individual prices like "Large Pepperoni Pizza - $18.99"]
 - Special Instructions: [instructions or None]
 - Total: $[total amount]
-- Ready Time: [estimated minutes]
+- Ready Time: [estimated minutes for pickup or delivery]
 ORDER_END
 
-CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY to ORDER_CONFIRMED format. Do NOT ask for confirmation.`;
+**IMPORTANT**: Only create ORDER_CONFIRMED after you have:
+- Customer name
+- Order type (pickup or delivery)
+- Items ordered
+- For delivery: validated address
+- For pickup: just the above items`;
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -935,7 +938,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Validate delivery address - ONLY call this when customer has provided what looks like a complete address with street number, street name, city, state, zip. CRITICAL: Call this IMMEDIATELY when customer provides address details.",
+                            description: "CRITICAL: ONLY call this for DELIVERY orders when customer has provided a complete address. NEVER call for pickup orders.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -1018,6 +1021,15 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                             text: response.transcript
                         });
                         
+                        // Extract customer name from AI responses
+                        if (!customerName && response.transcript.includes('Customer Name:')) {
+                            const nameMatch = response.transcript.match(/Customer Name:\s*([^\n\r-]+)/);
+                            if (nameMatch) {
+                                customerName = nameMatch[1].trim();
+                                console.log('Customer name captured:', customerName);
+                            }
+                        }
+                        
                         // Process order only after successful validation and not during modification calls
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !isModificationCall && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
@@ -1050,6 +1062,32 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         
                         const customerMessage = response.transcript.trim();
                         
+                        // Extract customer name from conversation
+                        if (!customerName && !isModificationCall) {
+                            // Look for name patterns in responses to name questions
+                            const namePatterns = [
+                                /my name is (\w+)/i,
+                                /I'm (\w+)/i,
+                                /this is (\w+)/i,
+                                /(\w+) here/i
+                            ];
+                            
+                            const lastAIMessage = conversationTranscript
+                                .filter(msg => msg.speaker === 'AI')
+                                .slice(-1)[0]?.text || '';
+                            
+                            if (lastAIMessage.toLowerCase().includes('name')) {
+                                for (let pattern of namePatterns) {
+                                    const match = customerMessage.match(pattern);
+                                    if (match) {
+                                        customerName = match[1].trim();
+                                        console.log('Customer name extracted:', customerName);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Auto-search for orders when customer mentions modification
                         const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
                         if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
@@ -1072,21 +1110,13 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                                 }
                             }, 500);
                         }
-                        
-                        // Check if customer provided address and trigger validation
-                        const hasAddressPattern = /\d+.*?(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr|maryland|md)/i.test(customerMessage);
-                        
-                        if (hasAddressPattern && !addressValidationInProgress && !addressValidationPending) {
-                            console.log('Customer provided address, marking for validation:', customerMessage);
-                            addressValidationPending = true;
-                        }
 
                         // Create customer message record
                         if (restaurant && customerMessage && customerMessage.length > 3) {
                             const messageData = {
                                 restaurant_id: restaurant.id,
                                 customer_phone: customerPhone,
-                                customer_name: 'Unknown',
+                                customer_name: customerName || 'Unknown',
                                 message_type: 'voice_call',
                                 subject: 'Voice Call Message',
                                 message_content: customerMessage,
@@ -1291,6 +1321,18 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                     break;
 
                 case 'validate_delivery_address':
+                    // CRITICAL: Prevent validation for pickup orders
+                    if (currentOrderType === 'pickup') {
+                        console.log('BLOCKING address validation for pickup order');
+                        result = {
+                            valid: false,
+                            message: 'Address validation is not needed for pickup orders.',
+                            pickup_order: true,
+                            instruction: 'This is a pickup order. Do not validate address. Create ORDER_CONFIRMED immediately.'
+                        };
+                        break;
+                    }
+
                     // Prevent multiple validations and handle caching
                     if (addressValidationInProgress) {
                         console.log('Validation already in progress, skipping...');
@@ -1574,7 +1616,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                     transcript.indexOf('ORDER_END')
                 ).trim();
                 
-                let customerName = '';
+                let extractedCustomerName = '';
                 let items = '';
                 let orderType = 'pickup';
                 let deliveryAddress = null;
@@ -1592,7 +1634,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                     const value = line.substring(colonIndex + 1).trim();
                     
                     if (key.includes('customer name')) {
-                        customerName = value;
+                        extractedCustomerName = value;
                     } else if (key.includes('order type')) {
                         orderType = value.toLowerCase();
                     } else if (key.includes('delivery address')) {
@@ -1617,8 +1659,11 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                     }
                 }
                 
+                // Use extracted customer name or fallback to stored name
+                const finalCustomerName = extractedCustomerName || customerName || 'Unknown Customer';
+                
                 // Validate required fields
-                if (!customerName) {
+                if (!finalCustomerName || finalCustomerName === 'Unknown Customer') {
                     console.log('Order processing failed: Missing customer name');
                     orderProcessed = false;
                     return;
@@ -1641,11 +1686,11 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                 const orderData = {
                     restaurant_id: restaurant.id,
                     customer_phone: customerPhone,
-                    customer_name: customerName,
+                    customer_name: finalCustomerName,
                     total_amount: totalAmount || 0,
                     order_type: orderType,
                     delivery_address: deliveryAddress,
-                    order_details: `Customer: ${customerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup Order'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
+                    order_details: `Customer: ${finalCustomerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup Order'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
                     special_instructions: specialInstructions || '',
                     call_sid: callSid,
                     ready_time: timing.readyTimeString,
@@ -1814,6 +1859,9 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`All Edge Functions integrated and active`);
     console.log(`FIXED: Automatic caller ID lookup for order modifications`);
     console.log(`FIXED: Only PENDING orders can be modified or cancelled`);
+    console.log(`FIXED: Address validation only for delivery orders`);
+    console.log(`FIXED: Customer name collection improved`);
+    console.log(`FIXED: Order type detection and processing`);
     console.log(`NEW: Message system for non-pending orders instead of phone calls`);
     console.log(`NEW: Auto-search orders when modification keywords detected`);
     
