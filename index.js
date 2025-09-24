@@ -1817,12 +1817,12 @@ After successfully completing an order, cancellation, modification, or sending a
                         order_id: cancelOrderId
                     };
 
-                    // Auto-hangup after successful cancellation
-                    if (cancelResult) {
-                        setTimeout(async () => {
-                            await hangupAfterCancellation(callSid, restaurant);
-                        }, 3000);
-                    }
+                    // Remove auto-hangup - let "anything else" flow handle it
+                    // if (cancelResult) {
+                    //     setTimeout(async () => {
+                    //         await hangupAfterCancellation(callSid, restaurant);
+                    //     }, 3000);
+                    // }
                     break;
 
                 case 'update_order':
@@ -1856,12 +1856,12 @@ After successfully completing an order, cancellation, modification, or sending a
                         modifications: parsedArgs.modifications
                     };
 
-                    // Auto-hangup after successful modification
-                    if (updateResult) {
-                        setTimeout(async () => {
-                            await hangupAfterModification(callSid, restaurant);
-                        }, 3000);
-                    }
+                    // Remove auto-hangup - let "anything else" flow handle it
+                    // if (updateResult) {
+                    //     setTimeout(async () => {
+                    //         await hangupAfterModification(callSid, restaurant);
+                    //     }, 3000);
+                    // }
                     break;
 
                 case 'send_message_to_restaurant':
@@ -1895,16 +1895,16 @@ After successfully completing an order, cancellation, modification, or sending a
                             message_id: messageResult.message_id || messageResult.data?.id
                         };
 
-                        // Auto-hangup after sending message
-                        setTimeout(async () => {
-                            await hangup(callSid, {
-                                method: 'graceful',
-                                reason: 'message_sent',
-                                restaurant: restaurant,
-                                message: `Your message has been sent to ${restaurant.name}. They will contact you as soon as possible. Thank you for calling!`,
-                                delay: 2000
-                            });
-                        }, 1000);
+                        // Remove auto-hangup after message - let "anything else" flow handle it
+                        // setTimeout(async () => {
+                        //     await hangup(callSid, {
+                        //         method: 'graceful',
+                        //         reason: 'message_sent',
+                        //         restaurant: restaurant,
+                        //         message: `Your message has been sent to ${restaurant.name}. They will contact you as soon as possible. Thank you for calling!`,
+                        //         delay: 2000
+                        //     });
+                        // }, 1000);
                     } else {
                         result = {
                             success: false,
