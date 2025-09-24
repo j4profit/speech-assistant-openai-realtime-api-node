@@ -44,6 +44,126 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // =============================================================================
+// MESSAGE FILTERING FUNCTIONS
+// =============================================================================
+
+// Message filtering functions
+function shouldCreateCustomerMessage(transcription) {
+    const message = transcription.toLowerCase().trim();
+    
+    // Don't create messages for empty or very short responses
+    if (!message || message.length < 5) {
+        return false;
+    }
+    
+    // Common conversational responses that don't require restaurant attention
+    const normalResponses = [
+        'yes', 'no', 'yeah', 'yep', 'nope', 'okay', 'ok', 'sure', 'alright',
+        'hello', 'hi', 'hey', 'goodbye', 'bye', 'thank you', 'thanks',
+        'you\'re welcome', 'welcome', 'please', 'excuse me', 'sorry',
+        'i\'m all set', 'all set', 'that\'s it', 'that\'s all',
+        'sounds good', 'perfect', 'great', 'awesome', 'wonderful'
+    ];
+    
+    if (normalResponses.includes(message)) {
+        return false;
+    }
+    
+    // Normal ordering conversation patterns
+    const orderingPatterns = [
+        /^(i want|i'd like|i'll have|can i get|i need)/,
+        /^(large|medium|small|extra).*(pizza|wing|salad|drink)/,
+        /^my name is/,
+        /^(pickup|delivery)/,
+        /^what.*your.*(hours|location|address|phone)/,
+        /^where are you/,
+        /^how much.*cost/,
+        /^what.*menu/,
+        /^do you have/,
+        /^can you/,
+        /^is.*available/,
+        /^what time/,
+        /^how long/,
+        /^(cancel|change|modify).*order/ // These get handled by functions
+    ];
+    
+    for (const pattern of orderingPatterns) {
+        if (pattern.test(message)) {
+            return false;
+        }
+    }
+    
+    // Keywords that indicate issues requiring restaurant attention
+    const issueKeywords = [
+        'complaint', 'complain', 'problem', 'issue', 'wrong', 'mistake',
+        'manager', 'supervisor', 'speak to', 'talk to', 'cold', 'burnt',
+        'late', 'never arrived', 'missing', 'forgot', 'incorrect',
+        'refund', 'money back', 'dissatisfied', 'unhappy', 'angry',
+        'terrible', 'awful', 'horrible', 'disgusting', 'inedible',
+        'overcharged', 'charged wrong', 'billing', 'receipt',
+        'allergic reaction', 'sick', 'food poisoning', 'hair in food',
+        'dirty', 'unsanitary', 'rude', 'unprofessional'
+    ];
+    
+    // Check for issue keywords
+    for (const keyword of issueKeywords) {
+        if (message.includes(keyword)) {
+            return true;
+        }
+    }
+    
+    // Check for requests to speak to humans
+    const humanRequestPatterns = [
+        /speak.*manager/,
+        /talk.*manager/,
+        /get.*manager/,
+        /human/,
+        /person/,
+        /someone.*charge/,
+        /file.*complaint/,
+        /report.*problem/
+    ];
+    
+    for (const pattern of humanRequestPatterns) {
+        if (pattern.test(message)) {
+            return true;
+        }
+    }
+    
+    return false; // Default: don't create message for normal conversation
+}
+
+function determineMessagePriority(transcription) {
+    const message = transcription.toLowerCase();
+    
+    // High priority issues
+    const highPriorityKeywords = [
+        'allergic reaction', 'sick', 'food poisoning', 'emergency',
+        'refund', 'money back', 'overcharged', 'charged wrong'
+    ];
+    
+    for (const keyword of highPriorityKeywords) {
+        if (message.includes(keyword)) {
+            return 'high';
+        }
+    }
+    
+    // Medium priority issues
+    const mediumPriorityKeywords = [
+        'manager', 'complaint', 'wrong', 'mistake', 'missing',
+        'late', 'never arrived', 'cold', 'burnt'
+    ];
+    
+    for (const keyword of mediumPriorityKeywords) {
+        if (message.includes(keyword)) {
+            return 'medium';
+        }
+    }
+    
+    return 'normal';
+}
+
+// =============================================================================
 // UNIVERSAL HANGUP FUNCTION
 // =============================================================================
 
@@ -1432,18 +1552,19 @@ After successfully completing an order, cancellation, modification, or sending a
                             }, 500);
                         }
 
-                        // Create customer message record
-                        if (restaurant && customerMessage && customerMessage.length > 3) {
+                        // Create customer message record ONLY if it requires restaurant attention
+                        if (restaurant && customerMessage && customerMessage.length > 3 && shouldCreateCustomerMessage(customerMessage)) {
+                            console.log('Creating customer message for issue requiring restaurant attention');
                             const messageData = {
                                 restaurant_id: restaurant.id,
                                 customer_phone: customerPhone,
                                 customer_name: customerName || 'Unknown',
                                 message_type: 'voice_call',
-                                subject: 'Voice Call Message',
+                                subject: 'Customer Issue - Voice Call',
                                 message_content: customerMessage,
                                 call_sid: callSid,
                                 order_reference: null,
-                                priority: 'normal'
+                                priority: determineMessagePriority(customerMessage)
                             };
                             
                             // Create customer message using Edge Function
@@ -1824,13 +1945,6 @@ After successfully completing an order, cancellation, modification, or sending a
                         message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order',
                         order_id: cancelOrderId
                     };
-
-                    // Remove auto-hangup - let "anything else" flow handle it
-                    // if (cancelResult) {
-                    //     setTimeout(async () => {
-                    //         await hangupAfterCancellation(callSid, restaurant);
-                    //     }, 3000);
-                    // }
                     break;
 
                 case 'update_order':
@@ -1863,13 +1977,6 @@ After successfully completing an order, cancellation, modification, or sending a
                         order_id: orderId,
                         modifications: parsedArgs.modifications
                     };
-
-                    // Remove auto-hangup - let "anything else" flow handle it
-                    // if (updateResult) {
-                    //     setTimeout(async () => {
-                    //         await hangupAfterModification(callSid, restaurant);
-                    //     }, 3000);
-                    // }
                     break;
 
                 case 'send_message_to_restaurant':
@@ -1902,17 +2009,6 @@ After successfully completing an order, cancellation, modification, or sending a
                             message: 'Your message has been sent to the restaurant. Since they are quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible.',
                             message_id: messageResult.message_id || messageResult.data?.id
                         };
-
-                        // Remove auto-hangup after message - let "anything else" flow handle it
-                        // setTimeout(async () => {
-                        //     await hangup(callSid, {
-                        //         method: 'graceful',
-                        //         reason: 'message_sent',
-                        //         restaurant: restaurant,
-                        //         message: `Your message has been sent to ${restaurant.name}. They will contact you as soon as possible. Thank you for calling!`,
-                        //         delay: 2000
-                        //     });
-                        // }, 1000);
                     } else {
                         result = {
                             success: false,
@@ -2289,6 +2385,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`NEW: Auto-search orders when modification keywords detected`);
     console.log(`NEW: Universal hangup system with automatic call completion`);
     console.log(`NEW: Graceful error handling with appropriate hangups`);
+    console.log(`NEW: Intelligent message filtering system - only creates messages for genuine issues`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
