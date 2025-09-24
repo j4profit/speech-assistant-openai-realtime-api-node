@@ -1304,19 +1304,27 @@ After successfully completing an order, cancellation, modification, or sending a
                             }, 2000);
                         }
 
-                        // Check for completion phrases that should trigger "anything else" flow
+                        // Check for completion phrases that should trigger "anything else" flow (prevent loops)
                         const completionPhrases = [
                             'your order is confirmed',
                             'order has been confirmed',
                             'your order has been cancelled',
                             'order cancelled successfully',
                             'order has been updated',
-                            'message has been sent',
-                            'your all set',
-                            "you're all set"
+                            'message has been sent'
                         ];
                         
-                        if (completionPhrases.some(phrase => response.transcript.toLowerCase().includes(phrase))) {
+                        // Prevent triggering on "you're all set" to avoid loops
+                        const isCompletionPhrase = completionPhrases.some(phrase => 
+                            response.transcript.toLowerCase().includes(phrase)
+                        );
+                        
+                        // Only trigger if it's a completion phrase AND we haven't already asked "anything else"
+                        const alreadyAskedAnythingElse = conversationTranscript
+                            .filter(msg => msg.speaker === 'AI')
+                            .some(msg => msg.text.toLowerCase().includes('anything else'));
+                        
+                        if (isCompletionPhrase && !alreadyAskedAnythingElse) {
                             // Trigger "anything else" flow after order/task completion
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
