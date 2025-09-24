@@ -141,80 +141,7 @@ app.get('/orders', async (req, res) => {
             })
         });
 
-        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.close();
-        }
-    });
-    
-    ws.on('error', (error) => {
-        console.error('Twilio WebSocket error:', error);
-    });
-});
-
-// =============================================================================
-// SERVER STARTUP
-// =============================================================================
-
-// Ensure port is properly configured
-const PORT = process.env.PORT || 3000;
-console.log('Configured to run on port:', PORT);
-console.log('NODE_ENV:', process.env.NODE_ENV);
-
-wss.on('error', (error) => {
-    console.error('WebSocket Server error:', error);
-});
-
-// Start server with explicit error handling and immediate port binding
-server.listen(PORT, '0.0.0.0', (error) => {
-    if (error) {
-        console.error('Server failed to start:', error);
-        process.exit(1);
-    }
-    
-    console.log(`Restaurant AI System running on port ${PORT}`);
-    console.log(`Server address: http://0.0.0.0:${PORT}`);
-    console.log(`Ready to take orders and messages via phone calls`);
-    console.log(`WebSocket ready for Twilio Media Streams`);
-    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
-    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
-    console.log(`Multi-tenant delivery controls enabled`);
-    console.log(`Enhanced address validation and error handling active`);
-    console.log(`All Edge Functions integrated and active`);
-    console.log(`FIXED: Automatic caller ID lookup for order modifications`);
-    console.log(`FIXED: Only PENDING orders can be modified or cancelled`);
-    console.log(`NEW: Auto-search orders when modification keywords detected`);
-    
-    // Immediately log that the server is ready for connections
-    console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
-});
-
-// Handle server errors
-server.on('error', (error) => {
-    console.error('Server error:', error);
-    if (error.code === 'EADDRINUSE') {
-        console.error(`Port ${PORT} is already in use`);
-    } else if (error.code === 'EACCES') {
-        console.error(`Permission denied to bind to port ${PORT}`);
-    }
-    process.exit(1);
-});
-
-// Handle process termination gracefully
-process.on('SIGTERM', () => {
-    console.log('Received SIGTERM, shutting down gracefully');
-    server.close(() => {
-        console.log('Server closed');
-        process.exit(0);
-    });
-});
-
-process.on('SIGINT', () => {
-    console.log('Received SIGINT, shutting down gracefully');
-    server.close(() => {
-        console.log('Server closed');
-        process.exit(0);
-    });
-});!response.ok) {
+        if (!response.ok) {
             return res.status(500).json({ error: 'Failed to fetch orders' });
         }
 
@@ -371,7 +298,7 @@ async function updateCallLog(callSid, updateData) {
     }
 }
 
-// **UPDATED** - Search for recent orders (both pending and non-pending) using Edge Function
+// Search for recent orders using Edge Function
 async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statusFilter = null) {
     try {
         console.log('Searching orders for phone:', phoneNumber, 'restaurant:', restaurantId, 'status filter:', statusFilter);
@@ -382,10 +309,6 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
             days_back: daysBack
         };
 
-        // If we want to search for pending only, we don't add status filter since Edge Function defaults to pending
-        // If we want all orders, we need to modify the Edge Function or create a new one
-        // For now, we'll work with the existing Edge Function that returns pending orders
-        
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
             method: 'POST',
             headers: {
@@ -403,7 +326,6 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
         const result = await response.json();
         console.log('Search orders result:', result);
         
-        // Return the orders array from result.orders, not result.data
         const orders = result.orders || [];
         console.log(`Found ${orders.length} orders for phone ${phoneNumber}`);
         
@@ -608,10 +530,62 @@ async function createCustomerMessage(messageData) {
             return null;
         }
 
-        console.log('Customer message created successfully:', result.data?.id);
-        return result.data;
+        console.log('Customer message created successfully:', result.data?.id || result.message_id);
+        return result.data || result;
     } catch (error) {
         console.error('Error calling create-message Edge Function:', error);
+        return null;
+    }
+}
+
+// Create restaurant message for non-pending order requests or customer messages
+async function createRestaurantMessage(customerPhone, customerName, restaurant, orderReference, requestDetails, messageType = 'order_modification_request') {
+    try {
+        let subject, messageContent, priority;
+        
+        if (messageType === 'customer_message') {
+            subject = 'Customer Message';
+            messageContent = `Customer ${customerName || 'Unknown'} (${customerPhone}) has sent a message:\n\n${requestDetails}`;
+            priority = 'normal';
+        } else {
+            subject = 'Customer Order Modification Request';
+            messageContent = `Customer ${customerName || 'Unknown'} (${customerPhone}) is requesting changes to an order that is already in progress.\n\nOrder Reference: ${orderReference}\n\nRequest Details: ${requestDetails}\n\nThis order is beyond the pending status and requires restaurant attention.`;
+            priority = 'high';
+        }
+
+        const messageData = {
+            restaurant_id: restaurant.id,
+            customer_phone: customerPhone,
+            customer_name: customerName || 'Unknown Customer',
+            message_type: messageType,
+            subject: subject,
+            message_content: messageContent,
+            call_sid: null,
+            order_reference: orderReference,
+            priority: priority
+        };
+
+        console.log('Creating restaurant message:', messageData);
+
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify(messageData)
+        });
+
+        if (!response.ok) {
+            console.error('Restaurant message creation failed:', response.status);
+            return null;
+        }
+
+        const result = await response.json();
+        console.log('Restaurant message created successfully:', result.message_id || result.data?.id);
+        return result;
+    } catch (error) {
+        console.error('Error creating restaurant message:', error);
         return null;
     }
 }
@@ -869,9 +843,9 @@ ${!restaurant.delivery_enabled ?
 ${menuText}
 
 **CRITICAL ORDER MODIFICATION RULES:**
-- ONLY orders with status "pending" can be modified or cancelled
-- Orders with status "confirmed", "preparing", "ready", or "delivered" CANNOT be changed
-- If customer has non-pending orders, say: "I see you have orders that are already being prepared. For orders already in progress, you'll need to call the restaurant directly at ${restaurant.phone || 'the restaurant phone number'} as they're quite busy and can't guarantee changes."
+- ONLY orders with status "pending" can be modified or cancelled directly
+- Orders with status "confirmed", "preparing", "ready", or "delivered" CANNOT be changed directly
+- If customer has non-pending orders, say: "I see you have orders that are already being prepared. I've sent a message to the restaurant about your request. Since the restaurant is quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible."
 
 **CRITICAL ORDER MODIFICATION FLOW:**
 When customer mentions wanting to change/modify/cancel an order:
@@ -879,7 +853,8 @@ When customer mentions wanting to change/modify/cancel an order:
 2. The system will automatically search using their caller ID (${customerPhone})
 3. ONLY if no orders are found, then ask: "I don't see any recent orders from this number. What phone number did you use when placing the order?"
 4. If PENDING orders ARE found, immediately tell them about their order(s) and ask what they'd like to change
-5. If only NON-PENDING orders are found, inform them to call the restaurant directly
+5. If only NON-PENDING orders are found, automatically create a message to the restaurant and inform customer
+6. If customer wants to leave additional details or has other concerns, use send_message_to_restaurant function
 
 **CRITICAL ADDRESS VALIDATION TIMING RULES - MUST FOLLOW EXACTLY:**
 
@@ -945,7 +920,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         {
                             type: "function",
                             name: "search_recent_orders",
-                            description: "Search for recent PENDING orders only. The system automatically uses the caller's phone number first. Only provide phone_number parameter if customer gives a different number.",
+                            description: "Search for recent orders. The system automatically uses the caller's phone number first. Only provide phone_number parameter if customer gives a different number.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -997,6 +972,21 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                                     new_total: { type: "number", description: "New total amount" }
                                 },
                                 required: ["order_id", "modifications"]
+                            }
+                        },
+                        {
+                            type: "function",
+                            name: "send_message_to_restaurant", 
+                            description: "Send a message to the restaurant for non-pending orders or general inquiries",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    customer_name: { type: "string", description: "Customer's name" },
+                                    message_content: { type: "string", description: "The message content from the customer" },
+                                    order_reference: { type: "string", description: "Order ID if related to a specific order" },
+                                    subject: { type: "string", description: "Subject of the message" }
+                                },
+                                required: ["customer_name", "message_content"]
                             }
                         }
                     ]
@@ -1096,7 +1086,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                             const messageData = {
                                 restaurant_id: restaurant.id,
                                 customer_phone: customerPhone,
-                                customer_name: 'Unknown', // We don't have customer name at this point
+                                customer_name: 'Unknown',
                                 message_type: 'voice_call',
                                 subject: 'Voice Call Message',
                                 message_content: customerMessage,
@@ -1170,7 +1160,7 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
         });
     }
 
-    // **FIXED** - Enhanced function call handler with pending-only order processing
+    // Enhanced function call handler with pending and non-pending order processing
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1272,13 +1262,14 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                             customerName, 
                             restaurant, 
                             latestOrder.id,
-                            'Customer called requesting order modifications but order is already in progress'
+                            'Customer called requesting order modifications but order is already in progress',
+                            'order_modification_request'
                         );
 
                         result = {
                             orders: [],
                             count: 0,
-                            message: `I found your order, but it's already being prepared (status: ${latestOrder.status}). I've sent a message to the restaurant about your request. For immediate assistance with orders already in progress, please call the restaurant directly at ${restaurant.phone || 'the restaurant number'}.`,
+                            message: `I found your order, but it's already being prepared (status: ${latestOrder.status}). I've sent a message to the restaurant about your request. Since the restaurant is quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible.`,
                             phone_searched: phoneNumber,
                             has_non_pending_only: true,
                             restaurant_message_sent: true
@@ -1466,6 +1457,44 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
                         order_id: orderId,
                         modifications: parsedArgs.modifications
                     };
+                    break;
+
+                case 'send_message_to_restaurant':
+                    // Allow customers to send messages for non-pending orders or general inquiries
+                    const customerName = parsedArgs.customer_name || 'Unknown Customer';
+                    const messageContent = parsedArgs.message_content;
+                    const orderReference = parsedArgs.order_reference || null;
+                    const subject = parsedArgs.subject || 'Customer Message';
+                    
+                    if (!messageContent) {
+                        result = {
+                            success: false,
+                            error: 'Message content is required'
+                        };
+                        break;
+                    }
+
+                    // Create the restaurant message
+                    const messageResult = await createRestaurantMessage(
+                        customerPhone,
+                        customerName,
+                        restaurant,
+                        orderReference,
+                        messageContent
+                    );
+
+                    if (messageResult) {
+                        result = {
+                            success: true,
+                            message: 'Your message has been sent to the restaurant. Since they are quite busy, it may take some time for them to get back to you, but they will review your message and contact you as soon as possible.',
+                            message_id: messageResult.message_id || messageResult.data?.id
+                        };
+                    } else {
+                        result = {
+                            success: false,
+                            message: 'Sorry, there was an issue sending your message. Please try again or contact the restaurant directly.'
+                        };
+                    }
                     break;
 
                 default:
@@ -1664,84 +1693,3 @@ CRITICAL TIMING RULE: After successful address validation, proceed IMMEDIATELY t
             switch (data.event) {
                 case 'connected':
                     console.log('Twilio connected');
-                    break;
-                    
-                case 'start':
-                    streamSid = data.start.streamSid;
-                    const calledNumber = data.start.customParameters?.Called || data.start.customParameters?.To;
-                    const fromNumber = data.start.customParameters?.From || data.start.customParameters?.Caller;
-                    const callId = data.start.customParameters?.CallSid || data.start.callSid;
-                    
-                    console.log('Stream started:', streamSid);
-                    console.log('Called number:', calledNumber);
-                    console.log('From number (caller ID):', fromNumber);
-                    console.log('Call ID:', callId);
-                    
-                    // Store call data for later updates
-                    callData = {
-                        call_sid: callId,
-                        from_number: fromNumber,
-                        to_number: calledNumber,
-                        stream_sid: streamSid,
-                        call_started_at: new Date().toISOString()
-                    };
-                    
-                    initializeOpenAI(calledNumber, fromNumber, callId);
-                    break;
-                    
-                case 'media':
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.send(JSON.stringify({
-                            type: 'input_audio_buffer.append',
-                            audio: data.media.payload
-                        }));
-                    }
-                    break;
-                    
-                case 'stop':
-                    console.log('Stream stopped');
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.close();
-                    }
-                    break;
-            }
-        } catch (error) {
-            console.error('Error processing Twilio message:', error);
-        }
-    });
-    
-    ws.on('close', async () => {
-        console.log('Twilio connection closed');
-        
-        const callEndTime = new Date();
-        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
-        
-        if (callSid) {
-            // Prepare comprehensive call log update with all required fields
-            const updateData = {
-                call_ended_at: callEndTime.toISOString(),
-                call_duration: callDuration,
-                conversation_transcript: JSON.stringify(conversationTranscript),
-                stream_sid: streamSid,
-                call_status: 'completed'
-            };
-
-            // Add additional fields if we have them from the original webhook
-            if (callData) {
-                updateData.call_started_at = callData.call_started_at;
-                updateData.from_number = callData.from_number;
-                updateData.to_number = callData.to_number;
-            }
-
-            console.log('Updating call log with complete data:', {
-                call_sid: callSid,
-                call_duration: callDuration,
-                conversation_items: conversationTranscript.length,
-                call_ended_at: callEndTime.toISOString()
-            });
-
-            await updateCallLog(callSid, updateData);
-            console.log(`Call completed. Duration: ${callDuration} seconds`);
-        }
-        
-        if
