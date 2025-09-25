@@ -1896,24 +1896,40 @@ After successfully completing an order, cancellation, modification, or sending a
 
                 case 'create_customer_message':
                     // Intent-based customer message creation - let AI decide when this is needed
+                    
+                    // Ensure we have required data with proper fallbacks
+                    const finalCustomerName = parsedArgs.customer_name || customerName || 'Customer';
+                    const finalMessageContent = parsedArgs.message_content || 'Customer callback request';
+                    const finalSubject = parsedArgs.subject || 'Customer Callback Request';
+                    const finalPriority = parsedArgs.priority || 'normal';
+                    
+                    console.log('Creating customer message with data:', {
+                        customer_name: finalCustomerName,
+                        message_content: finalMessageContent,
+                        subject: finalSubject,
+                        priority: finalPriority,
+                        phone: customerPhone
+                    });
+                    
                     const customerMessageData = {
                         restaurant_id: restaurant.id,
-                        customer_phone: customerPhone,
-                        customer_name: parsedArgs.customer_name || customerName || 'Unknown Customer',
+                        customer_phone: customerPhone || 'Unknown',
+                        customer_name: finalCustomerName,
                         message_type: 'voice_call_issue',
-                        subject: parsedArgs.subject || 'Customer Issue - Voice Call',
-                        message_content: parsedArgs.message_content,
+                        subject: finalSubject,
+                        message_content: finalMessageContent,
                         call_sid: callSid,
                         order_reference: null,
-                        priority: parsedArgs.priority || 'normal'
+                        priority: finalPriority
                     };
 
                     const customerMessageResult = await createCustomerMessage(customerMessageData);
                     
                     if (customerMessageResult) {
+                        console.log('Customer message created successfully:', customerMessageResult);
                         result = {
                             success: true,
-                            message: 'I\'ve recorded your message and sent it to the restaurant. They will review it and get back to you as soon as possible.',
+                            message: `I\'ve sent your request for the owner to call you back. Since the restaurant is quite busy, it may take up to a day for them to get back to you, but they will review your message and contact you as soon as possible.`,
                             message_id: customerMessageResult.message_id || customerMessageResult.data?.id
                         };
                     } else {
