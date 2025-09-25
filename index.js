@@ -1155,7 +1155,56 @@ ORDER_END`;
                     break;
 
                 case 'validate_delivery_address':
-                    const address = parsedArgs.address;
+                    let deliveryAddress = parsedArgs.address;
+                    
+                    // If address not provided in function args, extract from recent conversation
+                    if (!deliveryAddress || deliveryAddress.trim().length === 0) {
+                        console.log('Address not provided in function args, extracting from conversation...');
+                        
+                        // Get recent customer messages that likely contain the address
+                        const recentCustomerMessages = conversationTranscript
+                            .filter(msg => msg.speaker === 'Customer')
+                            .slice(-3) // Look at last 3 customer messages
+                            .map(msg => msg.text)
+                            .join(' ');
+                        
+                        console.log('Searching for address in:', recentCustomerMessages);
+                        
+                        // Enhanced address extraction patterns
+                        const addressPatterns = [
+                            // Complete address with number, street, city, state, zip
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
+                            // Address with common abbreviations
+                            /\b\d+\s+[\w\s]+(?:rd|st|ave|ln|dr|ct|pl|way|blvd)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
+                            // Number + street + city + state + zip (more flexible)
+                            /\b\d+\s+[A-Za-z][\w\s,.-]*(?:maryland|md)[^,]*,?\s*\d{5}\b/gi,
+                            // Very liberal: number + text ending with 5-digit zip
+                            /\b\d+\s+[\w\s,.-]+\d{5}\b/gi
+                        ];
+                        
+                        for (let pattern of addressPatterns) {
+                            const matches = recentCustomerMessages.match(pattern);
+                            if (matches && matches.length > 0) {
+                                // Get the longest match (most likely to be complete)
+                                deliveryAddress = matches.reduce((longest, current) => 
+                                    current.length > longest.length ? current : longest
+                                ).trim();
+                                
+                                console.log('Extracted address from conversation:', deliveryAddress);
+                                break;
+                            }
+                        }
+                        
+                        // If still no address found, try a simpler approach
+                        if (!deliveryAddress && recentCustomerMessages.length > 0) {
+                            // Look for any sequence starting with a number that looks like an address
+                            const simpleMatch = recentCustomerMessages.match(/\b\d+\s+[^.!?]+/g);
+                            if (simpleMatch) {
+                                deliveryAddress = simpleMatch[simpleMatch.length - 1].trim(); // Get the last match
+                                console.log('Fallback address extraction:', deliveryAddress);
+                            }
+                        }
+                    }
                     
                     if (!restaurant.delivery_enabled) {
                         result = {
@@ -1166,14 +1215,28 @@ ORDER_END`;
                         break;
                     }
                     
-                    const validationResult = await validateDeliveryAddress(address, restaurant);
+                    // Check if we successfully extracted an address
+                    if (!deliveryAddress || deliveryAddress.trim().length < 10) {
+                        console.log('No valid address found in conversation');
+                        result = {
+                            valid: false,
+                            message: 'I need your complete delivery address. Please provide the street number, street name, city, state, and zip code.',
+                            address: deliveryAddress || '',
+                            needs_address: true,
+                            instruction: 'Customer has not provided a complete address yet. Ask them to provide their delivery address.'
+                        };
+                        break;
+                    }
+                    
+                    console.log('Validating extracted address:', deliveryAddress);
+                    const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
                     
                     if (validationResult.valid) {
                         result = {
                             ...validationResult,
                             instruction: 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately with all collected information.',
                             status: 'APPROVED',
-                            confirmed_address: address,
+                            confirmed_address: deliveryAddress,
                             proceed_to_order: true
                         };
                     } else {
