@@ -64,7 +64,7 @@ async function hangup(callSid, options = {}) {
         delay = 0
     } = options;
 
-    console.log(`Hangup initiated: ${callSid} - Method: ${method}, Reason: ${reason}`);
+    console.log('Hangup initiated: ' + callSid + ' - Method: ' + method + ', Reason: ' + reason);
 
     try {
         if (delay > 0) {
@@ -73,7 +73,7 @@ async function hangup(callSid, options = {}) {
 
         if (method === 'immediate') {
             await twilioClient.calls(callSid).update({ status: 'completed' });
-            console.log(`Call terminated immediately: ${callSid}`);
+            console.log('Call terminated immediately: ' + callSid);
             return { success: true, method: 'immediate', reason: reason, call_sid: callSid };
         }
 
@@ -81,7 +81,7 @@ async function hangup(callSid, options = {}) {
             let finalMessage = message;
             if (!finalMessage) {
                 finalMessage = restaurant ? 
-                    `Thank you for calling ${restaurant.name}. Have a great day!` : 
+                    'Thank you for calling ' + restaurant.name + '. Have a great day!' : 
                     'Thank you for calling. Have a great day!';
             }
 
@@ -93,15 +93,15 @@ async function hangup(callSid, options = {}) {
             };
 
             const hangupUrl = BASE_URL ? 
-                `${BASE_URL}/hangup-twiml?call_sid=${callSid}` : 
-                `https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com/hangup-twiml?call_sid=${callSid}`;
+                BASE_URL + '/hangup-twiml?call_sid=' + callSid : 
+                'https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com/hangup-twiml?call_sid=' + callSid;
             
             await twilioClient.calls(callSid).update({
                 url: hangupUrl,
                 method: 'POST'
             });
 
-            console.log(`Call redirected to graceful hangup: ${callSid}`);
+            console.log('Call redirected to graceful hangup: ' + callSid);
             return {
                 success: true,
                 method: 'graceful',
@@ -111,10 +111,10 @@ async function hangup(callSid, options = {}) {
             };
         }
 
-        return { success: false, error: `Invalid method: ${method}` };
+        return { success: false, error: 'Invalid method: ' + method };
 
     } catch (error) {
-        console.error(`Hangup failed for call ${callSid}:`, error);
+        console.error('Hangup failed for call ' + callSid + ':', error);
         return { 
             success: false, 
             error: error.message,
@@ -138,11 +138,7 @@ app.post('/hangup-twiml', (req, res) => {
         delete global.pendingHangupTwiML[callSid];
     }
     
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">${message}</Say>
-    <Hangup/>
-</Response>`;
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Say voice="alice">' + message + '</Say>\n    <Hangup/>\n</Response>';
     
     res.type('text/xml');
     res.send(twiml);
@@ -192,16 +188,7 @@ app.post('/voice', async (req, res) => {
         has_twilio_data: !!callData.twilio_data
     });
     
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Connect>
-        <Stream url="wss://${req.get('host')}/media-stream">
-            <Parameter name="Called" value="${req.body.Called || req.body.To}" />
-            <Parameter name="From" value="${req.body.From || req.body.Caller}" />
-            <Parameter name="CallSid" value="${req.body.CallSid}" />
-        </Stream>
-    </Connect>
-</Response>`;
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Connect>\n        <Stream url="wss://' + req.get('host') + '/media-stream">\n            <Parameter name="Called" value="' + (req.body.Called || req.body.To) + '" />\n            <Parameter name="From" value="' + (req.body.From || req.body.Caller) + '" />\n            <Parameter name="CallSid" value="' + req.body.CallSid + '" />\n        </Stream>\n    </Connect>\n</Response>';
     
     res.type('text/xml');
     res.send(twiml);
@@ -229,7 +216,7 @@ app.get('/', (req, res) => {
         message: 'Restaurant AI Ordering and Messaging System - Busy Restaurant Mode',
         status: 'running',
         port: process.env.PORT || 3000,
-        websocket_url: `wss://${req.get('host')}/media-stream`,
+        websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString()
     });
 });
@@ -241,7 +228,7 @@ app.get('/orders', async (req, res) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
                 limit: 50,
@@ -265,10 +252,7 @@ app.get('/messages', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('customer_messages')
-            .select(`
-                *,
-                restaurants(name, delivery_enabled, delivery_hours)
-            `)
+            .select('*, restaurants(name, delivery_enabled, delivery_hours)')
             .order('created_at', { ascending: false })
             .limit(50);
 
@@ -292,7 +276,7 @@ async function getRestaurantByPhone(phoneNumber) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({ phone_number: phoneNumber })
         });
@@ -326,7 +310,7 @@ async function createCallLog(callData) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify(callData)
         });
@@ -368,7 +352,7 @@ async function searchRecentOrders(phoneNumber, restaurantId) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
                 phone_number: phoneNumber,
@@ -392,7 +376,7 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
                 order_id: orderId,
@@ -414,7 +398,7 @@ async function updateOrder(orderId, updateData) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
                 order_id: orderId,
@@ -475,7 +459,7 @@ async function validateDeliveryAddress(address, restaurant) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
                 address: address.trim(),
@@ -535,7 +519,7 @@ async function createOrder(orderData) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify(orderData)
         });
@@ -567,7 +551,7 @@ async function createCustomerMessage(messageData) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify(messageData)
         });
@@ -609,7 +593,7 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         
         return {
             readyTime: readyTime,
-            readyTimeString: `${displayHours}:${displayMinutes} ${ampm}`,
+            readyTimeString: displayHours + ':' + displayMinutes + ' ' + ampm,
             preparationMinutes: preparationMinutes,
             deliveryMinutes: deliveryAddedMinutes,
             totalMinutes: totalMinutes
@@ -649,25 +633,25 @@ function formatMenuForAI(menuItems, restaurant) {
     const sortedCategories = Object.keys(categories).sort();
     
     sortedCategories.forEach(category => {
-        menuText += `\n${category.toUpperCase()}:\n`;
+        menuText += '\n' + category.toUpperCase() + ':\n';
         
         categories[category]
             .sort((a, b) => a.name.localeCompare(b.name))
             .forEach(item => {
-                menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.price}\n`;
+                menuText += '- ' + item.name + ': ' + (item.description || 'No description') + ' - ' + item.price + '\n';
             });
     });
 
     if (restaurant) {
-        menuText += `\n\nDELIVERY INFORMATION:\n`;
-        menuText += `- Delivery Available: ${restaurant.delivery_enabled ? 'Yes' : 'No'}\n`;
+        menuText += '\n\nDELIVERY INFORMATION:\n';
+        menuText += '- Delivery Available: ' + (restaurant.delivery_enabled ? 'Yes' : 'No') + '\n';
         
         if (restaurant.delivery_enabled) {
-            menuText += `- Delivery Hours: ${restaurant.delivery_hours || 'Same as restaurant hours'}\n`;
-            menuText += `- Delivery Radius: ${restaurant.delivery_radius || 'Contact restaurant'} miles\n`;
-            menuText += `- Estimated Delivery Time: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes\n`;
+            menuText += '- Delivery Hours: ' + (restaurant.delivery_hours || 'Same as restaurant hours') + '\n';
+            menuText += '- Delivery Radius: ' + (restaurant.delivery_radius || 'Contact restaurant') + ' miles\n';
+            menuText += '- Estimated Delivery Time: ' + ((restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)) + ' minutes\n';
         } else {
-            menuText += `- Pickup Only\n`;
+            menuText += '- Pickup Only\n';
         }
     }
 
@@ -717,7 +701,7 @@ wss.on('connection', (ws, req) => {
         
         openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
             headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Authorization': 'Bearer ' + OPENAI_API_KEY,
                 'OpenAI-Beta': 'realtime=v1'
             }
         });
@@ -729,83 +713,7 @@ wss.on('connection', (ws, req) => {
                 'Would you like this for pickup or delivery?' : 
                 'All orders are for pickup only.';
             
-            const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
-
-CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
-
-IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"
-
-IMPORTANT: ALWAYS get the customer's name BEFORE creating any order. Ask for their name when they want to place an order.
-
-**RESTAURANT STATUS: VERY BUSY**
-- The restaurant is extremely busy and cannot take phone calls
-- Staff are focused on preparing food and serving customers
-- You are the only way customers can place orders or leave messages
-
-**DELIVERY SETTINGS:**
-- Delivery Enabled: ${restaurant.delivery_enabled ? 'YES' : 'NO'}
-${!restaurant.delivery_enabled ? 
-    'IMPORTANT: This restaurant does NOT offer delivery. Only offer PICKUP orders.' :
-    'You can offer both pickup and delivery options.'}
-
-${menuText}
-
-**PRIMARY FUNCTIONS (in order of priority):**
-
-1. **PENDING ORDER MODIFICATIONS/CANCELLATIONS**
-   - If customer mentions changing/cancelling an order, immediately search their orders
-   - Only PENDING orders can be modified or cancelled
-   - For non-pending orders, create a message for restaurant staff
-
-2. **NEW ORDERS** 
-   - ALWAYS ask for customer name first if they want to order
-   - Get customer name, order type (pickup/delivery), items, and address (if delivery)
-   - For delivery orders: validate address before confirming
-   - Create ORDER_CONFIRMED format when complete (this is the ONLY exception to the 1-2 sentence rule)
-
-3. **CUSTOMER MESSAGES (for everything else)**
-   - For ANY other request, question, complaint, compliment, or callback request
-   - Always use create_customer_message function
-   - Say: "Since we're extremely busy, it may take until tomorrow for them to get back to you, but they will review your message."
-
-**RESPONSE LENGTH RULES:**
-- ALL responses must be 1-2 sentences maximum
-- Be direct and concise
-- Only exception: ORDER_CONFIRMED format (required for order processing)
-- No long explanations or detailed descriptions
-
-**MENU POLICY:**
-- NEVER automatically list menu items unless customer specifically asks for suggestions
-- If customer asks "What would you like to order?" just say "What would you like to order?" 
-- Only provide menu items when customer says: "What do you have?", "What's on the menu?", "I don't know what to order", or similar requests
-- The menu information is for YOUR reference only - don't recite it automatically
-
-**CALL COMPLETION:**
-After completing any task (order, cancellation, modification, or message):
-1. Complete the task (create ORDER_CONFIRMED format, etc.)
-2. Immediately ask: "Anything else I can help you with?"
-3. Wait for customer response
-4. If customer says no/nothing/that's all - system will auto-hangup
-5. If customer has another request - help them
-
-**ORDER COMPLETION SEQUENCE:**
-After saying ORDER_CONFIRMED format and ORDER_END, you MUST immediately ask: "Anything else I can help you with?"
-
-**ORDER_CONFIRMED FORMAT (EXACT FORMAT REQUIRED):**
-ORDER_CONFIRMED:
-- Customer Name: [name]
-- Phone: ${customerPhone || '[phone]'}
-- Order Type: [pickup or delivery]
-- Delivery Address: [address or N/A]
-- Items: [items with prices]
-- Total: $[amount]
-- Ready Time: [calculated minutes based on order type]
-ORDER_END
-
-IMPORTANT TIMING RULES:
-- For PICKUP orders: Use ${restaurant.preparation_time || 20} minutes
-- For DELIVERY orders: Use ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes
-- Always say: "Your [pickup/delivery] order will be ready in [X] minutes" after ORDER_END
+            const instructions = 'You are the AI assistant for ' + restaurant.name + '. The restaurant is extremely busy and cannot take phone calls right now, so you\'re helping customers place orders and take messages.\n\nCRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.\n\nIMPORTANT: Start every call with: "Hello! Thank you for calling ' + restaurant.name + '. We\'re extremely busy right now and can\'t take calls, but I can help you! ' + deliveryOptions + '"\n\nIMPORTANT: ALWAYS get the customer\'s name BEFORE creating any order. Ask for their name when they want to place an order.\n\n**RESTAURANT STATUS: VERY BUSY**\n- The restaurant is extremely busy and cannot take phone calls\n- Staff are focused on preparing food and serving customers\n- You are the only way customers can place orders or leave messages\n\n**DELIVERY SETTINGS:**\n- Delivery Enabled: ' + (restaurant.delivery_enabled ? 'YES' : 'NO') + '\n' + (!restaurant.delivery_enabled ? 'IMPORTANT: This restaurant does NOT offer delivery. Only offer PICKUP orders.' : 'You can offer both pickup and delivery options.') + '\n\n' + menuText + '\n\n**PRIMARY FUNCTIONS (in order of priority):**\n\n1. **PENDING ORDER MODIFICATIONS/CANCELLATIONS**\n   - If customer mentions changing/cancelling an order, immediately search their orders\n   - Only PENDING orders can be modified or cancelled\n   - For non-pending orders, create a message for restaurant staff\n\n2. **NEW ORDERS** \n   - ALWAYS ask for customer name first if they want to order\n   - Get customer name, order type (pickup/delivery), items, and address (if delivery)\n   - For delivery orders: validate address before confirming\n   - Create ORDER_CONFIRMED format when complete (this is the ONLY exception to the 1-2 sentence rule)\n\n3. **CUSTOMER MESSAGES (for everything else)**\n   - For ANY other request, question, complaint, compliment, or callback request\n   - Always use create_customer_message function\n   - Say: "Since we\'re extremely busy, it may take until tomorrow for them to get back to you, but they will review your message."\n\n**RESPONSE LENGTH RULES:**\n- ALL responses must be 1-2 sentences maximum\n- Be direct and concise\n- Only exception: ORDER_CONFIRMED format (required for order processing)\n- No long explanations or detailed descriptions\n\n**MENU POLICY:**\n- NEVER automatically list menu items unless customer specifically asks for suggestions\n- If customer asks "What would you like to order?" just say "What would you like to order?" \n- Only provide menu items when customer says: "What do you have?", "What\'s on the menu?", "I don\'t know what to order", or similar requests\n- The menu information is for YOUR reference only - don\'t recite it automatically\n\n**CALL COMPLETION:**\nAfter completing any task (order, cancellation, modification, or message):\n1. Complete the task (create ORDER_CONFIRMED format, etc.)\n2. Immediately ask: "Anything else I can help you with?"\n3. Wait for customer response\n4. If customer says no/nothing/that\'s all - system will auto-hangup\n5. If customer has another request - help them\n\n**ORDER COMPLETION SEQUENCE:**\nAfter saying ORDER_CONFIRMED format and ORDER_END, you MUST immediately ask: "Anything else I can help you with?"\n\n**ORDER_CONFIRMED FORMAT (EXACT FORMAT REQUIRED):**\nORDER_CONFIRMED:\n- Customer Name: [name]\n- Phone: ' + (customerPhone || '[phone]') + '\n- Order Type: [pickup or delivery]\n- Delivery Address: [address or N/A]\n- Items: [items with prices]\n- Total: $[amount]\n- Ready Time: [calculated minutes based on order type]\nORDER_END\n\nIMPORTANT TIMING RULES:\n- For PICKUP orders: Use ' + (restaurant.preparation_time || 20) + ' minutes\n- For DELIVERY orders: Use ' + ((restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)) + ' minutes\n- Always say: "Your [pickup/delivery] order will be ready in [X] minutes" after ORDER_END';
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1161,7 +1069,7 @@ IMPORTANT TIMING RULES:
             let result = null;
             let parsedArgs = {};
 
-            console.log(`Executing function: ${name} with args:`, args);
+            console.log('Executing function: ' + name + ' with args:', args);
 
             if (!args || args === '') {
                 parsedArgs = {};
@@ -1226,7 +1134,7 @@ IMPORTANT TIMING RULES:
                         result = {
                             orders: mappedOrders,
                             count: pendingOrders.length,
-                            message: `Found ${pendingOrders.length} pending order(s) that can be modified.`,
+                            message: 'Found ' + pendingOrders.length + ' pending order(s) that can be modified.',
                             phone_searched: phoneNumber,
                             has_pending: true
                         };
@@ -1234,7 +1142,7 @@ IMPORTANT TIMING RULES:
                         result = {
                             orders: [],
                             count: 0,
-                            message: `I found your order, but it's already being prepared (status: ${nonPendingOrders[0].status}). I've sent a message to the restaurant about your request. Since the restaurant is extremely busy, it may take until tomorrow for them to get back to you, but they will review your message and contact you.`,
+                            message: 'I found your order, but it\'s already being prepared (status: ' + nonPendingOrders[0].status + '). I\'ve sent a message to the restaurant about your request. Since the restaurant is extremely busy, it may take until tomorrow for them to get back to you, but they will review your message and contact you.',
                             phone_searched: phoneNumber,
                             has_non_pending_only: true,
                             restaurant_message_sent: true
@@ -1260,7 +1168,7 @@ IMPORTANT TIMING RULES:
                         // Check each message from most recent to oldest for addresses
                         for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
                             const message = recentCustomerMessages[i];
-                            console.log(`Checking message ${i}: "${message}"`);
+                            console.log('Checking message ' + i + ': "' + message + '"');
                             
                             // Simple, robust address patterns
                             const patterns = [
@@ -1278,7 +1186,7 @@ IMPORTANT TIMING RULES:
                                 const match = message.match(pattern);
                                 if (match) {
                                     deliveryAddress = match[0].trim();
-                                    console.log(`Found address with pattern: "${deliveryAddress}"`);
+                                    console.log('Found address with pattern: "' + deliveryAddress + '"');
                                     break;
                                 }
                             }
@@ -1496,7 +1404,7 @@ IMPORTANT TIMING RULES:
                     break;
 
                 default:
-                    result = { error: `Unknown function: ${name}` };
+                    result = { error: 'Unknown function: ' + name };
             }
 
             console.log('Function result:', result);
@@ -1529,7 +1437,7 @@ IMPORTANT TIMING RULES:
                         type: 'function_call_output',
                         call_id: functionCall.call_id || 'unknown',
                         output: JSON.stringify({ 
-                            error: `Function execution failed: ${error.message}`,
+                            error: 'Function execution failed: ' + error.message,
                             success: false
                         })
                     }
@@ -1637,7 +1545,7 @@ IMPORTANT TIMING RULES:
                 total_amount: totalAmount || 0,
                 order_type: orderType,
                 delivery_address: deliveryAddress,
-                order_details: `Customer: ${customerName}\nPhone: ${customerPhone}\nOrder Type: ${orderType}\n${orderType === 'delivery' ? `Delivery Address: ${deliveryAddress}` : 'Pickup Order'}\nItems: ${items}\nSpecial Instructions: ${specialInstructions || 'None'}\nEstimated ${orderType === 'delivery' ? 'Delivery' : 'Pickup'} Time: ${timing.totalMinutes} minutes`,
+                order_details: 'Customer: ' + customerName + '\nPhone: ' + customerPhone + '\nOrder Type: ' + orderType + '\n' + (orderType === 'delivery' ? 'Delivery Address: ' + deliveryAddress : 'Pickup Order') + '\nItems: ' + items + '\nSpecial Instructions: ' + (specialInstructions || 'None') + '\nEstimated ' + (orderType === 'delivery' ? 'Delivery' : 'Pickup') + ' Time: ' + timing.totalMinutes + ' minutes',
                 special_instructions: specialInstructions || '',
                 call_sid: callSid,
                 ready_time: timing.readyTimeString,
@@ -1660,14 +1568,14 @@ IMPORTANT TIMING RULES:
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                         const timingMessage = orderType === 'delivery' 
-                            ? `Your order should arrive within the next ${timing.totalMinutes} minutes.`
-                            : `Your pickup order will be ready in about ${timing.totalMinutes} minutes.`;
+                            ? 'Your order should arrive within the next ' + timing.totalMinutes + ' minutes.'
+                            : 'Your pickup order will be ready in about ' + timing.totalMinutes + ' minutes.';
                         
                         openaiWs.send(JSON.stringify({
                             type: 'response.create',
                             response: {
                                 modalities: ['audio', 'text'],
-                                instructions: `Say exactly: "${timingMessage}"`
+                                instructions: 'Say exactly: "' + timingMessage + '"'
                             }
                         }));
                     }
@@ -1808,7 +1716,7 @@ IMPORTANT TIMING RULES:
                 delete global.pendingCallData[callSid];
             }
             
-            console.log(`Call completed. Duration: ${callDuration} seconds`);
+            console.log('Call completed. Duration: ' + callDuration + ' seconds');
         }
         
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1839,26 +1747,26 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
     
-    console.log(`Restaurant AI System running on port ${PORT}`);
-    console.log(`Server address: https://0.0.0.0:${PORT}`);
-    console.log(`Ready to handle calls for busy restaurants`);
-    console.log(`WebSocket ready for Twilio Media Streams`);
-    console.log(`OpenAI configured: ${!!OPENAI_API_KEY}`);
-    console.log(`Supabase configured: ${!!(SUPABASE_URL && SUPABASE_ANON_KEY)}`);
-    console.log(`Twilio configured: ${!!twilioClient}`);
-    console.log(`BUSY RESTAURANT MODE: Calls handled by AI while staff focus on food prep`);
-    console.log(`NATURAL CONVERSATION: OpenAI handles all conversation flow and intent detection`);
-    console.log(`EDGE FUNCTIONS: All database operations through Supabase Edge Functions`);
-    console.log(`MESSAGE SYSTEM: Customer messages for requests restaurant staff will handle`);
-    console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
+    console.log('Restaurant AI System running on port ' + PORT);
+    console.log('Server address: https://0.0.0.0:' + PORT);
+    console.log('Ready to handle calls for busy restaurants');
+    console.log('WebSocket ready for Twilio Media Streams');
+    console.log('OpenAI configured: ' + !!OPENAI_API_KEY);
+    console.log('Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
+    console.log('Twilio configured: ' + !!twilioClient);
+    console.log('BUSY RESTAURANT MODE: Calls handled by AI while staff focus on food prep');
+    console.log('NATURAL CONVERSATION: OpenAI handles all conversation flow and intent detection');
+    console.log('EDGE FUNCTIONS: All database operations through Supabase Edge Functions');
+    console.log('MESSAGE SYSTEM: Customer messages for requests restaurant staff will handle');
+    console.log('✅ Server successfully bound to port ' + PORT + ' and ready for traffic');
 });
 
 server.on('error', (error) => {
     console.error('Server error:', error);
     if (error.code === 'EADDRINUSE') {
-        console.error(`Port ${PORT} is already in use`);
+        console.error('Port ' + PORT + ' is already in use');
     } else if (error.code === 'EACCES') {
-        console.error(`Permission denied to bind to port ${PORT}`);
+        console.error('Permission denied to bind to port ' + PORT);
     }
     process.exit(1);
 });
