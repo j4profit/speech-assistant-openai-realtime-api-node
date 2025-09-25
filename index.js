@@ -532,7 +532,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
 async function createOrder(orderData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-order', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -548,7 +548,7 @@ async function createOrder(orderData) {
         console.log('Order created successfully:', result.data?.id);
         return result.data;
     } catch (error) {
-        console.error('Error calling save-order Edge Function:', error);
+        console.error('Error calling create-order Edge Function:', error);
         return null;
     }
 }
