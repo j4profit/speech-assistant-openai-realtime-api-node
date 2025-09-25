@@ -1213,18 +1213,18 @@ ORDER_END`;
                         
                         console.log('Searching for address in:', recentCustomerMessages.join(' '));
                         
-                        // Enhanced address extraction patterns - take the LATEST valid address
+                        // Enhanced address extraction patterns - handle natural speech
                         const addressPatterns = [
-                            // Complete address with number, street, city, state, zip
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
-                            // Address with common abbreviations
-                            /\b\d+\s+[\w\s]+(?:rd|st|ave|ln|dr|ct|pl|way|blvd)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
-                            // Number + street + city + state + zip (more flexible)
-                            /\b\d+\s+[A-Za-z][\w\s,.-]*(?:maryland|md)[^,]*,?\s*\d{5}\b/gi,
-                            // Street + zip code only
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*\d{5}\b/gi,
-                            // Very liberal: number + text ending with 5-digit zip
-                            /\b\d+\s+[\w\s,.-]+\d{5}\b/gi
+                            // Complete address: "123 Main Street, City, State, 12345"
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}(-\d{4})?\b/gi,
+                            // Natural speech: "123 Main Street in City, State, 12345"
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*\s+in\s+[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}(-\d{4})?\b/gi,
+                            // Natural speech: "123 Main Street in City, State"
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*\s+in\s+[\w\s]+,\s*[A-Za-z]{2,}\b/gi,
+                            // Street + zip only: "123 Main Street, 12345"
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,?\s*\d{5}(-\d{4})?\b/gi,
+                            // Very flexible: number + street name + 5-digit zip anywhere
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b.*?\d{5}(-\d{4})?\b/gi
                         ];
                         
                         // Check each message from most recent to oldest
