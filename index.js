@@ -436,15 +436,31 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
         
-        // Check if address has basic required components (street number + street name + either zip or city)
+        // Check if address has basic required components (street number + street name + 5-digit zip)
         const hasStreetNumber = /^\d+/.test(address.trim());
-        const hasZip = /\d{5}/.test(address);
-        const hasCityState = /[A-Za-z]+,?\s*[A-Za-z]{2,}/.test(address);
+        const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
+        const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
         
-        if (!hasStreetNumber || (!hasZip && !hasCityState)) {
+        if (!hasStreetNumber) {
             return {
                 valid: false,
-                message: 'Please provide your street address and either zip code or city and state.',
+                message: 'Please include the street number.',
+                address: address
+            };
+        }
+        
+        if (!hasStreetName) {
+            return {
+                valid: false,
+                message: 'Please include the street name.',
+                address: address
+            };
+        }
+        
+        if (!hasFiveDigitZip) {
+            return {
+                valid: false,
+                message: 'Please include a valid 5-digit zip code.',
                 address: address
             };
         }
