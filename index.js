@@ -1454,7 +1454,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                         message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
-                            }, 1000); // Reduced delay for faster hangup
+                            }, 1500); // Increased to 1.5 seconds to allow AI voice to finish goodbye message
                             return; // Stop processing this message further
                         }
                         // Let OpenAI handle all conversation naturally - no forced function calls
