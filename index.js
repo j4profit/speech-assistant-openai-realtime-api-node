@@ -535,7 +535,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
         });
 
         if (!response.ok) {
-            console.error('lookup-order Edge Function failed:', response.status);
+            console.error('search-orders Edge Function failed:', response.status);
             return [];
         }
 
@@ -547,7 +547,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
         
         return orders;
     } catch (error) {
-        console.error('Error calling lookup-order Edge Function:', error);
+        console.error('Error calling search-orders Edge Function:', error);
         return [];
     }
 }
@@ -607,7 +607,7 @@ async function updateOrder(orderId, updateData) {
     }
 }
 
-// Validate delivery address using Edge Function
+// Validate delivery address using Edge Function - CORRECTED URL
 async function validateDeliveryAddress(address, restaurant) {
     try {
         console.log('Validating delivery address:', address);
@@ -676,7 +676,7 @@ async function validateDeliveryAddress(address, restaurant) {
         };
         
     } catch (error) {
-        console.error('Error calling validate-delivery-address Edge Function:', error);
+        console.error('Error calling validate-delivery Edge Function:', error);
         return {
             valid: false,
             message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
@@ -686,7 +686,7 @@ async function validateDeliveryAddress(address, restaurant) {
     }
 }
 
-// Create order using Edge Function instead of direct Supabase call
+// Create order using Edge Function - CORRECTED URL
 async function createOrder(orderData) {
     try {
         console.log('Creating order using Edge Function:', orderData);
@@ -701,26 +701,26 @@ async function createOrder(orderData) {
         });
 
         if (!response.ok) {
-            console.error('save-order Edge Function response not ok:', response.status);
+            console.error('create-order Edge Function response not ok:', response.status);
             return null;
         }
 
         const result = await response.json();
         
         if (result.error) {
-            console.error('save-order Edge Function returned error:', result.error);
+            console.error('create-order Edge Function returned error:', result.error);
             return null;
         }
 
         console.log('Order created successfully:', result.data?.id);
         return result.data;
     } catch (error) {
-        console.error('Error calling save-order Edge Function:', error);
+        console.error('Error calling create-order Edge Function:', error);
         return null;
     }
 }
 
-// Create customer message using Edge Function - FIXED URL
+// Create customer message using Edge Function - CORRECTED URL
 async function createCustomerMessage(messageData) {
     try {
         console.log('Creating customer message using Edge Function:', messageData);
@@ -754,7 +754,7 @@ async function createCustomerMessage(messageData) {
     }
 }
 
-// Create restaurant message for non-pending order requests or customer messages - FIXED URL
+// Create restaurant message for non-pending order requests or customer messages - CORRECTED URL
 async function createRestaurantMessage(customerPhone, customerName, restaurant, orderReference, requestDetails, messageType = 'order_modification_request') {
     try {
         let subject, messageContent, priority;
@@ -2318,7 +2318,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`IMPROVED: Natural conversation flow without pre-filtering`);
     console.log(`IMPROVED: AI-driven function calling based on customer intent`);
     console.log(`IMPROVED: OpenAI-driven farewell messages respect AI's context understanding`);
-    console.log(`FIXED: Edge Function URL corrected to use 'create-message' instead of 'save-message'`);
+    console.log(`CORRECTED: All Edge Function URLs now match deployed functions exactly`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
