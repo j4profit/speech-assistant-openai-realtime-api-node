@@ -186,6 +186,13 @@ app.post('/voice', async (req, res) => {
     global.pendingCallData = global.pendingCallData || {};
     global.pendingCallData[req.body.CallSid] = callData;
     
+    console.log('Stored call data for:', req.body.CallSid, {
+        from: callData.from_number,
+        to: callData.to_number,
+        restaurant_id: callData.restaurant_id,
+        has_twilio_data: !!callData.twilio_data
+    });
+    
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
@@ -1213,38 +1220,33 @@ ORDER_END`;
                         
                         console.log('Searching for address in:', recentCustomerMessages.join(' '));
                         
-                        // Enhanced address extraction patterns - handle natural speech
-                        const addressPatterns = [
-                            // Complete address: "123 Main Street, City, State, 12345"
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}(-\d{4})?\b/gi,
-                            // Natural speech: "123 Main Street in City, State, 12345"
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*\s+in\s+[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}(-\d{4})?\b/gi,
-                            // Natural speech: "123 Main Street in City, State"
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*\s+in\s+[\w\s]+,\s*[A-Za-z]{2,}\b/gi,
-                            // Street + zip only: "123 Main Street, 12345"
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,?\s*\d{5}(-\d{4})?\b/gi,
-                            // Very flexible: number + street name + 5-digit zip anywhere
-                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b.*?\d{5}(-\d{4})?\b/gi
-                        ];
-                        
-                        // Check each message from most recent to oldest
+                        // Check each message from most recent to oldest for addresses
                         for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
                             const message = recentCustomerMessages[i];
+                            console.log(`Checking message ${i}: "${message}"`);
                             
-                            for (let pattern of addressPatterns) {
-                                const matches = message.match(pattern);
-                                if (matches && matches.length > 0) {
-                                    // Get the longest match from this message
-                                    deliveryAddress = matches.reduce((longest, current) => 
-                                        current.length > longest.length ? current : longest
-                                    ).trim();
-                                    
-                                    console.log('Extracted address from conversation:', deliveryAddress);
+                            // Simple, robust address patterns
+                            const patterns = [
+                                // Basic: number + text + 5-digit zip
+                                /\b\d+[^.!?]*\d{5}\b/i,
+                                // Street name + zip: "123 Main St, 12345"  
+                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\d{5}\b/i,
+                                // Address with "in": "123 Main St in City, State"
+                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\s+in\s+[\w\s,]+/i,
+                                // Just number + street name (no zip required)
+                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)\b[^.!?]*/i
+                            ];
+                            
+                            for (const pattern of patterns) {
+                                const match = message.match(pattern);
+                                if (match) {
+                                    deliveryAddress = match[0].trim();
+                                    console.log(`Found address with pattern: "${deliveryAddress}"`);
                                     break;
                                 }
                             }
                             
-                            if (deliveryAddress) break; // Found address, stop looking
+                            if (deliveryAddress) break;
                         }
                     }
                     
@@ -1732,18 +1734,25 @@ ORDER_END`;
                 call_duration: callDuration,
                 conversation_items: conversationTranscript.length,
                 has_twilio_data: !!initialCallData.twilio_data,
-                restaurant_id: restaurant?.id
+                restaurant_id: restaurant?.id,
+                has_transcript: !!JSON.stringify(conversationTranscript),
+                call_ended_at: callEndTime.toISOString()
             });
+
+            // Log the complete data being sent to debug edge function issues
+            console.log('Complete call data being sent:', JSON.stringify(completeCallData, null, 2));
 
             try {
                 const callLogResult = await createCallLog(completeCallData);
                 if (callLogResult) {
                     console.log('Call log created successfully:', callLogResult.id);
+                    console.log('Returned call log data:', JSON.stringify(callLogResult, null, 2));
                 } else {
                     console.error('Call log creation failed - no result returned');
                 }
             } catch (error) {
                 console.error('Call log creation error:', error);
+                console.error('Error details:', JSON.stringify(error, null, 2));
             }
             
             // Clean up stored call data
