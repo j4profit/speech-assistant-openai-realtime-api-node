@@ -119,31 +119,12 @@ async function hangup(callSid, options = {}) {
         if (method === 'graceful') {
             let finalMessage = message;
 
-            // Generate appropriate message if not provided
+            // Only use fallback if no message provided - let OpenAI handle context-specific messages
             if (!finalMessage) {
-                if (orderData && restaurant) {
-                    // Order completion message
-                    if (orderData.order_type === 'delivery') {
-                        finalMessage = `Perfect! Your order number ${orderData.id} has been confirmed. We'll deliver your food to ${orderData.delivery_address || 'your address'} in approximately ${orderData.estimated_time || '30'} minutes. Thank you for choosing ${restaurant.name}!`;
-                    } else {
-                        finalMessage = `Great! Your pickup order number ${orderData.id} has been confirmed. Your food will be ready in approximately ${orderData.estimated_time || '25'} minutes at ${restaurant.name}. Thank you!`;
-                    }
-                } else if (restaurant) {
-                    // Restaurant-specific goodbye
-                    finalMessage = `Thank you for calling ${restaurant.name}. Have a wonderful day!`;
-                } else if (reason === 'error') {
-                    // Error message
-                    finalMessage = 'We apologize for the technical difficulty. Please try calling again.';
-                } else if (reason === 'order_cancelled') {
-                    // Cancellation message
-                    finalMessage = 'Your order has been cancelled successfully. Thank you for calling!';
-                } else if (reason === 'order_modified') {
-                    // Modification message
-                    finalMessage = 'Your order has been updated successfully. Thank you for calling!';
-                } else {
-                    // Default goodbye
-                    finalMessage = 'Thank you for calling. Have a great day!';
-                }
+                // Simple fallback - OpenAI should provide context-appropriate messages
+                finalMessage = restaurant ? 
+                    `Thank you for calling ${restaurant.name}. Have a great day!` : 
+                    'Thank you for calling. Have a great day!';
             }
 
             // Store the TwiML for the hangup endpoint
@@ -1031,6 +1012,8 @@ wss.on('connection', (ws, req) => {
     let customerName = null; // Track customer name throughout call
     let currentOrderType = null; // Track whether pickup or delivery
     let collectedItems = []; // Track items being ordered
+    let anythingElseTimeout = null; // Track timeout for anything else question
+    let completionMessageSent = false; // Track if we've sent completion message
     
     // Address validation state tracking
     let addressValidationCompleted = false;
@@ -1150,9 +1133,9 @@ ORDER_END
 After successfully completing an order, cancellation, modification, or sending a message:
 1. Confirm the completed action
 2. Ask: "You're all set! Is there anything else I can help you with today?"  
-3. If customer says "no", "nothing", "that's all", etc. - the system will automatically hang up gracefully
+3. If customer says "no", "nothing", "that's all", "I'm good", "I'm all set", "no thank you", "no thanks", "all good", "nope", "nah", "that's it" etc. - the system will automatically hang up gracefully
 4. If customer asks for something else - help them with their new request
-5. If no response for 8 seconds - automatically hang up with goodbye message
+5. If no response for 8 seconds after asking "anything else" - automatically hang up with goodbye message
 
 **IMPORTANT**: Do NOT use the hangup_call function after completing orders/tasks. Let the natural "anything else" flow handle call completion.`;
 
@@ -1342,7 +1325,7 @@ After successfully completing an order, cancellation, modification, or sending a
                             }, 2000);
                         }
 
-                        // Check for completion phrases that should trigger "anything else" flow (prevent loops)
+                        // Check for completion phrases that should trigger "anything else" flow
                         const completionPhrases = [
                             'your order is confirmed',
                             'order has been confirmed',
@@ -1352,7 +1335,6 @@ After successfully completing an order, cancellation, modification, or sending a
                             'message has been sent'
                         ];
                         
-                        // Prevent triggering on "you're all set" to avoid loops
                         const isCompletionPhrase = completionPhrases.some(phrase => 
                             response.transcript.toLowerCase().includes(phrase)
                         );
@@ -1362,7 +1344,8 @@ After successfully completing an order, cancellation, modification, or sending a
                             .filter(msg => msg.speaker === 'AI')
                             .some(msg => msg.text.toLowerCase().includes('anything else'));
                         
-                        if (isCompletionPhrase && !alreadyAskedAnythingElse) {
+                        if (isCompletionPhrase && !alreadyAskedAnythingElse && !completionMessageSent) {
+                            completionMessageSent = true;
                             // Trigger "anything else" flow after order/task completion
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
@@ -1376,7 +1359,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                     }));
                                     
                                     // Set timeout for no response - hangup after 8 seconds of silence
-                                    setTimeout(async () => {
+                                    anythingElseTimeout = setTimeout(async () => {
                                         if (callSid && ws.readyState === WebSocket.OPEN) {
                                             console.log('No response to "anything else" - hanging up');
                                             await hangup(callSid, {
@@ -1401,6 +1384,12 @@ After successfully completing an order, cancellation, modification, or sending a
                         });
                         
                         const customerMessage = response.transcript.trim();
+                        
+                        // Clear the "anything else" timeout since customer responded
+                        if (anythingElseTimeout) {
+                            clearTimeout(anythingElseTimeout);
+                            anythingElseTimeout = null;
+                        }
                         
                         // Extract customer name from conversation
                         if (!customerName && !isModificationCall) {
@@ -1428,8 +1417,8 @@ After successfully completing an order, cancellation, modification, or sending a
                             }
                         }
                         
-                        // Check if customer is responding "no" to "anything else" question
-                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah)\b/i;
+                        // Enhanced detection for "no" responses to "anything else" question
+                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done)\b/i;
                         const lastAIMessage = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
                             .slice(-1)[0]?.text || '';
@@ -1454,13 +1443,14 @@ After successfully completing an order, cancellation, modification, or sending a
                         }
                         // Let OpenAI handle all conversation naturally - no forced function calls
                         break;
-
-                        // Customer message handling is now intent-based through OpenAI function calls
-                        // No pre-filtering - let OpenAI decide when to create customer messages
-                        break;
                         
                     case 'input_audio_buffer.speech_started':
                         console.log('Customer started speaking');
+                        // Clear timeout when customer starts speaking
+                        if (anythingElseTimeout) {
+                            clearTimeout(anythingElseTimeout);
+                            anythingElseTimeout = null;
+                        }
                         break;
                         
                     case 'input_audio_buffer.speech_stopped':
@@ -2311,6 +2301,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`NEW: Intent-based customer messaging - OpenAI decides when messages need restaurant attention`);
     console.log(`IMPROVED: Natural conversation flow without pre-filtering`);
     console.log(`IMPROVED: AI-driven function calling based on customer intent`);
+    console.log(`IMPROVED: OpenAI-driven farewell messages respect AI's context understanding`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
