@@ -172,7 +172,6 @@ app.post('/voice', async (req, res) => {
         call_ended_at: null,
         call_duration: null,
         conversation_transcript: null,
-        stream_sid: null,
         order_id: null
     };
     
@@ -541,9 +540,18 @@ async function createOrder(orderData) {
             body: JSON.stringify(orderData)
         });
 
-        if (!response.ok) return null;
+        if (!response.ok) {
+            console.error('Order creation failed with status:', response.status);
+            const errorText = await response.text();
+            console.error('Order creation error response:', errorText);
+            return null;
+        }
+        
         const result = await response.json();
-        if (result.error) return null;
+        if (result.error) {
+            console.error('Order creation returned error:', result.error);
+            return null;
+        }
 
         console.log('Order created successfully:', result.data?.id);
         return result.data;
@@ -727,6 +735,8 @@ CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and 
 
 IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"
 
+IMPORTANT: ALWAYS get the customer's name BEFORE creating any order. Ask for their name when they want to place an order.
+
 **RESTAURANT STATUS: VERY BUSY**
 - The restaurant is extremely busy and cannot take phone calls
 - Staff are focused on preparing food and serving customers
@@ -748,6 +758,7 @@ ${menuText}
    - For non-pending orders, create a message for restaurant staff
 
 2. **NEW ORDERS** 
+   - ALWAYS ask for customer name first if they want to order
    - Get customer name, order type (pickup/delivery), items, and address (if delivery)
    - For delivery orders: validate address before confirming
    - Create ORDER_CONFIRMED format when complete (this is the ONLY exception to the 1-2 sentence rule)
@@ -1594,8 +1605,8 @@ ORDER_END`;
             }
             
             // Validate required fields
-            if (!customerName || customerName === 'Unknown Customer') {
-                console.log('Order processing failed: Missing customer name');
+            if (!customerName || customerName === 'Unknown Customer' || customerName === '[N/A]' || customerName.includes('[')) {
+                console.log('Order processing failed: Missing or invalid customer name:', customerName);
                 orderProcessed = false;
                 return;
             }
@@ -1727,6 +1738,7 @@ ORDER_END`;
             // Create complete call log with all Twilio data and call results
             const completeCallData = {
                 call_sid: callSid,
+                restaurant_id: restaurant?.id || initialCallData.restaurant_id || null,
                 from_number: customerPhone || initialCallData.from_number,
                 to_number: restaurant?.phone_number || initialCallData.to_number || '+14108880091',
                 call_status: 'completed',
@@ -1739,15 +1751,12 @@ ORDER_END`;
                 to_state: initialCallData.to_state || '',
                 to_city: initialCallData.to_city || '',
                 to_zip: initialCallData.to_zip || '',
+                call_duration: callDuration,
                 call_started_at: callStartTime.toISOString(),
                 call_ended_at: callEndTime.toISOString(),
-                call_duration: callDuration,
+                twilio_data: initialCallData.twilio_data || initialCallData,
                 conversation_transcript: JSON.stringify(conversationTranscript),
-                stream_sid: streamSid,
-                restaurant_id: restaurant?.id || initialCallData.restaurant_id || null,
-                order_id: initialCallData.order_id || null,
-                twilio_data: initialCallData.twilio_data || initialCallData
-                // NOTE: Removed conversation_items since this column doesn't exist in call_logs table
+                order_id: initialCallData.order_id || null
             };
 
             console.log('Creating complete call log:', {
