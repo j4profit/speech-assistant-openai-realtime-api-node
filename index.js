@@ -636,7 +636,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
         console.log('Sending validation request:', requestData);
         
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery-address', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -691,7 +691,7 @@ async function createOrder(orderData) {
     try {
         console.log('Creating order using Edge Function:', orderData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-order', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -720,12 +720,12 @@ async function createOrder(orderData) {
     }
 }
 
-// Create customer message using Edge Function
+// Create customer message using Edge Function - FIXED URL
 async function createCustomerMessage(messageData) {
     try {
         console.log('Creating customer message using Edge Function:', messageData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-message', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -735,26 +735,26 @@ async function createCustomerMessage(messageData) {
         });
 
         if (!response.ok) {
-            console.error('save-message Edge Function response not ok:', response.status);
+            console.error('create-message Edge Function response not ok:', response.status);
             return null;
         }
 
         const result = await response.json();
         
         if (result.error) {
-            console.error('save-message Edge Function returned error:', result.error);
+            console.error('create-message Edge Function returned error:', result.error);
             return null;
         }
 
         console.log('Customer message created successfully:', result.data?.id || result.message_id);
         return result.data || result;
     } catch (error) {
-        console.error('Error calling save-message Edge Function:', error);
+        console.error('Error calling create-message Edge Function:', error);
         return null;
     }
 }
 
-// Create restaurant message for non-pending order requests or customer messages
+// Create restaurant message for non-pending order requests or customer messages - FIXED URL
 async function createRestaurantMessage(customerPhone, customerName, restaurant, orderReference, requestDetails, messageType = 'order_modification_request') {
     try {
         let subject, messageContent, priority;
@@ -783,7 +783,7 @@ async function createRestaurantMessage(customerPhone, customerName, restaurant, 
 
         console.log('Creating restaurant message:', messageData);
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-message', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1527,7 +1527,7 @@ After successfully completing an order, cancellation, modification, or sending a
                 // Hangup on processing errors
                 setTimeout(async () => {
                     if (callSid) {
-                        await hangupOnError(callSid);
+                        await hangupOnError(callSid, 'We are experiencing technical difficulties. Please try calling again.');
                     }
                 }, 1000);
             }
@@ -2318,6 +2318,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log(`IMPROVED: Natural conversation flow without pre-filtering`);
     console.log(`IMPROVED: AI-driven function calling based on customer intent`);
     console.log(`IMPROVED: OpenAI-driven farewell messages respect AI's context understanding`);
+    console.log(`FIXED: Edge Function URL corrected to use 'create-message' instead of 'save-message'`);
     
     // Immediately log that the server is ready for connections
     console.log(`✅ Server successfully bound to port ${PORT} and ready for traffic`);
