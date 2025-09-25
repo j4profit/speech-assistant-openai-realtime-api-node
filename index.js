@@ -1242,7 +1242,7 @@ ORDER_END`;
                 case 'create_customer_message':
                     // Extract customer message from recent conversation if function args are incomplete
                     let customerName = parsedArgs.customer_name || 'Customer';
-                    let messageContent = parsedArgs.message_content;
+                    let messageContent = parsedArgs.message_content || '';
                     let subject = parsedArgs.subject || 'Customer Message';
                     let priority = parsedArgs.priority || 'normal';
                     
@@ -1286,7 +1286,7 @@ ORDER_END`;
                         priority: priority
                     });
 
-                    const messageData = {
+                    const customerMessageData = {
                         restaurant_id: restaurant.id,
                         customer_phone: customerPhone || 'Unknown',
                         customer_name: customerName,
@@ -1298,7 +1298,7 @@ ORDER_END`;
                         priority: priority
                     };
 
-                    const messageResult = await createCustomerMessage(messageData);
+                    const messageResult = await createCustomerMessage(customerMessageData);
                     
                     if (messageResult) {
                         result = {
