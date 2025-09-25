@@ -734,10 +734,14 @@ ${menuText}
 
 **CALL COMPLETION:**
 After completing any task (order, cancellation, modification, or message):
-1. Confirm the completed action in 1 sentence
-2. Ask: "Anything else I can help you with?"
-3. If customer says no/nothing/that's all - system will auto-hangup
-4. If customer has another request - help them
+1. Complete the task (create ORDER_CONFIRMED format, etc.)
+2. Immediately ask: "Anything else I can help you with?"
+3. Wait for customer response
+4. If customer says no/nothing/that's all - system will auto-hangup
+5. If customer has another request - help them
+
+**ORDER COMPLETION SEQUENCE:**
+After saying ORDER_CONFIRMED format and ORDER_END, you MUST immediately ask: "Anything else I can help you with?"
 
 **ORDER_CONFIRMED FORMAT (EXACT FORMAT REQUIRED):**
 ORDER_CONFIRMED:
@@ -930,6 +934,8 @@ ORDER_END`;
                         
                         // Check for completion phrases that should trigger "anything else" flow
                         const completionPhrases = [
+                            'order_confirmed:',
+                            'order_end',
                             'your order is confirmed',
                             'order has been confirmed',
                             'your order has been cancelled',
