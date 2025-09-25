@@ -954,7 +954,29 @@ ORDER_END`;
                             .filter(msg => msg.speaker === 'AI')
                             .some(msg => msg.text.toLowerCase().includes('anything else'));
                         
-                        if (isCompletionPhrase && !alreadyAskedAnythingElse) {
+                        const isOrderConfirmationResponse = response.transcript.includes('ORDER_CONFIRMED:') && 
+                                                          response.transcript.includes('Anything else I can help you with?');
+                        
+                        // If this is an order confirmation response that already includes "anything else", don't trigger another one
+                        if (isOrderConfirmationResponse) {
+                            console.log('Order confirmation with "anything else" detected - setting up response timeout');
+                            
+                            // Set timeout for no response - hangup after 10 seconds of silence
+                            anythingElseTimeout = setTimeout(async () => {
+                                if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
+                                    console.log('No response to "anything else" in order confirmation - hanging up');
+                                    clearTimeout(anythingElseTimeout);
+                                    anythingElseTimeout = null;
+                                    await hangup(callSid, {
+                                        method: 'graceful',
+                                        reason: 'no_response_to_anything_else',
+                                        restaurant: restaurant,
+                                        message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                    });
+                                }
+                            }, 10000);
+                            
+                        } else if (isCompletionPhrase && !alreadyAskedAnythingElse) {
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
                                     console.log('Triggering "anything else" flow after completion');
