@@ -1082,12 +1082,10 @@ ${!restaurant.delivery_enabled ?
 
 ${menuText}
 
-**INTENT-BASED CUSTOMER SUPPORT:**
-- Handle conversations naturally and conversationally
-- ONLY use create_customer_message when customers express genuine complaints, problems, or requests that require restaurant staff attention
-- Examples that require create_customer_message: "My food was cold", "I want to speak to the manager", "There was hair in my food", "I was overcharged", "I need a refund"
-- Normal conversation does NOT require create_customer_message: "Thank you", "What's on the menu?", "How long for delivery?", ordering food, etc.
-- Use your judgment - if it's just normal ordering conversation, don't create messages
+**NATURAL CONVERSATION FLOW:**
+- Handle all conversations naturally and conversationally
+- You have access to functions when needed, but let conversation flow naturally
+- Use functions based on actual customer intent and context, not rigid rules
 
 **CRITICAL ORDER MODIFICATION RULES:**
 - ONLY orders with status "pending" can be modified or cancelled directly
@@ -1234,18 +1232,18 @@ After successfully completing an order, cancellation, modification, or sending a
                         {
                             type: "function",
                             name: "create_customer_message",
-                            description: "ONLY use when customer expresses genuine complaints, problems, or requests requiring restaurant staff attention. Do NOT use for normal conversation, ordering, or standard questions.",
+                            description: "Create a message for restaurant staff when customers have issues, complaints, or special requests that need human attention",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
-                                    message_content: { type: "string", description: "The customer's complaint or issue that needs restaurant attention" },
+                                    message_content: { type: "string", description: "The customer's message or concern" },
                                     priority: { 
                                         type: "string", 
                                         enum: ["high", "medium", "normal"],
-                                        description: "Priority level: high for urgent issues (food safety, allergic reactions, billing errors), medium for quality complaints, normal for general feedback" 
+                                        description: "Priority level based on urgency" 
                                     },
-                                    subject: { type: "string", description: "Brief subject describing the issue type" }
+                                    subject: { type: "string", description: "Brief subject describing the issue" }
                                 },
                                 required: ["customer_name", "message_content", "priority"]
                             }
@@ -1253,12 +1251,12 @@ After successfully completing an order, cancellation, modification, or sending a
                         {
                             type: "function",
                             name: "send_message_to_restaurant", 
-                            description: "Send a message to the restaurant specifically for non-pending order modification requests or when customers need to communicate with restaurant staff about existing orders",
+                            description: "Send a message to restaurant staff about order-related requests or customer needs",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
-                                    message_content: { type: "string", description: "The message content from the customer" },
+                                    message_content: { type: "string", description: "The message content" },
                                     order_reference: { type: "string", description: "Order ID if related to a specific order" },
                                     subject: { type: "string", description: "Subject of the message" }
                                 },
@@ -1454,26 +1452,8 @@ After successfully completing an order, cancellation, modification, or sending a
                             }, 2000); // Increased delay to let AI finish speaking
                             return; // Stop processing this message further
                         }
-                        const modificationKeywords = /\b(change|modify|cancel|update|alter|edit)\s+(my\s+)?order\b/i;
-                        if (modificationKeywords.test(customerMessage) && !initialOrderSearchCompleted) {
-                            console.log('Customer wants to modify order, auto-searching...');
-                            initialOrderSearchCompleted = true;
-                            
-                            // Trigger automatic search using caller ID
-                            setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'conversation.item.create',
-                                        item: {
-                                            type: 'function_call',
-                                            name: 'search_recent_orders',
-                                            call_id: 'auto_search_' + Date.now(),
-                                            arguments: JSON.stringify({}) // Use caller ID automatically
-                                        }
-                                    }));
-                                }
-                            }, 500);
-                        }
+                        // Let OpenAI handle all conversation naturally - no forced function calls
+                        break;
 
                         // Customer message handling is now intent-based through OpenAI function calls
                         // No pre-filtering - let OpenAI decide when to create customer messages
