@@ -1076,6 +1076,12 @@ ${menuText}
 - NEVER just say "I'll send a message" without actually calling the create_customer_message function
 - Always confirm message was sent after function completes
 
+**FUNCTION CALL REQUIREMENTS:**
+- You MUST pass the customer's actual words as message_content parameter
+- You MUST pass the customer's name as customer_name parameter (use their name from conversation or "Customer" as fallback)
+- You MUST pass appropriate subject as subject parameter
+- Example: create_customer_message(customer_name="John Smith", message_content="I want the owner to call me back", subject="Owner Callback Request", priority="normal")
+
 **CALLBACK REQUEST RECOGNITION:**
 - When customers say "I want [person] to call me back" or "tell [person] to call me" - that IS the complete message
 - Immediately call create_customer_message with message_content like "Customer [name] requests that [person] call them back"
