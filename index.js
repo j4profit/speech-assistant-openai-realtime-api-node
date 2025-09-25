@@ -427,10 +427,24 @@ async function updateOrder(orderId, updateData) {
 
 async function validateDeliveryAddress(address, restaurant) {
     try {
-        if (!address || address.trim().length < 10) {
+        // More flexible address validation - accept street + zip OR street + city, state
+        if (!address || address.trim().length < 8) {
             return {
                 valid: false,
-                message: 'Please provide a complete address with street number, street name, city, state, and zip code.',
+                message: 'Please provide your delivery address.',
+                address: address
+            };
+        }
+        
+        // Check if address has basic required components (street number + street name + either zip or city)
+        const hasStreetNumber = /^\d+/.test(address.trim());
+        const hasZip = /\d{5}/.test(address);
+        const hasCityState = /[A-Za-z]+,?\s*[A-Za-z]{2,}/.test(address);
+        
+        if (!hasStreetNumber || (!hasZip && !hasCityState)) {
+            return {
+                valid: false,
+                message: 'Please provide your street address and either zip code or city and state.',
                 address: address
             };
         }
@@ -1291,10 +1305,10 @@ ORDER_END`;
                         console.log('No valid address found in conversation');
                         result = {
                             valid: false,
-                            message: 'I need your complete delivery address. Please provide the street number, street name, city, state, and zip code.',
+                            message: 'I need your delivery address.',
                             address: deliveryAddress || '',
                             needs_address: true,
-                            instruction: 'Customer has not provided a complete address yet. Ask them to provide their delivery address.'
+                            instruction: 'Customer has not provided an address yet. Ask them to provide their delivery address.'
                         };
                         break;
                     }
@@ -1305,7 +1319,7 @@ ORDER_END`;
                     if (validationResult.valid) {
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery. Create ORDER_CONFIRMED format immediately with all collected information.',
+                            instruction: 'SUCCESS! Address is valid for delivery. Now ask "What would you like to order?" and wait for customer to specify their food items. Do NOT create ORDER_CONFIRMED until customer provides their order.',
                             status: 'APPROVED',
                             confirmed_address: deliveryAddress,
                             proceed_to_order: true
