@@ -1066,7 +1066,7 @@ ORDER_END`;
         });
     }
 
-    // Function call handler
+    // Function call handler - ALL VARIABLES HAVE UNIQUE NAMES
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1240,29 +1240,29 @@ ORDER_END`;
                     break;
 
                 case 'create_customer_message':
-                    // Extract customer message from recent conversation if function args are incomplete
-                    let customerName = parsedArgs.customer_name || 'Customer';
-                    let messageContent = parsedArgs.message_content || '';
-                    let subject = parsedArgs.subject || 'Customer Message';
-                    let priority = parsedArgs.priority || 'normal';
+                    // Extract customer message with all unique variable names
+                    let custName = parsedArgs.customer_name || 'Customer';
+                    let custMessageContent = parsedArgs.message_content || '';
+                    let custSubject = parsedArgs.subject || 'Customer Message';
+                    let custPriority = parsedArgs.priority || 'normal';
                     
                     // If message content is missing, extract from recent customer messages
-                    if (!messageContent || messageContent.trim().length === 0) {
+                    if (!custMessageContent || custMessageContent.trim().length === 0) {
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
                             .slice(-3) // Look at last 3 customer messages
                             .map(msg => msg.text)
                             .join(' ');
                         
-                        messageContent = recentCustomerMessages || 'Customer requested to leave a message';
-                        console.log('Extracted message content from conversation:', messageContent);
+                        custMessageContent = recentCustomerMessages || 'Customer requested to leave a message';
+                        console.log('Extracted message content from conversation:', custMessageContent);
                         
                         // Detect callback requests and set appropriate subject/priority
-                        if (messageContent.toLowerCase().includes('call me back') || 
-                            messageContent.toLowerCase().includes('call back') ||
-                            messageContent.toLowerCase().includes('have') && messageContent.toLowerCase().includes('call')) {
-                            subject = 'Owner Callback Request';
-                            priority = 'normal';
+                        if (custMessageContent.toLowerCase().includes('call me back') || 
+                            custMessageContent.toLowerCase().includes('call back') ||
+                            (custMessageContent.toLowerCase().includes('have') && custMessageContent.toLowerCase().includes('call'))) {
+                            custSubject = 'Owner Callback Request';
+                            custPriority = 'normal';
                         }
                     }
                     
@@ -1275,27 +1275,27 @@ ORDER_END`;
                         
                         const nameMatch = conversationText.match(/Customer Name:\s*([^,\n]+)|my name is\s+(\w+)|I'm\s+(\w+)|this is\s+(\w+)/i);
                         if (nameMatch) {
-                            customerName = (nameMatch[1] || nameMatch[2] || nameMatch[3] || nameMatch[4]).trim();
+                            custName = (nameMatch[1] || nameMatch[2] || nameMatch[3] || nameMatch[4]).trim();
                         }
                     }
 
                     console.log('Creating customer message with extracted data:', {
-                        customer_name: customerName,
-                        message_content: messageContent,
-                        subject: subject,
-                        priority: priority
+                        customer_name: custName,
+                        message_content: custMessageContent,
+                        subject: custSubject,
+                        priority: custPriority
                     });
 
                     const customerMessageData = {
                         restaurant_id: restaurant.id,
                         customer_phone: customerPhone || 'Unknown',
-                        customer_name: customerName,
+                        customer_name: custName,
                         message_type: 'voice_call_issue',
-                        subject: subject,
-                        message_content: messageContent,
+                        subject: custSubject,
+                        message_content: custMessageContent,
                         call_sid: callSid,
                         order_reference: null,
-                        priority: priority
+                        priority: custPriority
                     };
 
                     const messageResult = await createCustomerMessage(customerMessageData);
@@ -1315,9 +1315,9 @@ ORDER_END`;
                     break;
 
                 case 'send_message_to_restaurant':
-                    const messageContent = parsedArgs.message_content;
+                    const restMsgContent = parsedArgs.message_content;
                     
-                    if (!messageContent) {
+                    if (!restMsgContent) {
                         result = {
                             success: false,
                             error: 'Message content is required'
@@ -1331,7 +1331,7 @@ ORDER_END`;
                         customer_name: parsedArgs.customer_name || 'Unknown Customer',
                         message_type: 'order_modification_request',
                         subject: parsedArgs.subject || 'Customer Message',
-                        message_content: messageContent,
+                        message_content: restMsgContent,
                         call_sid: callSid,
                         order_reference: parsedArgs.order_reference || null,
                         priority: 'high'
