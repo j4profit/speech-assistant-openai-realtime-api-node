@@ -544,7 +544,7 @@ async function searchRecentOrders(phoneNumber, restaurantId, daysBack = 7, statu
             days_back: daysBack
         };
 
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/lookup-order', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
