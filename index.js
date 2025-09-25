@@ -799,8 +799,13 @@ ORDER_CONFIRMED:
 - Delivery Address: [address or N/A]
 - Items: [items with prices]
 - Total: $[amount]
-- Ready Time: [minutes]
-ORDER_END`;
+- Ready Time: [calculated minutes based on order type]
+ORDER_END
+
+IMPORTANT TIMING RULES:
+- For PICKUP orders: Use ${restaurant.preparation_time || 20} minutes
+- For DELIVERY orders: Use ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes
+- Always say: "Your [pickup/delivery] order will be ready in [X] minutes" after ORDER_END
 
             const sessionUpdate = {
                 type: 'session.update',
@@ -1650,6 +1655,24 @@ ORDER_END`;
                 if (callSid && global.pendingCallData?.[callSid]) {
                     global.pendingCallData[callSid].order_id = order.id;
                 }
+                
+                // Send timing confirmation message to AI after successful order creation
+                setTimeout(() => {
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const timingMessage = orderType === 'delivery' 
+                            ? `Your order should arrive within the next ${timing.totalMinutes} minutes.`
+                            : `Your pickup order will be ready in about ${timing.totalMinutes} minutes.`;
+                        
+                        openaiWs.send(JSON.stringify({
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text'],
+                                instructions: `Say exactly: "${timingMessage}"`
+                            }
+                        }));
+                    }
+                }, 1000);
+                
             } else {
                 console.log('Order creation failed');
                 orderProcessed = false;
