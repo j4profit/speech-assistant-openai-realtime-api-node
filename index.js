@@ -1076,6 +1076,12 @@ ${menuText}
 - NEVER just say "I'll send a message" without actually calling the create_customer_message function
 - Always confirm message was sent after function completes
 
+**CALLBACK REQUEST RECOGNITION:**
+- When customers say "I want [person] to call me back" or "tell [person] to call me" - that IS the complete message
+- Immediately call create_customer_message with message_content like "Customer [name] requests that [person] call them back"
+- Don't ask "what would you like the message to say" - the callback request IS the message
+- Examples: "owner to call back", "manager to call back", "Erica to call back" - process immediately
+
 **FALLBACK FOR UNKNOWN REQUESTS:**
 - If you encounter ANY request you cannot handle or don't understand, ALWAYS offer: "I'm not able to help with that directly, but I can take a message for the restaurant staff. What would you like me to tell them?"
 - When offering to take messages, ALWAYS set realistic expectations: "Since the restaurant is quite busy, it may take up to a day for them to get back to you, but they will review your message and contact you as soon as possible."
