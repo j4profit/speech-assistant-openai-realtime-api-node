@@ -182,8 +182,9 @@ app.post('/voice', async (req, res) => {
         callData.restaurant_id = restaurant.id;
     }
     
-    // Create initial call log using Edge Function
-    await createCallLog(callData);
+    // Store call data for final logging at call completion
+    global.pendingCallData = global.pendingCallData || {};
+    global.pendingCallData[req.body.CallSid] = callData;
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -330,28 +331,6 @@ async function createCallLog(callData) {
         return result.data;
     } catch (error) {
         console.error('Error calling create-call-log Edge Function:', error);
-        return null;
-    }
-}
-
-async function updateCallLog(callSid, updateData) {
-    try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-call-log', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({
-                call_sid: callSid,
-                ...updateData
-            })
-        });
-
-        if (!response.ok) return null;
-        return (await response.json()).data;
-    } catch (error) {
-        console.error('Error calling update-call-log Edge Function:', error);
         return null;
     }
 }
@@ -1633,9 +1612,9 @@ ORDER_END`;
             if (order) {
                 console.log('NEW order saved successfully with ID:', order.id);
                 
-                // Update call log with order ID
-                if (callSid) {
-                    await updateCallLog(callSid, { order_id: order.id });
+                // Store order ID for final call log
+                if (callSid && global.pendingCallData?.[callSid]) {
+                    global.pendingCallData[callSid].order_id = order.id;
                 }
             } else {
                 console.log('Order creation failed');
@@ -1719,21 +1698,35 @@ ORDER_END`;
         const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
         
         if (callSid) {
-            const updateData = {
+            // Get the initial Twilio call data
+            const initialCallData = global.pendingCallData?.[callSid] || {};
+            
+            // Create complete call log with all Twilio data and call results
+            const completeCallData = {
+                ...initialCallData,
                 call_ended_at: callEndTime.toISOString(),
                 call_duration: callDuration,
                 conversation_transcript: JSON.stringify(conversationTranscript),
                 stream_sid: streamSid,
-                call_status: 'completed'
+                call_status: 'completed',
+                conversation_items: conversationTranscript.length,
+                order_id: initialCallData.order_id || null
             };
 
-            console.log('Updating call log with complete data:', {
+            console.log('Creating complete call log:', {
                 call_sid: callSid,
                 call_duration: callDuration,
-                conversation_items: conversationTranscript.length
+                conversation_items: conversationTranscript.length,
+                twilio_data_included: !!initialCallData.twilio_data
             });
 
-            await updateCallLog(callSid, updateData);
+            await createCallLog(completeCallData);
+            
+            // Clean up stored call data
+            if (global.pendingCallData?.[callSid]) {
+                delete global.pendingCallData[callSid];
+            }
+            
             console.log(`Call completed. Duration: ${callDuration} seconds`);
         }
         
