@@ -905,42 +905,6 @@ ORDER_END`;
                             text: response.transcript
                         });
                         
-                        // BACKUP VALIDATION DETECTION - Force function call if AI skipped validation
-                        const transcript = response.transcript.toLowerCase();
-                        const mentionsAddressValid = transcript.includes('address is within') || 
-                                                   transcript.includes('address is valid') ||
-                                                   transcript.includes('delivery range') ||
-                                                   transcript.includes('within our range');
-                        
-                        // Check if we have a recent customer address but no validation function was called
-                        if (mentionsAddressValid) {
-                            const recentCustomerMessages = conversationTranscript
-                                .filter(msg => msg.speaker === 'Customer')
-                                .slice(-3)
-                                .map(msg => msg.text)
-                                .join(' ');
-                            
-                            const hasAddressPattern = /\d+\s+[\w\s,]+\d{5}/.test(recentCustomerMessages);
-                            
-                            if (hasAddressPattern) {
-                                console.log('ERROR: AI mentioned address validity without calling validate_delivery_address function!');
-                                console.log('Forcing validation now...');
-                                
-                                // Extract the address
-                                const addressMatch = recentCustomerMessages.match(/\d+\s+[^.!?]+\d{5}/);
-                                if (addressMatch && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    // Force the AI to call the validation function
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: `You mentioned address validity but did not call validate_delivery_address function. You MUST call validate_delivery_address function now with address: "${addressMatch[0].trim()}". Do not proceed without calling this function.`
-                                        }
-                                    }));
-                                }
-                            }
-                        }
-                        
                         // Process order confirmation
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
@@ -1250,12 +1214,11 @@ ORDER_END`;
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
                             .slice(-3) // Look at last 3 customer messages
-                            .map(msg => msg.text)
-                            .join(' ');
+                            .map(msg => msg.text);
                         
-                        console.log('Searching for address in:', recentCustomerMessages);
+                        console.log('Searching for address in:', recentCustomerMessages.join(' '));
                         
-                        // Enhanced address extraction patterns
+                        // Enhanced address extraction patterns - take the LATEST valid address
                         const addressPatterns = [
                             // Complete address with number, street, city, state, zip
                             /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
@@ -1263,31 +1226,30 @@ ORDER_END`;
                             /\b\d+\s+[\w\s]+(?:rd|st|ave|ln|dr|ct|pl|way|blvd)\b[^,]*,\s*[\w\s]+,\s*[A-Za-z]{2,}\s*,?\s*\d{5}\b/gi,
                             // Number + street + city + state + zip (more flexible)
                             /\b\d+\s+[A-Za-z][\w\s,.-]*(?:maryland|md)[^,]*,?\s*\d{5}\b/gi,
+                            // Street + zip code only
+                            /\b\d+\s+[\w\s]+(?:road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b[^,]*,\s*\d{5}\b/gi,
                             // Very liberal: number + text ending with 5-digit zip
                             /\b\d+\s+[\w\s,.-]+\d{5}\b/gi
                         ];
                         
-                        for (let pattern of addressPatterns) {
-                            const matches = recentCustomerMessages.match(pattern);
-                            if (matches && matches.length > 0) {
-                                // Get the longest match (most likely to be complete)
-                                deliveryAddress = matches.reduce((longest, current) => 
-                                    current.length > longest.length ? current : longest
-                                ).trim();
-                                
-                                console.log('Extracted address from conversation:', deliveryAddress);
-                                break;
+                        // Check each message from most recent to oldest
+                        for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
+                            const message = recentCustomerMessages[i];
+                            
+                            for (let pattern of addressPatterns) {
+                                const matches = message.match(pattern);
+                                if (matches && matches.length > 0) {
+                                    // Get the longest match from this message
+                                    deliveryAddress = matches.reduce((longest, current) => 
+                                        current.length > longest.length ? current : longest
+                                    ).trim();
+                                    
+                                    console.log('Extracted address from conversation:', deliveryAddress);
+                                    break;
+                                }
                             }
-                        }
-                        
-                        // If still no address found, try a simpler approach
-                        if (!deliveryAddress && recentCustomerMessages.length > 0) {
-                            // Look for any sequence starting with a number that looks like an address
-                            const simpleMatch = recentCustomerMessages.match(/\b\d+\s+[^.!?]+/g);
-                            if (simpleMatch) {
-                                deliveryAddress = simpleMatch[simpleMatch.length - 1].trim(); // Get the last match
-                                console.log('Fallback address extraction:', deliveryAddress);
-                            }
+                            
+                            if (deliveryAddress) break; // Found address, stop looking
                         }
                     }
                     
