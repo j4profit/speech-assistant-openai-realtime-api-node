@@ -1360,8 +1360,10 @@ After successfully completing an order, cancellation, modification, or sending a
                                     
                                     // Set timeout for no response - hangup after 8 seconds of silence
                                     anythingElseTimeout = setTimeout(async () => {
-                                        if (callSid && ws.readyState === WebSocket.OPEN) {
+                                        if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
                                             console.log('No response to "anything else" - hanging up');
+                                            clearTimeout(anythingElseTimeout);
+                                            anythingElseTimeout = null;
                                             await hangup(callSid, {
                                                 method: 'graceful',
                                                 reason: 'no_response_to_anything_else',
@@ -1369,7 +1371,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                                 message: `Thank you for calling ${restaurant.name}. Have a great day!`
                                             });
                                         }
-                                    }, 8000);
+                                    }, 10000); // Increased to 10 seconds to give customer more time to respond
                                 }
                             }, 1500); // Give a moment after completion statement
                         }
@@ -1418,14 +1420,28 @@ After successfully completing an order, cancellation, modification, or sending a
                         }
                         
                         // Enhanced detection for "no" responses to "anything else" question
-                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done)\b/i;
-                        const lastAIMessage = conversationTranscript
+                        // Look back further in conversation to find recent "anything else" questions
+                        const recentAIMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
-                            .slice(-1)[0]?.text || '';
+                            .slice(-3) // Look at last 3 AI messages
+                            .map(msg => msg.text.toLowerCase());
                         
-                        if (anythingElseResponses.test(customerMessage) && 
-                            lastAIMessage.toLowerCase().includes('anything else')) {
-                            console.log('Customer responded "no" to anything else question - initiating hangup');
+                        const hasRecentAnythingElse = recentAIMessages.some(msg => 
+                            msg.includes('anything else') || 
+                            msg.includes('help you with') ||
+                            msg.includes('is there anything')
+                        );
+                        
+                        // More flexible "no" response patterns
+                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done|that's everything|we're all set)\b/i;
+                        
+                        // Also detect phrases that start with "no" even with additional words
+                        const startsWithNo = /^no[,\s]/i;
+                        
+                        if ((anythingElseResponses.test(customerMessage) || startsWithNo.test(customerMessage)) && hasRecentAnythingElse) {
+                            console.log('Customer responded "no" to recent anything else question - initiating hangup');
+                            console.log('Customer message:', customerMessage);
+                            console.log('Recent AI messages contained "anything else"');
                             
                             // Customer said no to anything else, hangup gracefully
                             setTimeout(async () => {
@@ -1438,7 +1454,7 @@ After successfully completing an order, cancellation, modification, or sending a
                                         message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
-                            }, 2000); // Increased delay to let AI finish speaking
+                            }, 1000); // Reduced delay for faster hangup
                             return; // Stop processing this message further
                         }
                         // Let OpenAI handle all conversation naturally - no forced function calls
