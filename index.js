@@ -784,7 +784,7 @@ ORDER_END`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "MANDATORY: Call immediately when customer provides delivery address. Required before processing any delivery order. Never ask for order items before validating address.",
+                            description: "MANDATORY: Must call this function every time a customer provides a delivery address. Required before saying anything about address validity. Never assume address is valid without calling this function. Call immediately when address is mentioned.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -886,6 +886,42 @@ ORDER_END`;
                             speaker: 'AI',
                             text: response.transcript
                         });
+                        
+                        // BACKUP VALIDATION DETECTION - Force function call if AI skipped validation
+                        const transcript = response.transcript.toLowerCase();
+                        const mentionsAddressValid = transcript.includes('address is within') || 
+                                                   transcript.includes('address is valid') ||
+                                                   transcript.includes('delivery range') ||
+                                                   transcript.includes('within our range');
+                        
+                        // Check if we have a recent customer address but no validation function was called
+                        if (mentionsAddressValid) {
+                            const recentCustomerMessages = conversationTranscript
+                                .filter(msg => msg.speaker === 'Customer')
+                                .slice(-3)
+                                .map(msg => msg.text)
+                                .join(' ');
+                            
+                            const hasAddressPattern = /\d+\s+[\w\s,]+\d{5}/.test(recentCustomerMessages);
+                            
+                            if (hasAddressPattern) {
+                                console.log('ERROR: AI mentioned address validity without calling validate_delivery_address function!');
+                                console.log('Forcing validation now...');
+                                
+                                // Extract the address
+                                const addressMatch = recentCustomerMessages.match(/\d+\s+[^.!?]+\d{5}/);
+                                if (addressMatch && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    // Force the AI to call the validation function
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create',
+                                        response: {
+                                            modalities: ['audio', 'text'],
+                                            instructions: `You mentioned address validity but did not call validate_delivery_address function. You MUST call validate_delivery_address function now with address: "${addressMatch[0].trim()}". Do not proceed without calling this function.`
+                                        }
+                                    }));
+                                }
+                            }
+                        }
                         
                         // Process order confirmation
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
