@@ -988,7 +988,7 @@ IMPORTANT TIMING RULES:
                                         method: 'graceful',
                                         reason: 'no_response_to_anything_else',
                                         restaurant: restaurant,
-                                        message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                        message: 'Thank you for calling ' + restaurant.name + '. Have a great day!'
                                     });
                                 }
                             }, 10000);
@@ -1015,7 +1015,7 @@ IMPORTANT TIMING RULES:
                                                 method: 'graceful',
                                                 reason: 'no_response_to_anything_else',
                                                 restaurant: restaurant,
-                                                message: `Thank you for calling ${restaurant.name}. Have a great day!`
+                                                message: 'Thank you for calling ' + restaurant.name + '. Have a great day!'
                                             });
                                         }
                                     }, 10000);
@@ -1064,7 +1064,7 @@ IMPORTANT TIMING RULES:
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: `Thank you for calling ${restaurant.name}. Have a wonderful day!`
+                                        message: 'Thank you for calling ' + restaurant.name + '. Have a wonderful day!'
                                     });
                                 }
                             }, 1500);
@@ -1119,7 +1119,7 @@ IMPORTANT TIMING RULES:
                                     type: 'response.create',
                                     response: {
                                         modalities: ['audio', 'text'],
-                                        instructions: `Say exactly: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"`
+                                        instructions: 'Say exactly: "Hello! Thank you for calling ' + restaurant.name + '. We\'re extremely busy right now and can\'t take calls, but I can help you! ' + deliveryOptions + '"'
                                     }
                                 }));
                             }
