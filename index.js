@@ -1746,8 +1746,8 @@ ORDER_END`;
                 stream_sid: streamSid,
                 restaurant_id: restaurant?.id || initialCallData.restaurant_id || null,
                 order_id: initialCallData.order_id || null,
-                twilio_data: initialCallData.twilio_data || initialCallData,
-                conversation_items: conversationTranscript.length
+                twilio_data: initialCallData.twilio_data || initialCallData
+                // NOTE: Removed conversation_items since this column doesn't exist in call_logs table
             };
 
             console.log('Creating complete call log:', {
