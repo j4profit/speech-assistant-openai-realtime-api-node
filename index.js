@@ -976,7 +976,7 @@ ORDER_END`;
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: `RING 4 FOOD, has handled your call! Thank you for calling ${restaurant.name}. Have a wonderful day!`
+                                        message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
                             }, 1500);
@@ -1240,16 +1240,62 @@ ORDER_END`;
                     break;
 
                 case 'create_customer_message':
+                    // Extract customer message from recent conversation if function args are incomplete
+                    let customerName = parsedArgs.customer_name || 'Customer';
+                    let messageContent = parsedArgs.message_content;
+                    let subject = parsedArgs.subject || 'Customer Message';
+                    let priority = parsedArgs.priority || 'normal';
+                    
+                    // If message content is missing, extract from recent customer messages
+                    if (!messageContent || messageContent.trim().length === 0) {
+                        const recentCustomerMessages = conversationTranscript
+                            .filter(msg => msg.speaker === 'Customer')
+                            .slice(-3) // Look at last 3 customer messages
+                            .map(msg => msg.text)
+                            .join(' ');
+                        
+                        messageContent = recentCustomerMessages || 'Customer requested to leave a message';
+                        console.log('Extracted message content from conversation:', messageContent);
+                        
+                        // Detect callback requests and set appropriate subject/priority
+                        if (messageContent.toLowerCase().includes('call me back') || 
+                            messageContent.toLowerCase().includes('call back') ||
+                            messageContent.toLowerCase().includes('have') && messageContent.toLowerCase().includes('call')) {
+                            subject = 'Owner Callback Request';
+                            priority = 'normal';
+                        }
+                    }
+                    
+                    // Extract customer name from conversation if not provided
+                    if (!parsedArgs.customer_name && conversationTranscript.length > 0) {
+                        // Look for name in order details or previous conversation
+                        const conversationText = conversationTranscript
+                            .map(msg => msg.text)
+                            .join(' ');
+                        
+                        const nameMatch = conversationText.match(/Customer Name:\s*([^,\n]+)|my name is\s+(\w+)|I'm\s+(\w+)|this is\s+(\w+)/i);
+                        if (nameMatch) {
+                            customerName = (nameMatch[1] || nameMatch[2] || nameMatch[3] || nameMatch[4]).trim();
+                        }
+                    }
+
+                    console.log('Creating customer message with extracted data:', {
+                        customer_name: customerName,
+                        message_content: messageContent,
+                        subject: subject,
+                        priority: priority
+                    });
+
                     const messageData = {
                         restaurant_id: restaurant.id,
                         customer_phone: customerPhone || 'Unknown',
-                        customer_name: parsedArgs.customer_name || 'Customer',
+                        customer_name: customerName,
                         message_type: 'voice_call_issue',
-                        subject: parsedArgs.subject || 'Customer Message',
-                        message_content: parsedArgs.message_content,
+                        subject: subject,
+                        message_content: messageContent,
                         call_sid: callSid,
                         order_reference: null,
-                        priority: parsedArgs.priority || 'normal'
+                        priority: priority
                     };
 
                     const messageResult = await createCustomerMessage(messageData);
