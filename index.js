@@ -784,7 +784,7 @@ ORDER_END`;
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "ONLY for delivery orders when customer provides address. NEVER for pickup.",
+                            description: "MANDATORY: Call immediately when customer provides delivery address. Required before processing any delivery order. Never ask for order items before validating address.",
                             parameters: {
                                 type: "object",
                                 properties: {
