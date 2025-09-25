@@ -321,6 +321,8 @@ async function getRestaurantByPhone(phoneNumber) {
 
 async function createCallLog(callData) {
     try {
+        console.log('Calling create-call-log Edge Function with data:', JSON.stringify(callData, null, 2));
+        
         const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-call-log', {
             method: 'POST',
             headers: {
@@ -330,14 +332,33 @@ async function createCallLog(callData) {
             body: JSON.stringify(callData)
         });
 
-        if (!response.ok) return null;
-        const result = await response.json();
-        if (result.error) return null;
+        console.log('Edge Function response status:', response.status);
+        
+        const responseText = await response.text();
+        console.log('Edge Function raw response:', responseText);
+
+        if (!response.ok) {
+            console.error('Edge Function error response:', responseText);
+            return null;
+        }
+
+        const result = JSON.parse(responseText);
+        
+        if (result.error) {
+            console.error('Edge Function returned error:', result.error);
+            return null;
+        }
 
         console.log('Call log created:', result.data?.id);
+        console.log('Call log data:', JSON.stringify(result.data, null, 2));
         return result.data;
     } catch (error) {
         console.error('Error calling create-call-log Edge Function:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            callDataLength: JSON.stringify(callData).length
+        });
         return null;
     }
 }
@@ -511,7 +532,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
 async function createOrder(orderData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-order', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -527,14 +548,14 @@ async function createOrder(orderData) {
         console.log('Order created successfully:', result.data?.id);
         return result.data;
     } catch (error) {
-        console.error('Error calling create-order Edge Function:', error);
+        console.error('Error calling save-order Edge Function:', error);
         return null;
     }
 }
 
 async function createCustomerMessage(messageData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -550,7 +571,7 @@ async function createCustomerMessage(messageData) {
         console.log('Customer message created successfully:', result.data?.id || result.message_id);
         return result.data || result;
     } catch (error) {
-        console.error('Error calling create-message Edge Function:', error);
+        console.error('Error calling save-message Edge Function:', error);
         return null;
     }
 }
@@ -1706,8 +1727,8 @@ ORDER_END`;
             // Create complete call log with all Twilio data and call results
             const completeCallData = {
                 call_sid: callSid,
-                from_number: customerPhone,
-                to_number: restaurant?.phone_number || '+14108880091',
+                from_number: customerPhone || initialCallData.from_number,
+                to_number: restaurant?.phone_number || initialCallData.to_number || '+14108880091',
                 call_status: 'completed',
                 call_direction: 'inbound',
                 caller_country: initialCallData.caller_country || 'US',
@@ -1723,7 +1744,7 @@ ORDER_END`;
                 call_duration: callDuration,
                 conversation_transcript: JSON.stringify(conversationTranscript),
                 stream_sid: streamSid,
-                restaurant_id: restaurant?.id || null,
+                restaurant_id: restaurant?.id || initialCallData.restaurant_id || null,
                 order_id: initialCallData.order_id || null,
                 twilio_data: initialCallData.twilio_data || initialCallData,
                 conversation_items: conversationTranscript.length
@@ -1739,20 +1760,15 @@ ORDER_END`;
                 call_ended_at: callEndTime.toISOString()
             });
 
-            // Log the complete data being sent to debug edge function issues
-            console.log('Complete call data being sent:', JSON.stringify(completeCallData, null, 2));
-
             try {
                 const callLogResult = await createCallLog(completeCallData);
                 if (callLogResult) {
                     console.log('Call log created successfully:', callLogResult.id);
-                    console.log('Returned call log data:', JSON.stringify(callLogResult, null, 2));
                 } else {
                     console.error('Call log creation failed - no result returned');
                 }
             } catch (error) {
                 console.error('Call log creation error:', error);
-                console.error('Error details:', JSON.stringify(error, null, 2));
             }
             
             // Clean up stored call data
