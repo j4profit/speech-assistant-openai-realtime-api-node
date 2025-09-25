@@ -976,7 +976,7 @@ ORDER_END`;
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: `Perfect! Thank you for calling ${restaurant.name}. Have a wonderful day!`
+                                        message: `RING 4 FOOD, has handled your call! Thank you for calling ${restaurant.name}. Have a wonderful day!`
                                     });
                                 }
                             }, 1500);
