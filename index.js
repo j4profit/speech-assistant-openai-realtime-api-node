@@ -1703,24 +1703,48 @@ ORDER_END`;
             
             // Create complete call log with all Twilio data and call results
             const completeCallData = {
-                ...initialCallData,
+                call_sid: callSid,
+                from_number: customerPhone,
+                to_number: restaurant?.phone_number || '+14108880091',
+                call_status: 'completed',
+                call_direction: 'inbound',
+                caller_country: initialCallData.caller_country || 'US',
+                caller_state: initialCallData.caller_state || '',
+                caller_city: initialCallData.caller_city || '',
+                caller_zip: initialCallData.caller_zip || '',
+                to_country: initialCallData.to_country || 'US',
+                to_state: initialCallData.to_state || '',
+                to_city: initialCallData.to_city || '',
+                to_zip: initialCallData.to_zip || '',
+                call_started_at: callStartTime.toISOString(),
                 call_ended_at: callEndTime.toISOString(),
                 call_duration: callDuration,
                 conversation_transcript: JSON.stringify(conversationTranscript),
                 stream_sid: streamSid,
-                call_status: 'completed',
-                conversation_items: conversationTranscript.length,
-                order_id: initialCallData.order_id || null
+                restaurant_id: restaurant?.id || null,
+                order_id: initialCallData.order_id || null,
+                twilio_data: initialCallData.twilio_data || initialCallData,
+                conversation_items: conversationTranscript.length
             };
 
             console.log('Creating complete call log:', {
                 call_sid: callSid,
                 call_duration: callDuration,
                 conversation_items: conversationTranscript.length,
-                twilio_data_included: !!initialCallData.twilio_data
+                has_twilio_data: !!initialCallData.twilio_data,
+                restaurant_id: restaurant?.id
             });
 
-            await createCallLog(completeCallData);
+            try {
+                const callLogResult = await createCallLog(completeCallData);
+                if (callLogResult) {
+                    console.log('Call log created successfully:', callLogResult.id);
+                } else {
+                    console.error('Call log creation failed - no result returned');
+                }
+            } catch (error) {
+                console.error('Call log creation error:', error);
+            }
             
             // Clean up stored call data
             if (global.pendingCallData?.[callSid]) {
