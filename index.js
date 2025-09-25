@@ -1070,6 +1070,17 @@ ${menuText}
 - You have access to functions when needed, but let conversation flow naturally
 - Use functions based on actual customer intent and context, not rigid rules
 
+**CRITICAL MESSAGE HANDLING:**
+- When customers want to leave ANY message for restaurant staff, you MUST call create_customer_message function
+- This includes: callback requests, complaints, compliments, questions, or any communication
+- NEVER just say "I'll send a message" without actually calling the create_customer_message function
+- Always confirm message was sent after function completes
+
+**FALLBACK FOR UNKNOWN REQUESTS:**
+- If you encounter ANY request you cannot handle or don't understand, ALWAYS offer: "I'm not able to help with that directly, but I can take a message for the restaurant staff. What would you like me to tell them?"
+- When offering to take messages, ALWAYS set realistic expectations: "Since the restaurant is quite busy, it may take up to a day for them to get back to you, but they will review your message and contact you as soon as possible."
+- NEVER leave customers without a solution - there should always be a path to human help through messaging
+
 **CRITICAL ORDER MODIFICATION RULES:**
 - ONLY orders with status "pending" can be modified or cancelled directly
 - Orders with status "confirmed", "preparing", "ready", or "delivered" CANNOT be changed directly
@@ -1215,18 +1226,18 @@ After successfully completing an order, cancellation, modification, or sending a
                         {
                             type: "function",
                             name: "create_customer_message",
-                            description: "Create a message for restaurant staff when customers have issues, complaints, or special requests that need human attention",
+                            description: "ALWAYS call this function when customers want to leave ANY message for restaurant staff, including: callback requests, complaints, compliments, questions, special requests, or any communication that needs restaurant attention. Use this for ANY message that isn't placing an order.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
-                                    message_content: { type: "string", description: "The customer's message or concern" },
+                                    message_content: { type: "string", description: "The customer's message, request, or concern" },
                                     priority: { 
                                         type: "string", 
                                         enum: ["high", "medium", "normal"],
-                                        description: "Priority level based on urgency" 
+                                        description: "Priority level: high for urgent issues, normal for general messages like callbacks" 
                                     },
-                                    subject: { type: "string", description: "Brief subject describing the issue" }
+                                    subject: { type: "string", description: "Brief subject like 'Callback Request' or 'Customer Inquiry'" }
                                 },
                                 required: ["customer_name", "message_content", "priority"]
                             }
