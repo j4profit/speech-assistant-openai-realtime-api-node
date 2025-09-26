@@ -853,7 +853,6 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
-                    // Enhanced speech settings for faster, more responsive speech
                     temperature: 0.8,
                     max_response_output_tokens: 1000,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
@@ -981,10 +980,25 @@ TIMING RULES:
 
                     case 'response.created':
                         console.log('🎯 OpenAI response created:', response.response?.id);
+                        console.log('🎯 Response modalities:', response.response?.modalities);
+                        console.log('🎯 Response status:', response.response?.status);
                         break;
 
                     case 'response.done':
                         console.log('✅ OpenAI response completed:', response.response?.id);
+                        console.log('✅ Response status_details:', response.response?.status_details);
+                        console.log('✅ Response usage:', response.response?.usage);
+                        break;
+
+                    case 'response.output_item.added':
+                        console.log('📋 Output item added:', response.item?.type, 'content_type:', response.item?.content?.[0]?.type);
+                        break;
+
+                    case 'response.output_item.done':
+                        console.log('📋 Output item completed:', response.item?.type);
+                        if (response.item?.type === 'message' && response.item?.content?.[0]?.type === 'audio') {
+                            console.log('🎵 Audio content generated, length:', response.item.content[0].audio?.length || 0);
+                        }
                         break;
 
                     case 'response.audio_transcript.done':
@@ -1178,11 +1192,14 @@ TIMING RULES:
                                     }
                                 }));
 
-                                // Then create the response
+                                // Then create the response with explicit audio modality
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                         openaiWs.send(JSON.stringify({
-                                            type: 'response.create'
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['audio', 'text']
+                                            }
                                         }));
                                     }
                                 }, 100);
@@ -1574,7 +1591,12 @@ TIMING RULES:
 
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.send(JSON.stringify({ type: 'response.create' }));
+                        openaiWs.send(JSON.stringify({
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text']
+                            }
+                        }));
                     }
                 }, 200);
             }
