@@ -762,6 +762,12 @@ GREETING TRIGGER: When you receive the message "Start the call greeting", immedi
 - Deliver your audio response fast while maintaining clarity
 - Use a brisk, efficient pace throughout the conversation
 
+**ORDER TYPE RESPONSE HANDLING:**
+When customer responds to "Is this for pickup or delivery?":
+- If they say "pickup" → Follow PICKUP ORDER FLOW
+- If they say "delivery" → Follow DELIVERY ORDER FLOW
+- If unclear, ask: "Will this be for pickup or delivery?"
+
 **DELIVERY ORDER FLOW (CRITICAL):**
 For delivery orders, follow this EXACT sequence:
 1. Get customer's name
@@ -779,7 +785,10 @@ For pickup orders:
 3. Take order details
 4. Create ORDER_CONFIRMED format
 
-IMPORTANT: ALWAYS get the customer's name BEFORE taking any order details.
+IMPORTANT:
+- ALWAYS get the customer's name BEFORE taking any order details
+- Do NOT ask for delivery address if customer chose pickup
+- Do NOT call validate_delivery_address unless customer specifically chose delivery and provided a complete address
 
 **RESTAURANT STATUS: VERY BUSY**
 - The restaurant is extremely busy and cannot take phone calls
@@ -875,7 +884,7 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Call this function ONLY when a customer has explicitly provided a complete delivery address with street number, street name, city, state, and zip code. Do not call if customer has only said they want delivery without providing address details.",
+                            description: "Call this function ONLY when: 1) Customer chose DELIVERY, 2) Customer provided a COMPLETE address with street number + street name + city + state + zip code. Do NOT call for pickup orders or if customer only said 'delivery' without giving address details.",
                             parameters: {
                                 type: "object",
                                 properties: {
