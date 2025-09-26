@@ -747,9 +747,7 @@ wss.on('connection', (ws, _req) => {
         openaiWs.on('open', () => {
             console.log('Connected to OpenAI Realtime API');
 
-            const deliveryOptions = restaurant.delivery_enabled ?
-                'Would you like this for pickup or delivery?' :
-                'All orders are for pickup only.';
+            // Delivery options are handled in the greeting logic below
 
             // Modern system instructions with intent-based approach
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
@@ -965,11 +963,14 @@ TIMING RULES:
                 switch (response.type) {
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
+                            console.log('Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
                             ws.send(JSON.stringify({
                                 event: 'media',
                                 streamSid: streamSid,
                                 media: { payload: response.delta }
                             }));
+                        } else {
+                            console.log('Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
                         }
                         break;
 
@@ -1123,6 +1124,8 @@ TIMING RULES:
                         if (response.item?.type === 'function_call') {
                             console.log('Function call item created:', response.item.name);
                             handleFunctionCall(response.item);
+                        } else if (response.item?.type === 'message') {
+                            console.log('Message item created:', response.item.role, 'content length:', response.item.content?.[0]?.text?.length || 0);
                         }
                         break;
 
@@ -1154,15 +1157,31 @@ TIMING RULES:
                                 const restaurantName = restaurant.name || 'the restaurant';
                                 console.log('Sending immediate greeting for restaurant:', restaurantName);
 
+                                // First create a conversation item with the greeting text
                                 openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
-                                    response: {
-                                        modalities: ['audio', 'text'],
-                                        instructions: `Say exactly: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}"`
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'assistant',
+                                        content: [
+                                            {
+                                                type: 'text',
+                                                text: `Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}`
+                                            }
+                                        ]
                                     }
                                 }));
+
+                                // Then trigger the response
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create'
+                                        }));
+                                    }
+                                }, 100);
                             }
-                        }, 1000);
+                        }, 1500);
                         break;
                 }
             } catch (error) {
