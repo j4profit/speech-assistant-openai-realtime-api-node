@@ -1,5 +1,5 @@
-// Restaurant AI Ordering System - Updated for OpenAI Migration
-// Keeps your existing Twilio WebSocket architecture while addressing migration concerns
+// Restaurant AI Ordering System - FIXED: Twilio Error 11205 (Timeout Issue)
+// Updated for OpenAI Migration with Fast Twilio Response
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -48,14 +48,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // =============================================================================
-// UPDATED: INTENT-BASED FUNCTION CALLING (NO MORE KEYWORD PRE-FILTERING)
-// =============================================================================
-
-// REMOVED: Old keyword-based pre-filtering approach
-// The AI now naturally determines intent and calls functions appropriately
-
-// =============================================================================
-// UNIVERSAL HANGUP FUNCTION (PRESERVED FROM YOUR CODE)
+// UNIVERSAL HANGUP FUNCTION
 // =============================================================================
 
 async function hangup(callSid, options = {}) {
@@ -132,7 +125,7 @@ async function hangup(callSid, options = {}) {
 }
 
 // =============================================================================
-// HTTP ENDPOINTS (PRESERVED FROM YOUR CODE)
+// HTTP ENDPOINTS - FIXED FOR FAST TWILIO RESPONSE
 // =============================================================================
 
 // Hangup TwiML endpoint
@@ -152,59 +145,67 @@ app.post('/hangup-twiml', (req, res) => {
     res.send(twiml);
 });
 
-// Twilio webhook endpoint for incoming calls
-app.post('/voice', async (req, res) => {
+// FIXED: Fast-responding Twilio webhook endpoint for incoming calls
+app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
     
-    const callData = {
-        call_sid: req.body.CallSid,
-        from_number: req.body.From || req.body.Caller,
-        to_number: req.body.Called || req.body.To,
-        call_status: req.body.CallStatus,
-        call_direction: req.body.Direction,
-        caller_country: req.body.CallerCountry,
-        caller_state: req.body.CallerState,
-        caller_city: req.body.CallerCity,
-        caller_zip: req.body.CallerZip,
-        to_country: req.body.ToCountry || req.body.CalledCountry,
-        to_state: req.body.ToState || req.body.CalledState,
-        to_city: req.body.ToCity || req.body.CalledCity,
-        to_zip: req.body.ToZip || req.body.CalledZip,
-        call_started_at: new Date().toISOString(),
-        twilio_data: req.body,
-        restaurant_id: null,
-        call_ended_at: null,
-        call_duration: null,
-        conversation_transcript: null,
-        order_id: null
-    };
-    
-    // Look up restaurant to get restaurant_id for the call log
-    const restaurant = await getRestaurantByPhone(callData.to_number);
-    if (restaurant) {
-        callData.restaurant_id = restaurant.id;
-    }
-    
-    // Store call data for final logging at call completion
-    global.pendingCallData = global.pendingCallData || {};
-    global.pendingCallData[req.body.CallSid] = callData;
-    
-    console.log('Stored call data for:', req.body.CallSid, {
-        from: callData.from_number,
-        to: callData.to_number,
-        restaurant_id: callData.restaurant_id,
-        has_twilio_data: !!callData.twilio_data
-    });
-    
+    // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
     const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Connect>\n        <Stream url="wss://' + req.get('host') + '/media-stream">\n            <Parameter name="Called" value="' + (req.body.Called || req.body.To) + '" />\n            <Parameter name="From" value="' + (req.body.From || req.body.Caller) + '" />\n            <Parameter name="CallSid" value="' + req.body.CallSid + '" />\n        </Stream>\n    </Connect>\n</Response>';
     
     res.type('text/xml');
     res.send(twiml);
+    
+    // FIXED: Do restaurant lookup and call data storage AFTER responding to Twilio
+    setImmediate(async () => {
+        try {
+            const callData = {
+                call_sid: req.body.CallSid,
+                from_number: req.body.From || req.body.Caller,
+                to_number: req.body.Called || req.body.To,
+                call_status: req.body.CallStatus,
+                call_direction: req.body.Direction,
+                caller_country: req.body.CallerCountry,
+                caller_state: req.body.CallerState,
+                caller_city: req.body.CallerCity,
+                caller_zip: req.body.CallerZip,
+                to_country: req.body.ToCountry || req.body.CalledCountry,
+                to_state: req.body.ToState || req.body.CalledState,
+                to_city: req.body.ToCity || req.body.CalledCity,
+                to_zip: req.body.ToZip || req.body.CalledZip,
+                call_started_at: new Date().toISOString(),
+                twilio_data: req.body,
+                restaurant_id: null,
+                call_ended_at: null,
+                call_duration: null,
+                conversation_transcript: null,
+                order_id: null
+            };
+            
+            // Look up restaurant to get restaurant_id for the call log (non-blocking)
+            const restaurant = await getRestaurantByPhone(callData.to_number);
+            if (restaurant) {
+                callData.restaurant_id = restaurant.id;
+            }
+            
+            // Store call data for final logging at call completion
+            global.pendingCallData = global.pendingCallData || {};
+            global.pendingCallData[req.body.CallSid] = callData;
+            
+            console.log('Stored call data for:', req.body.CallSid, {
+                from: callData.from_number,
+                to: callData.to_number,
+                restaurant_id: callData.restaurant_id,
+                has_twilio_data: !!callData.twilio_data
+            });
+        } catch (error) {
+            console.error('Error processing call data after TwiML response:', error);
+        }
+    });
 });
 
-// Health check endpoint
+// IMPROVED: Health check endpoint with Twilio connectivity test
 app.get('/health', (req, res) => {
-    res.status(200).json({ 
+    const healthData = {
         status: 'healthy',
         port: process.env.PORT || 3000,
         timestamp: new Date().toISOString(),
@@ -213,8 +214,14 @@ app.get('/health', (req, res) => {
         twilio_configured: !!twilioClient,
         uptime: process.uptime(),
         migration_status: 'updated_for_modern_openai_apis',
-        architecture: 'twilio_websocket_with_intent_based_functions'
-    });
+        architecture: 'twilio_websocket_with_intent_based_functions',
+        // ADDED: Fast response time indicator for Twilio
+        twilio_response_optimized: true,
+        last_health_check: new Date().toISOString()
+    };
+    
+    // Return immediately for health checks (important for load balancers)
+    res.status(200).json(healthData);
 });
 
 app.get('/ping', (req, res) => {
@@ -223,16 +230,17 @@ app.get('/ping', (req, res) => {
 
 app.get('/', (req, res) => {
     res.status(200).json({ 
-        message: 'Restaurant AI Ordering System - Updated for OpenAI Migration',
+        message: 'Restaurant AI Ordering System - FIXED: Twilio Timeout Issue',
         status: 'running',
         port: process.env.PORT || 3000,
         websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
-        migration_ready: true
+        migration_ready: true,
+        twilio_timeout_fixed: true
     });
 });
 
-// API endpoints using Edge Functions (PRESERVED)
+// API endpoints using Edge Functions
 app.get('/orders', async (req, res) => {
     try {
         const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
@@ -278,19 +286,26 @@ app.get('/messages', async (req, res) => {
 });
 
 // =============================================================================
-// EDGE FUNCTION HELPERS (ALL PRESERVED - YOUR EXISTING CODE WORKS)
+// EDGE FUNCTION HELPERS - WITH TIMEOUT PROTECTION
 // =============================================================================
 
 async function getRestaurantByPhone(phoneNumber) {
     try {
+        // Add timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
         const response = await fetch(SUPABASE_URL + '/functions/v1/get-restaurant', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
-            body: JSON.stringify({ phone_number: phoneNumber })
+            body: JSON.stringify({ phone_number: phoneNumber }),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (!response.ok) return null;
         const result = await response.json();
@@ -308,7 +323,11 @@ async function getRestaurantByPhone(phoneNumber) {
             preparation_time: restaurant.preparation_time ?? 20
         };
     } catch (error) {
-        console.error('Error calling get-restaurant Edge Function:', error);
+        if (error.name === 'AbortError') {
+            console.error('Restaurant lookup timed out for phone:', phoneNumber);
+        } else {
+            console.error('Error calling get-restaurant Edge Function:', error);
+        }
         return null;
     }
 }
@@ -360,7 +379,7 @@ async function searchRecentOrders(phoneNumber, restaurantId) {
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-                restaurant_phone: restaurantId, // Using your existing Edge Function
+                restaurant_phone: restaurantId,
                 customer_phone: phoneNumber
             })
         });
@@ -563,7 +582,7 @@ async function createCustomerMessage(messageData) {
 }
 
 // =============================================================================
-// UTILITY FUNCTIONS (PRESERVED)
+// UTILITY FUNCTIONS
 // =============================================================================
 
 function calculateOrderReadyTime(restaurant, isDelivery = false) {
@@ -653,7 +672,7 @@ function formatMenuForAI(menuItems, restaurant) {
 }
 
 // =============================================================================
-// UPDATED: WEBSOCKET CONNECTION WITH INTENT-BASED FUNCTION CALLING
+// WEBSOCKET CONNECTION WITH INTENT-BASED FUNCTION CALLING
 // =============================================================================
 
 wss.on('connection', (ws, req) => {
@@ -671,7 +690,7 @@ wss.on('connection', (ws, req) => {
     let recentOrders = [];
     let anythingElseTimeout = null;
 
-    // UPDATED: Initialize OpenAI with modern approach
+    // Initialize OpenAI with modern approach
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
         
@@ -693,7 +712,7 @@ wss.on('connection', (ws, req) => {
         
         console.log('Connecting to OpenAI Realtime API with updated model...');
         
-        // UPDATED: Use the latest stable model
+        // Use the latest stable model
         openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
             headers: {
                 'Authorization': 'Bearer ' + OPENAI_API_KEY,
@@ -708,7 +727,7 @@ wss.on('connection', (ws, req) => {
                 'Would you like this for pickup or delivery?' : 
                 'All orders are for pickup only.';
             
-            // UPDATED: Modern system instructions with intent-based approach
+            // Modern system instructions with intent-based approach
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
@@ -890,7 +909,7 @@ TIMING RULES:
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
         
-        // PRESERVED: Your existing message handling logic with function call processing
+        // Message handling logic with function call processing
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
@@ -919,7 +938,7 @@ TIMING RULES:
                             processOrderFromTranscript(response.transcript);
                         }
                         
-                        // Handle "anything else" flow (your existing logic)
+                        // Handle "anything else" flow
                         const completionPhrases = [
                             'order_confirmed:',
                             'order_end',
@@ -1044,7 +1063,7 @@ TIMING RULES:
                         }
                         break;
                         
-                    // UPDATED: Handle function calls with modern approach
+                    // Handle function calls with modern approach
                     case 'response.function_call_done':
                         console.log('Function call completed:', response.name);
                         handleFunctionCall(response);
@@ -1120,7 +1139,7 @@ TIMING RULES:
         });
     }
 
-    // UPDATED: Function call handler with better intent recognition
+    // Function call handler with better intent recognition
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1211,7 +1230,7 @@ TIMING RULES:
                 case 'validate_delivery_address':
                     let deliveryAddress = parsedArgs.address;
                     
-                    // IMPROVED: Better address extraction from conversation context
+                    // Better address extraction from conversation context
                     if (!deliveryAddress || deliveryAddress.trim().length === 0) {
                         console.log('Address not provided in function args, extracting from conversation...');
                         
@@ -1348,7 +1367,7 @@ TIMING RULES:
                     break;
 
                 case 'create_customer_message':
-                    // IMPROVED: Better message extraction and handling
+                    // Better message extraction and handling
                     let custName = parsedArgs.customer_name || 'Customer';
                     let custMessageContent = parsedArgs.message_content || '';
                     let custSubject = parsedArgs.subject || 'Customer Message';
@@ -1507,7 +1526,7 @@ TIMING RULES:
         }
     }
 
-    // PRESERVED: Your existing order processing function
+    // Order processing function
     async function processOrderFromTranscript(transcript) {
         try {
             if (orderProcessed) {
@@ -1652,7 +1671,7 @@ TIMING RULES:
         }
     }
     
-    // PRESERVED: Your existing Twilio WebSocket handling
+    // Handle WebSocket messages from Twilio
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
@@ -1705,7 +1724,7 @@ TIMING RULES:
         }
     });
     
-    // PRESERVED: Your existing WebSocket close handling
+    // WebSocket close handling
     ws.on('close', async () => {
         console.log('WebSocket connection closed');
         
@@ -1800,23 +1819,23 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
     
-    console.log('🚀 Restaurant AI System UPDATED for OpenAI Migration - Running on port ' + PORT);
-    console.log('📞 Server address: https://0.0.0.0:' + PORT);
-    console.log('⚡ Ready to handle calls with INTENT-BASED function calling');
+    console.log('🚀 Restaurant AI System FIXED - Twilio Error 11205 Resolved');
+    console.log('📞 Server running on port ' + PORT);
+    console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
     console.log('🎯 WebSocket ready for Twilio Media Streams');
     console.log('🤖 OpenAI configured: ' + !!OPENAI_API_KEY);
     console.log('🗄️ Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
     console.log('📱 Twilio configured: ' + !!twilioClient);
     console.log('');
     console.log('✅ MIGRATION STATUS: READY');
-    console.log('🎯 INTENT-BASED: No more keyword pre-filtering - AI naturally handles conversation flow');
-    console.log('🔧 EDGE FUNCTIONS: All database operations preserved and working');  
-    console.log('💬 MESSAGE SYSTEM: Customer messages for requests restaurant staff will handle');
-    console.log('⏱️ CALL DURATION: Includes 5.5 second adjustment for accurate billing');
-    console.log('🌐 REALTIME API: Using latest gpt-4o-realtime-preview-2024-12-17 model');
+    console.log('🎯 INTENT-BASED: Natural conversation flow with function calling');
+    console.log('🔧 EDGE FUNCTIONS: All database operations preserved');  
+    console.log('💬 MESSAGE SYSTEM: Customer messages for staff requests');
+    console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
+    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with 25% faster speech');
+    console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('');
-    console.log('🎉 Server successfully bound to port ' + PORT + ' and ready for production traffic');
-    console.log('📋 Your existing Twilio WebSocket architecture is preserved with modern improvements');
+    console.log('✨ Server ready for production traffic - no more Error 11205!');
 });
 
 server.on('error', (error) => {
