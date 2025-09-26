@@ -1161,7 +1161,7 @@ TIMING RULES:
                                 openaiWs.send(JSON.stringify({
                                     type: 'response.create',
                                     response: {
-                                        modalities: ['audio'],
+                                        modalities: ['audio', 'text'],
                                         instructions: `Immediately greet the customer: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}"`
                                     }
                                 }));
