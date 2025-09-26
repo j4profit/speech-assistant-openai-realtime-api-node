@@ -1148,32 +1148,26 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured - triggering greeting');
-                        // Best practice: Create system message then trigger response
+                        // Direct approach: Send audio input to trigger natural response
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Creating greeting response');
+                                console.log('🎯 Sending silent audio to trigger greeting');
 
-                                // Create system message for greeting context
+                                // Send minimal audio input to trigger VAD
+                                const silentAudio = Buffer.alloc(160, 0).toString('base64'); // 20ms of silence
                                 openaiWs.send(JSON.stringify({
-                                    type: 'conversation.item.create',
-                                    item: {
-                                        type: 'message',
-                                        role: 'system',
-                                        content: [{
-                                            type: 'input_text',
-                                            text: 'Customer just called. Greet them immediately.'
-                                        }]
-                                    }
+                                    type: 'input_audio_buffer.append',
+                                    audio: silentAudio
                                 }));
 
-                                // Trigger immediate response
+                                // Commit to trigger response
                                 setTimeout(() => {
                                     openaiWs.send(JSON.stringify({
-                                        type: 'response.create'
+                                        type: 'input_audio_buffer.commit'
                                     }));
                                 }, 50);
                             }
-                        }, 100);
+                        }, 200);
                         break;
                 }
             } catch (error) {
