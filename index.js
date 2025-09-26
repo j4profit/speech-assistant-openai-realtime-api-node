@@ -1147,13 +1147,30 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured - triggering greeting');
-                        // Immediate greeting via empty audio commit (fastest method)
+                        // Best practice: Create system message then trigger response
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Triggering instant greeting via VAD');
+                                console.log('🎯 Creating greeting response');
+
+                                // Create system message for greeting context
                                 openaiWs.send(JSON.stringify({
-                                    type: 'input_audio_buffer.commit'
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'system',
+                                        content: [{
+                                            type: 'input_text',
+                                            text: 'Customer just called. Greet them immediately.'
+                                        }]
+                                    }
                                 }));
+
+                                // Trigger immediate response
+                                setTimeout(() => {
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create'
+                                    }));
+                                }, 50);
                             }
                         }, 100);
                         break;
