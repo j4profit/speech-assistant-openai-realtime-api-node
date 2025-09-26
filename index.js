@@ -449,8 +449,10 @@ async function validateDeliveryAddress(address, restaurant) {
         }
 
         const hasStreetNumber = /^\d+/.test(address.trim());
-        const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
+        const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address) ||
+                             /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address);
         const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
+        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}\b/.test(address); // City, State pattern
 
         if (!hasStreetNumber) {
             return {
@@ -468,10 +470,11 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
 
-        if (!hasFiveDigitZip) {
+        // Accept either zip code OR city/state combination
+        if (!hasFiveDigitZip && !hasCityState) {
             return {
                 valid: false,
-                message: 'Please include a valid 5-digit zip code.',
+                message: 'Please include either a 5-digit zip code or city and state (e.g., Baltimore, MD).',
                 address: address
             };
         }
@@ -884,7 +887,7 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Call this function ONLY when: 1) Customer chose DELIVERY, 2) Customer provided a COMPLETE address with street number + street name + city + state + zip code. Do NOT call for pickup orders or if customer only said 'delivery' without giving address details.",
+                            description: "Call this function when customer provides a delivery address with at minimum: street number + street name + (zip code OR city/state). Examples: '123 Main St, 12345' or '123 Main Street, Baltimore, MD' or '123 Main St, Baltimore, Maryland, 21201'. Do NOT call if customer only said their name or 'delivery' without address details.",
                             parameters: {
                                 type: "object",
                                 properties: {
