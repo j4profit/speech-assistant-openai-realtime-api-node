@@ -1147,21 +1147,40 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured - triggering greeting');
-                        // Immediate greeting: Direct response creation
+                        console.log('OpenAI session configured - implementing best practice greeting');
+                        // BEST PRACTICE: Add user message first, then trigger response
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Triggering immediate greeting');
+                                console.log('🎯 Creating user greeting trigger message');
 
-                                // Force immediate response generation
+                                // Step 1: Add user message to conversation
                                 openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
-                                    response: {
-                                        modalities: ['text', 'audio']
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'user',
+                                        content: [{
+                                            type: 'input_text',
+                                            text: 'Hello'
+                                        }]
                                     }
                                 }));
+
+                                // Step 2: Generate response with audio
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        console.log('🎵 Generating audio response');
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['text', 'audio'],
+                                                instructions: `You are answering the phone for ${restaurant.name}. Greet the customer immediately with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${restaurant.delivery_enabled ? 'Would you like this for pickup or delivery?' : 'We offer pickup orders.'}"`
+                                            }
+                                        }));
+                                    }
+                                }, 100);
                             }
-                        }, 500); // Slightly longer delay for session stability
+                        }, 1000); // Allow full session initialization
                         break;
                 }
             } catch (error) {
