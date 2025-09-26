@@ -755,7 +755,7 @@ wss.on('connection', (ws, _req) => {
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
-GREETING TRIGGER: When you receive a message that starts with "Start the call greeting", immediately provide a warm greeting to the customer. This is your cue to begin the conversation.
+GREETING TRIGGER: When you receive the message "Start the call greeting", immediately respond with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?" This is your cue to begin the conversation.
 
 **VOICE & PACING:**
 - Speak quickly and professionally, but do not sound rushed
@@ -975,6 +975,18 @@ TIMING RULES:
                         }
                         break;
 
+                    case 'response.audio.done':
+                        console.log('✅ Audio response completed');
+                        break;
+
+                    case 'response.created':
+                        console.log('🎯 OpenAI response created:', response.response?.id);
+                        break;
+
+                    case 'response.done':
+                        console.log('✅ OpenAI response completed:', response.response?.id);
+                        break;
+
                     case 'response.audio_transcript.done':
                         console.log('AI said:', response.transcript);
                         conversationTranscript.push({
@@ -1148,16 +1160,32 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured');
-                        // Send initial greeting like the working version
+                        // Add a conversation item first, then create response like working version
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                // First add a conversation item to trigger the greeting
                                 openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
-                                    response: {
-                                        modalities: ['audio', 'text'],
-                                        instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'user',
+                                        content: [
+                                            {
+                                                type: 'input_text',
+                                                text: 'Start the call greeting'
+                                            }
+                                        ]
                                     }
                                 }));
+
+                                // Then create the response
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create'
+                                        }));
+                                    }
+                                }, 100);
                             }
                         }, 500);
                         break;
