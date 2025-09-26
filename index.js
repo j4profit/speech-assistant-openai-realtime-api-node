@@ -450,9 +450,16 @@ async function validateDeliveryAddress(address, restaurant) {
 
         const hasStreetNumber = /^\d+/.test(address.trim());
         const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address) ||
-                             /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address);
+                             /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address) ||
+                             /(old|new|north|south|east|west)\s+\w+\s+(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
         const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
         const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}\b/.test(address); // City, State pattern
+
+        console.log('Detailed validation for address:', address);
+        console.log('hasStreetNumber:', hasStreetNumber);
+        console.log('hasStreetName:', hasStreetName);
+        console.log('hasFiveDigitZip:', hasFiveDigitZip);
+        console.log('hasCityState:', hasCityState);
 
         if (!hasStreetNumber) {
             return {
