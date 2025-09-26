@@ -852,7 +852,7 @@ TIMING RULES:
                         threshold: 0.7,
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
-                    }
+                    },
                     // Enhanced speech settings for faster, more responsive speech
                     temperature: 0.8,
                     max_response_output_tokens: 1000,
