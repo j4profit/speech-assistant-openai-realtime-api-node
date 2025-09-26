@@ -6,7 +6,6 @@ const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // Environment Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -34,7 +33,7 @@ if (!twilioClient) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Global state management
-const activeCalls = new Map();
+// Note: activeCalls map removed as it was unused
 
 // Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
@@ -204,7 +203,7 @@ app.post('/voice', (req, res) => {
 });
 
 // IMPROVED: Health check endpoint with Twilio connectivity test
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     const healthData = {
         status: 'healthy',
         port: process.env.PORT || 3000,
@@ -224,7 +223,7 @@ app.get('/health', (req, res) => {
     res.status(200).json(healthData);
 });
 
-app.get('/ping', (req, res) => {
+app.get('/ping', (_req, res) => {
     res.status(200).send('pong');
 });
 
@@ -241,7 +240,7 @@ app.get('/', (req, res) => {
 });
 
 // API endpoints using Edge Functions
-app.get('/orders', async (req, res) => {
+app.get('/orders', async (_req, res) => {
     try {
         const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
@@ -267,7 +266,7 @@ app.get('/orders', async (req, res) => {
     }
 });
 
-app.get('/messages', async (req, res) => {
+app.get('/messages', async (_req, res) => {
     try {
         const { data, error } = await supabase
             .from('customer_messages')
@@ -675,7 +674,7 @@ function formatMenuForAI(menuItems, restaurant) {
 // WEBSOCKET CONNECTION WITH INTENT-BASED FUNCTION CALLING
 // =============================================================================
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws, _req) => {
     console.log('New WebSocket connection');
 
     // Connection-specific variables
@@ -742,11 +741,12 @@ IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.nam
 **DELIVERY ORDER FLOW (CRITICAL):**
 For delivery orders, follow this EXACT sequence:
 1. Get customer's name
-2. IMMEDIATELY ask for delivery address: "What's your delivery address?"
-3. ALWAYS call validate_delivery_address function when address is provided
-4. Only after address is validated successfully, ask: "What would you like to order?"
-5. Take order details
-6. Create ORDER_CONFIRMED format
+2. Ask for delivery address: "What's your delivery address?"
+3. Wait for customer to provide COMPLETE address (street number, street name, city, state, zip)
+4. ONLY when complete address is provided, call validate_delivery_address function
+5. Only after address is validated successfully, ask: "What would you like to order?"
+6. Take order details
+7. Create ORDER_CONFIRMED format
 
 **PICKUP ORDER FLOW:**
 For pickup orders:
@@ -772,10 +772,12 @@ ${menuText}
 Instead of keyword matching, you naturally understand customer intent and call appropriate functions:
 
 1. **When customer wants to modify/cancel existing orders** → call search_recent_orders
-2. **When customer provides delivery address** → MANDATORY: call validate_delivery_address
+2. **When customer provides COMPLETE delivery address (with street, city, state, zip)** → call validate_delivery_address
 3. **When customer wants to leave a message/complaint/question** → call create_customer_message
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders
+
+IMPORTANT: Do NOT call validate_delivery_address until customer has provided a COMPLETE address with all components.
 
 **RESPONSE LENGTH RULES:**
 - ALL responses must be 1-2 sentences maximum
@@ -823,10 +825,13 @@ TIMING RULES:
                     input_audio_transcription: { model: 'whisper-1' },
                     turn_detection: {
                         type: 'server_vad',
-                        threshold: 0.7,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: 2000
+                        threshold: 0.5,
+                        prefix_padding_ms: 200,
+                        silence_duration_ms: 1500
                     },
+                    // Enhanced speech settings for faster, more responsive speech
+                    temperature: 0.8,
+                    max_response_output_tokens: 1000,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
@@ -847,13 +852,13 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "MANDATORY: Must call this function every time a customer provides a delivery address. Required before confirming address validity. Never assume address is valid without calling this function.",
+                            description: "Call this function ONLY when a customer has explicitly provided a complete delivery address with street number, street name, city, state, and zip code. Do not call if customer has only said they want delivery without providing address details.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "Complete delivery address provided by customer"
+                                        description: "Complete delivery address provided by customer (must include street number, street name, city, state, zip)"
                                     }
                                 },
                                 required: ["address"]
@@ -1114,8 +1119,18 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        // REMOVED: Programmed greeting to prevent duplication
-                        // The AI will greet naturally based on system instructions
+                        // Send immediate greeting to ensure fast response
+                        setTimeout(() => {
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                openaiWs.send(JSON.stringify({
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['audio', 'text'],
+                                        instructions: 'Immediately greet the customer with the opening message from your system instructions. Speak quickly and clearly.'
+                                    }
+                                }));
+                            }
+                        }, 500);
                         break;
                 }
             } catch (error) {
@@ -1237,38 +1252,32 @@ TIMING RULES:
                 case 'validate_delivery_address':
                     let deliveryAddress = parsedArgs.address;
 
-                    // Better address extraction from conversation context
+                    // If no address provided directly, extract from the most recent customer message only
                     if (!deliveryAddress || deliveryAddress.trim().length === 0) {
-                        console.log('Address not provided in function args, extracting from conversation...');
+                        console.log('Address not provided in function args, checking latest customer message...');
 
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
-                            .slice(-3)
-                            .map(msg => msg.text);
+                            .slice(-1); // Only check the most recent message
 
-                        console.log('Searching for address in:', recentCustomerMessages.join(' '));
+                        if (recentCustomerMessages.length > 0) {
+                            const latestMessage = recentCustomerMessages[0].text;
+                            console.log('Checking latest message: "' + latestMessage + '"');
 
-                        for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
-                            const message = recentCustomerMessages[i];
-                            console.log('Checking message ' + i + ': "' + message + '"');
-
-                            const patterns = [
-                                /\b\d+[^.!?]*\d{5}\b/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\d{5}\b/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\s+in\s+[\w\s,]+/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)\b[^.!?]*/i
+                            // Look for complete address patterns
+                            const addressPatterns = [
+                                /\b\d+[^.!?]*\d{5}(-\d{4})?\b/i, // Number...5-digit zip
+                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\d{5}(-\d{4})?\b/i
                             ];
 
-                            for (const pattern of patterns) {
-                                const match = message.match(pattern);
+                            for (const pattern of addressPatterns) {
+                                const match = latestMessage.match(pattern);
                                 if (match) {
                                     deliveryAddress = match[0].trim();
-                                    console.log('Found address with pattern: "' + deliveryAddress + '"');
+                                    console.log('Found address: "' + deliveryAddress + '"');
                                     break;
                                 }
                             }
-
-                            if (deliveryAddress) break;
                         }
                     }
 
