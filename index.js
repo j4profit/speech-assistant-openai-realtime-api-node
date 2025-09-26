@@ -1147,7 +1147,7 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        // Send immediate greeting when session is ready
+                        // IMMEDIATE low-latency greeting - no conversation items needed
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                 const deliveryText = restaurant.delivery_enabled ?
@@ -1155,38 +1155,18 @@ TIMING RULES:
                                     'We offer pickup orders.';
 
                                 const restaurantName = restaurant.name || 'the restaurant';
-                                console.log('🎤 Triggering immediate greeting for restaurant:', restaurantName);
+                                console.log('🚀 INSTANT greeting trigger for:', restaurantName);
 
-                                // Create a user message to trigger the greeting response
+                                // Direct response.create with instructions - fastest possible approach
                                 openaiWs.send(JSON.stringify({
-                                    type: 'conversation.item.create',
-                                    item: {
-                                        type: 'message',
-                                        role: 'user',
-                                        content: [
-                                            {
-                                                type: 'text',
-                                                text: `Start the call greeting for ${restaurantName}. ${deliveryText}`
-                                            }
-                                        ]
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['audio'],
+                                        instructions: `Immediately greet the customer: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}"`
                                     }
                                 }));
-
-                                // Then trigger the response to generate audio
-                                setTimeout(() => {
-                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                        console.log('🎵 Creating response to generate greeting audio');
-                                        openaiWs.send(JSON.stringify({
-                                            type: 'response.create',
-                                            response: {
-                                                modalities: ['text', 'audio'],
-                                                instructions: `Greet the customer warmly for ${restaurantName}. Say: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}" Keep it under 2 sentences and speak quickly but clearly.`
-                                            }
-                                        }));
-                                    }
-                                }, 100);
                             }
-                        }, 1500);
+                        }, 100); // Reduced from 1500ms to 100ms
                         break;
                 }
             } catch (error) {
