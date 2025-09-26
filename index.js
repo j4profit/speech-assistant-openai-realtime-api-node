@@ -1114,21 +1114,8 @@ TIMING RULES:
                         
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        setTimeout(() => {
-                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                const deliveryOptions = restaurant.delivery_enabled ? 
-                                    'Would you like this for pickup or delivery?' : 
-                                    'All orders are for pickup only.';
-                                    
-                                openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
-                                    response: {
-                                        modalities: ['audio', 'text'],
-                                        instructions: 'Say exactly: "Hello! Thank you for calling ' + restaurant.name + '. We\'re extremely busy right now and can\'t take calls, but I can help you! ' + deliveryOptions + '"'
-                                    }
-                                }));
-                            }
-                        }, 500);
+                        // REMOVED: Programmed greeting to prevent duplication
+                        // The AI will greet naturally based on system instructions
                         break;
                 }
             } catch (error) {
