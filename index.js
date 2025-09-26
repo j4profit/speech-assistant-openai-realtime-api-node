@@ -737,7 +737,7 @@ wss.on('connection', (ws, _req) => {
         console.log('Connecting to OpenAI Realtime API with updated model...');
 
         // Use the latest stable model
-        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
+        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
             headers: {
                 'Authorization': 'Bearer ' + OPENAI_API_KEY,
                 'OpenAI-Beta': 'realtime=v1'
@@ -1148,26 +1148,20 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured - triggering greeting');
-                        // Direct approach: Send audio input to trigger natural response
+                        // Immediate greeting: Direct response creation
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Sending silent audio to trigger greeting');
+                                console.log('🎯 Triggering immediate greeting');
 
-                                // Send minimal audio input to trigger VAD
-                                const silentAudio = Buffer.alloc(160, 0).toString('base64'); // 20ms of silence
+                                // Force immediate response generation
                                 openaiWs.send(JSON.stringify({
-                                    type: 'input_audio_buffer.append',
-                                    audio: silentAudio
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['text', 'audio']
+                                    }
                                 }));
-
-                                // Commit to trigger response
-                                setTimeout(() => {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'input_audio_buffer.commit'
-                                    }));
-                                }, 50);
                             }
-                        }, 200);
+                        }, 500); // Slightly longer delay for session stability
                         break;
                 }
             } catch (error) {
@@ -1920,7 +1914,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('🔧 EDGE FUNCTIONS: All database operations preserved');
     console.log('💬 MESSAGE SYSTEM: Customer messages for staff requests');
     console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
-    console.log('🌐 REALTIME API: Using gpt-4o-mini-realtime-preview with ultra-fast speech');
+    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
     console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('');
     console.log('✨ Server ready for production traffic - no more Error 11205!');
