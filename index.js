@@ -847,12 +847,7 @@ TIMING RULES:
                     input_audio_format: 'g711_ulaw',
                     output_audio_format: 'g711_ulaw',
                     input_audio_transcription: { model: 'whisper-1' },
-                    turn_detection: {
-                        type: 'server_vad',
-                        threshold: 0.5,
-                        prefix_padding_ms: 200,
-                        silence_duration_ms: 1500
-                    },
+                    turn_detection: null, // Disable VAD for manual control
                     // Enhanced speech settings for faster, more responsive speech
                     temperature: 0.8,
                     max_response_output_tokens: 1000,
@@ -961,7 +956,18 @@ TIMING RULES:
             try {
                 const response = JSON.parse(data);
 
+                // Log ALL OpenAI responses for debugging
+                console.log('🔍 OpenAI Response:', response.type, response);
+
                 switch (response.type) {
+                    case 'response.created':
+                        console.log('✅ Response created:', response.response?.id);
+                        break;
+
+                    case 'response.done':
+                        console.log('✅ Response completed:', response.response?.status);
+                        break;
+
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
                             console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
@@ -1147,40 +1153,42 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured - implementing best practice greeting');
-                        // BEST PRACTICE: Add user message first, then trigger response
+                        console.log('OpenAI session configured - manual greeting trigger');
+                        // Manual control approach for reliable greeting
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Creating user greeting trigger message');
+                                console.log('🎯 Sending audio input to trigger greeting');
 
-                                // Step 1: Add user message to conversation
+                                // Send actual audio data (brief silence) to trigger recognition
+                                const silenceBuffer = Buffer.alloc(320, 127); // 40ms of μ-law silence (neutral value 127)
+                                const silenceBase64 = silenceBuffer.toString('base64');
+
                                 openaiWs.send(JSON.stringify({
-                                    type: 'conversation.item.create',
-                                    item: {
-                                        type: 'message',
-                                        role: 'user',
-                                        content: [{
-                                            type: 'input_text',
-                                            text: 'Hello'
-                                        }]
-                                    }
+                                    type: 'input_audio_buffer.append',
+                                    audio: silenceBase64
                                 }));
 
-                                // Step 2: Generate response with audio
+                                // Commit the audio buffer to trigger processing
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                        console.log('🎵 Generating audio response');
+                                        console.log('🎵 Committing audio buffer to trigger response');
                                         openaiWs.send(JSON.stringify({
-                                            type: 'response.create',
-                                            response: {
-                                                modalities: ['text', 'audio'],
-                                                instructions: `You are answering the phone for ${restaurant.name}. Greet the customer immediately with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${restaurant.delivery_enabled ? 'Would you like this for pickup or delivery?' : 'We offer pickup orders.'}"`
-                                            }
+                                            type: 'input_audio_buffer.commit'
                                         }));
+
+                                        // Force response generation
+                                        setTimeout(() => {
+                                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                                console.log('🚀 Creating forced response');
+                                                openaiWs.send(JSON.stringify({
+                                                    type: 'response.create'
+                                                }));
+                                            }
+                                        }, 200);
                                     }
                                 }, 100);
                             }
-                        }, 1000); // Allow full session initialization
+                        }, 1000);
                         break;
                 }
             } catch (error) {
