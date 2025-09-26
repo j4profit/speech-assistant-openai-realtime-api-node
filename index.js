@@ -806,10 +806,7 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
-                    // FIXED: Faster speech settings
-                    voice_settings: {
-                        speed: 1.25 // 25% faster than normal (range: 0.25 to 4.0)
-                    },
+                    // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
                             type: "function",
