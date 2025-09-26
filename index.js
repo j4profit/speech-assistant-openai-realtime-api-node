@@ -371,15 +371,16 @@ async function createCallLog(callData) {
 
 async function searchRecentOrders(phoneNumber, restaurantId) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/lookup-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-                restaurant_phone: restaurantId,
-                customer_phone: phoneNumber
+                phone_number: phoneNumber,
+                restaurant_id: restaurantId,
+                days_back: 7
             })
         });
 
@@ -387,7 +388,7 @@ async function searchRecentOrders(phoneNumber, restaurantId) {
         const result = await response.json();
         return result.orders || [];
     } catch (error) {
-        console.error('Error calling lookup-order Edge Function:', error);
+        console.error('Error calling search-orders Edge Function:', error);
         return [];
     }
 }
@@ -475,33 +476,48 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
 
-        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery-address', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-                restaurant_phone: restaurant.phone_number,
-                address: address.trim()
+                address: address.trim(),
+                restaurant_id: restaurant.id,
+                delivery_enabled: restaurant.delivery_enabled,
+                delivery_radius: restaurant.delivery_radius || 5,
+                delivery_hours: restaurant.delivery_hours,
+                delivery_time: restaurant.delivery_time || 15,
+                preparation_time: restaurant.preparation_time || 20,
+                restaurant_address: restaurant.address,
+                restaurant_latitude: restaurant.latitude,
+                restaurant_longitude: restaurant.longitude
             })
         });
 
         if (!response.ok) {
+            console.error('Address validation HTTP error:', response.status, response.statusText);
+            const errorText = await response.text();
+            console.error('Address validation error response:', errorText);
             return {
                 valid: false,
                 message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
-                address: address
+                address: address,
+                error: 'http_error_' + response.status
             };
         }
 
         const result = await response.json();
+        console.log('Address validation result:', result);
 
         if (result.error) {
+            console.error('Address validation returned error:', result.error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
-                address: address
+                address: address,
+                error: result.error
             };
         }
 
@@ -527,7 +543,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
 async function createOrder(orderData) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/save-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -552,14 +568,14 @@ async function createOrder(orderData) {
         console.log('Order created successfully:', result.data?.id);
         return result.data;
     } catch (error) {
-        console.error('Error calling save-order Edge Function:', error);
+        console.error('Error calling create-order Edge Function:', error);
         return null;
     }
 }
 
 async function createCustomerMessage(messageData) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/save-message', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -575,7 +591,7 @@ async function createCustomerMessage(messageData) {
         console.log('Customer message created successfully:', result.data?.id || result.message_id);
         return result.data || result;
     } catch (error) {
-        console.error('Error calling save-message Edge Function:', error);
+        console.error('Error calling create-message Edge Function:', error);
         return null;
     }
 }
@@ -705,6 +721,15 @@ wss.on('connection', (ws, _req) => {
             return;
         }
 
+        console.log('Restaurant loaded:', {
+            id: restaurant.id,
+            name: restaurant.name,
+            phone: restaurant.phone_number,
+            delivery_enabled: restaurant.delivery_enabled,
+            tagline: restaurant.tagline,
+            description: restaurant.description
+        });
+
         customerPhone = fromNumber;
         callSid = callId;
         const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
@@ -731,7 +756,7 @@ wss.on('connection', (ws, _req) => {
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
-IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"
+IMPORTANT: You will automatically greet customers when the call starts. After that, follow the conversation flow naturally without repeating the greeting.
 
 **VOICE & PACING:**
 - Speak quickly and professionally, but do not sound rushed
@@ -1119,18 +1144,25 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        // Send immediate greeting to ensure fast response
+                        // Send immediate greeting when session is ready
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                const deliveryText = restaurant.delivery_enabled ?
+                                    'Would you like this for pickup or delivery?' :
+                                    'We offer pickup orders.';
+
+                                const restaurantName = restaurant.name || 'the restaurant';
+                                console.log('Sending immediate greeting for restaurant:', restaurantName);
+
                                 openaiWs.send(JSON.stringify({
                                     type: 'response.create',
                                     response: {
                                         modalities: ['audio', 'text'],
-                                        instructions: 'Immediately greet the customer with the opening message from your system instructions. Speak quickly and clearly.'
+                                        instructions: `Say exactly: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}"`
                                     }
                                 }));
                             }
-                        }, 500);
+                        }, 1000);
                         break;
                 }
             } catch (error) {
@@ -1626,7 +1658,7 @@ TIMING RULES:
             const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
 
             const orderData = {
-                restaurant_phone: restaurant.phone_number,
+                restaurant_id: restaurant.id,
                 customer_phone: customerPhone,
                 customer_name: customerName,
                 total_amount: totalAmount || 0,
@@ -1634,7 +1666,9 @@ TIMING RULES:
                 delivery_address: deliveryAddress,
                 order_details: items,
                 special_instructions: specialInstructions || '',
-                pickup_time: timing.readyTime?.toISOString()
+                ready_time: timing.readyTimeString,
+                estimated_ready_at: timing.readyTime?.toISOString(),
+                call_sid: callSid
             };
 
             console.log('Creating order with data:', orderData);
