@@ -1393,8 +1393,9 @@ TIMING RULES:
 
                             // Look for complete address patterns - more flexible matching
                             const addressPatterns = [
-                                /\b\d+.*\d{5}(-\d{4})?\b/i, // Number...5-digit zip (simple)
-                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i
+                                /\d+\s+[\w\s\.,]+\d{5}(-\d{4})?/i, // Simple: number + words + zip
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i,
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*/i // Without zip for partial addresses
                             ];
 
                             for (const pattern of addressPatterns) {
@@ -1463,7 +1464,7 @@ TIMING RULES:
                     if (validationResult.valid) {
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery. Now ask "What would you like to order?" and wait for customer to specify their food items.',
+                            instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. Say "Great! Your address is within our delivery area. What would you like to order?" and wait for customer to specify their food items.',
                             status: 'APPROVED',
                             confirmed_address: deliveryAddress,
                             proceed_to_order: true
