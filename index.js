@@ -765,31 +765,35 @@ GREETING TRIGGER: When you receive the message "Start the call greeting", immedi
 - Deliver your audio response fast while maintaining clarity
 - Use a brisk, efficient pace throughout the conversation
 
+**STANDARD GREETING FLOW:**
+EVERY caller gets this exact sequence:
+1. Greeting with pickup/delivery question:
+   - If delivery enabled: "Hello! Thank you for calling [restaurant name]. Is this for pickup or delivery?"
+   - If pickup only: "Hello! Thank you for calling [restaurant name]. We offer pickup only. How can I help you?"
+2. After they respond, ask for name: "May I have your name for the order?" or "Who am I speaking with?"
+
 **ORDER TYPE RESPONSE HANDLING:**
 When customer responds to "Is this for pickup or delivery?":
-- If they say "pickup" → Follow PICKUP ORDER FLOW
-- If they say "delivery" → Follow DELIVERY ORDER FLOW
+- If they say "pickup" → Ask for name, then follow PICKUP ORDER FLOW
+- If they say "delivery" → Ask for name, then follow DELIVERY ORDER FLOW
 - If unclear, ask: "Will this be for pickup or delivery?"
 
 **DELIVERY ORDER FLOW (CRITICAL):**
 For delivery orders, follow this EXACT sequence:
-1. Get customer's name
-2. Ask for delivery address: "What's your delivery address?"
-3. Wait for customer to provide COMPLETE address (street number, street name, city, state, zip)
-4. ONLY when complete address is provided, call validate_delivery_address function
-5. Only after address is validated successfully, ask: "What would you like to order?"
-6. Take order details
-7. Create ORDER_CONFIRMED format
+1. Ask for delivery address: "What's your delivery address?"
+2. Wait for customer to provide COMPLETE address (street number, street name, city, state, zip)
+3. ONLY when complete address is provided, call validate_delivery_address function
+4. Only after address is validated successfully, ask: "What would you like to order?"
+5. Take order details
+6. Create ORDER_CONFIRMED format
 
 **PICKUP ORDER FLOW:**
 For pickup orders:
-1. Get customer's name
-2. Ask: "What would you like to order?"
-3. Take order details
-4. Create ORDER_CONFIRMED format
+1. Ask: "What would you like to order?"
+2. Take order details
+3. Create ORDER_CONFIRMED format
 
 IMPORTANT:
-- ALWAYS get the customer's name BEFORE taking any order details
 - Do NOT ask for delivery address if customer chose pickup
 - Do NOT call validate_delivery_address unless customer specifically chose delivery and provided a complete address
 
@@ -1363,6 +1367,22 @@ TIMING RULES:
                         if (recentCustomerMessages.length > 0) {
                             const latestMessage = recentCustomerMessages[0].text;
                             console.log('Checking latest message: "' + latestMessage + '"');
+
+                            // FIRST: Check if this is obviously a name instead of an address
+                            const isName = /^[A-Za-z]+(\s+[A-Za-z]+)*\.?$/.test(latestMessage.trim());
+                            const hasNumber = /\d/.test(latestMessage);
+
+                            if (isName && !hasNumber) {
+                                console.log('Message appears to be a name, rejecting validation call');
+                                result = {
+                                    valid: false,
+                                    message: 'I need your delivery address with street number and name.',
+                                    address: '',
+                                    needs_address: true,
+                                    instruction: 'Customer provided their name instead of address. Do not call validation again until they provide a complete street address.'
+                                };
+                                break;
+                            }
 
                             // Look for complete address patterns
                             const addressPatterns = [
