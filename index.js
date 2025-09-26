@@ -887,7 +887,7 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "Call this function when customer provides a delivery address with at minimum: street number + street name + (zip code OR city/state). Examples: '123 Main St, 12345' or '123 Main Street, Baltimore, MD' or '123 Main St, Baltimore, Maryland, 21201'. Do NOT call if customer only said their name or 'delivery' without address details.",
+                            description: "ONLY call this function when customer provides a COMPLETE delivery address containing: STREET NUMBER + STREET NAME + (ZIP CODE OR CITY/STATE). Examples that should trigger this function: '123 Main St, 12345' or '123 Main Street, Baltimore, MD'. NEVER call this function for: names (John, Mary, etc.), single words (delivery, pickup), incomplete addresses missing numbers or street names, or questions.",
                             parameters: {
                                 type: "object",
                                 properties: {
@@ -1386,6 +1386,22 @@ TIMING RULES:
                             valid: false,
                             message: 'We only offer pickup orders. Delivery is not available at this location.',
                             delivery_not_available: true
+                        };
+                        break;
+                    }
+
+                    // Detect if this looks like a name instead of an address
+                    const possibleName = /^[A-Za-z]+(\s+[A-Za-z]+)*\.?$/.test(deliveryAddress?.trim() || '');
+                    const hasNumber = /\d/.test(deliveryAddress || '');
+
+                    if (possibleName && !hasNumber) {
+                        console.log('Input appears to be a name, not an address:', deliveryAddress);
+                        result = {
+                            valid: false,
+                            message: 'I need your delivery address.',
+                            address: '',
+                            needs_address: true,
+                            instruction: 'Customer provided their name instead of address. Ask for their delivery address.'
                         };
                         break;
                     }
