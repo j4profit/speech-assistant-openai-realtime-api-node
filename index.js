@@ -1146,27 +1146,16 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured with updated instructions');
-                        // IMMEDIATE low-latency greeting - no conversation items needed
+                        console.log('OpenAI session configured - triggering greeting');
+                        // Immediate greeting via empty audio commit (fastest method)
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                const deliveryText = restaurant.delivery_enabled ?
-                                    'Would you like this for pickup or delivery?' :
-                                    'We offer pickup orders.';
-
-                                const restaurantName = restaurant.name || 'the restaurant';
-                                console.log('🚀 INSTANT greeting trigger for:', restaurantName);
-
-                                // Direct response.create with instructions - fastest possible approach
+                                console.log('🎯 Triggering instant greeting via VAD');
                                 openaiWs.send(JSON.stringify({
-                                    type: 'response.create',
-                                    response: {
-                                        modalities: ['audio', 'text'],
-                                        instructions: `Immediately greet the customer: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}"`
-                                    }
+                                    type: 'input_audio_buffer.commit'
                                 }));
                             }
-                        }, 100); // Reduced from 1500ms to 100ms
+                        }, 100);
                         break;
                 }
             } catch (error) {
