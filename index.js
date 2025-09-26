@@ -1464,7 +1464,7 @@ TIMING RULES:
                     if (validationResult.valid) {
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. Say "Great! Your address is within our delivery area. What would you like to order?" and wait for customer to specify their food items.',
+                            instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. IMMEDIATELY say "Great! Your address is within our delivery area. What would you like to order?" Do NOT ask for the address again. Proceed directly to taking the food order.',
                             status: 'APPROVED',
                             confirmed_address: deliveryAddress,
                             proceed_to_order: true
