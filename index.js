@@ -737,7 +737,7 @@ wss.on('connection', (ws, _req) => {
         console.log('Connecting to OpenAI Realtime API with updated model...');
 
         // Use the latest stable model
-        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
+        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
             headers: {
                 'Authorization': 'Bearer ' + OPENAI_API_KEY,
                 'OpenAI-Beta': 'realtime=v1'
@@ -846,8 +846,13 @@ TIMING RULES:
                     voice: 'alloy',
                     input_audio_format: 'g711_ulaw',
                     output_audio_format: 'g711_ulaw',
-                    input_audio_transcription: null, // Disable to avoid rate limits
-                    turn_detection: null, // Disable VAD for manual control
+                    input_audio_transcription: { model: 'whisper-1' },
+                    turn_detection: {
+                        type: 'server_vad',
+                        threshold: 0.7,
+                        prefix_padding_ms: 300,
+                        silence_duration_ms: 2000
+                    }
                     // Enhanced speech settings for faster, more responsive speech
                     temperature: 0.8,
                     max_response_output_tokens: 1000,
@@ -956,18 +961,7 @@ TIMING RULES:
             try {
                 const response = JSON.parse(data);
 
-                // Log ALL OpenAI responses for debugging
-                console.log('🔍 OpenAI Response:', response.type, response);
-
                 switch (response.type) {
-                    case 'response.created':
-                        console.log('✅ Response created:', response.response?.id);
-                        break;
-
-                    case 'response.done':
-                        console.log('✅ Response completed:', response.response?.status);
-                        break;
-
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
                             console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
@@ -1153,40 +1147,19 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured - simple greeting trigger');
-                        // Simplified approach to avoid rate limits
+                        console.log('OpenAI session configured');
+                        // Send initial greeting like the working version
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Creating simple user message');
-
-                                // Create a simple user message
                                 openaiWs.send(JSON.stringify({
-                                    type: 'conversation.item.create',
-                                    item: {
-                                        type: 'message',
-                                        role: 'user',
-                                        content: [{
-                                            type: 'input_text',
-                                            text: 'Hi'
-                                        }]
+                                    type: 'response.create',
+                                    response: {
+                                        modalities: ['audio', 'text'],
+                                        instructions: `Say: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?"`
                                     }
                                 }));
-
-                                // Generate response with specific greeting instructions
-                                setTimeout(() => {
-                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                        console.log('🎵 Creating greeting response');
-                                        openaiWs.send(JSON.stringify({
-                                            type: 'response.create',
-                                            response: {
-                                                modalities: ['audio'],
-                                                instructions: `Immediately greet the customer for ${restaurant.name}: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy and can't take phone calls, but I can help you place an order! ${restaurant.delivery_enabled ? 'Would you like this for pickup or delivery?' : 'We offer pickup orders.'}"`
-                                            }
-                                        }));
-                                    }
-                                }, 300);
                             }
-                        }, 1500);
+                        }, 500);
                         break;
                 }
             } catch (error) {
