@@ -787,6 +787,10 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
+                    // FIXED: Faster speech settings
+                    voice_settings: {
+                        speed: 1.25 // 25% faster than normal (range: 0.25 to 4.0)
+                    },
                     tools: [
                         {
                             type: "function",
@@ -1264,6 +1268,12 @@ TIMING RULES:
                     }
                     
                     console.log('Validating extracted address:', deliveryAddress);
+                    console.log('Address validation details:', {
+                        hasStreetNumber: /^\d+/.test(deliveryAddress.trim()),
+                        hasStreetName: /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(deliveryAddress),
+                        hasFiveDigitZip: /\b\d{5}(-\d{4})?\b/.test(deliveryAddress),
+                        restaurant_delivery_enabled: restaurant.delivery_enabled
+                    });
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
                     
                     if (validationResult.valid) {
@@ -1706,7 +1716,7 @@ TIMING RULES:
         
         const callEndTime = new Date();
         const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
-        const callDuration = baseDuration + 5.5;
+        const callDuration = Math.round(baseDuration + 5.5); // FIXED: Convert to integer for database
         
         if (callSid) {
             const initialCallData = global.pendingCallData?.[callSid] || {};
@@ -1738,6 +1748,7 @@ TIMING RULES:
                 call_sid: callSid,
                 base_duration: baseDuration,
                 final_duration: callDuration,
+                duration_type: 'integer', // FIXED: Now sending integer instead of float
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
                 migration_status: 'ready'
