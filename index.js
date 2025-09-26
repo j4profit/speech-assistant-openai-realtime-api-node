@@ -755,7 +755,7 @@ wss.on('connection', (ws, _req) => {
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
-GREETING TRIGGER: When you receive the message "Start the call greeting", immediately respond with: "Hello! Thank you for calling ${restaurant.name}. How can I help you today?" This is your cue to begin the conversation.
+GREETING TRIGGER: When you receive the message "Start the call greeting", immediately respond with the appropriate greeting based on delivery availability. This is your cue to begin the conversation.
 
 **VOICE & PACING:**
 - Speak quickly and professionally, but do not sound rushed
@@ -1177,6 +1177,11 @@ TIMING RULES:
                         // Add a conversation item first, then create response like working version
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                // Create appropriate greeting based on delivery availability
+                                const greetingText = restaurant.delivery_enabled
+                                    ? `Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?`
+                                    : `Hello! Thank you for calling ${restaurant.name}. We offer pickup only. How can I help you?`;
+
                                 // First add a conversation item to trigger the greeting
                                 openaiWs.send(JSON.stringify({
                                     type: 'conversation.item.create',
@@ -1192,13 +1197,14 @@ TIMING RULES:
                                     }
                                 }));
 
-                                // Then create the response with explicit audio modality
+                                // Then create the response with the specific greeting
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                         openaiWs.send(JSON.stringify({
                                             type: 'response.create',
                                             response: {
-                                                modalities: ['audio', 'text']
+                                                modalities: ['audio', 'text'],
+                                                instructions: `Say exactly: "${greetingText}"`
                                             }
                                         }));
                                     }
