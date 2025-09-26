@@ -1656,11 +1656,9 @@ wss.on('connection', (ws, req) => {
         }
     });
     
-    ws.on('close', async () => {
-        console.log('Twilio connection closed');
-        
-        const callEndTime = new Date();
-        const callDuration = Math.floor((callEndTime - callStartTime) / 1000);
+
+        const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
+        const callDuration = baseDuration + 5.5;
         
         if (callSid) {
             // Get the initial Twilio call data
@@ -1692,7 +1690,9 @@ wss.on('connection', (ws, req) => {
 
             console.log('Creating complete call log:', {
                 call_sid: callSid,
-                call_duration: callDuration,
+                base_duration: baseDuration,
+                final_duration: callDuration,
+                adjustment: '5.5 seconds added',
                 conversation_items: conversationTranscript.length,
                 has_twilio_data: !!initialCallData.twilio_data,
                 restaurant_id: restaurant?.id,
@@ -1716,7 +1716,7 @@ wss.on('connection', (ws, req) => {
                 delete global.pendingCallData[callSid];
             }
             
-            console.log('Call completed. Duration: ' + callDuration + ' seconds');
+            console.log('Call completed. Base duration: ' + baseDuration + ' seconds, Final duration: ' + callDuration + ' seconds (+5.5s adjustment)');
         }
         
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1758,6 +1758,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('NATURAL CONVERSATION: OpenAI handles all conversation flow and intent detection');
     console.log('EDGE FUNCTIONS: All database operations through Supabase Edge Functions');
     console.log('MESSAGE SYSTEM: Customer messages for requests restaurant staff will handle');
+    console.log('UPDATED: Call duration calculation includes 5.5 second adjustment');
     console.log('✅ Server successfully bound to port ' + PORT + ' and ready for traffic');
 });
 
