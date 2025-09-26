@@ -754,7 +754,7 @@ wss.on('connection', (ws, _req) => {
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
-IMPORTANT: You will automatically greet customers when the call starts. After that, follow the conversation flow naturally without repeating the greeting.
+GREETING TRIGGER: When you receive a message that starts with "Start the call greeting", immediately provide a warm greeting to the customer. This is your cue to begin the conversation.
 
 **VOICE & PACING:**
 - Speak quickly and professionally, but do not sound rushed
@@ -963,14 +963,14 @@ TIMING RULES:
                 switch (response.type) {
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
-                            console.log('Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
+                            console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
                             ws.send(JSON.stringify({
                                 event: 'media',
                                 streamSid: streamSid,
                                 media: { payload: response.delta }
                             }));
                         } else {
-                            console.log('Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
+                            console.log('❌ Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
                         }
                         break;
 
@@ -1155,28 +1155,33 @@ TIMING RULES:
                                     'We offer pickup orders.';
 
                                 const restaurantName = restaurant.name || 'the restaurant';
-                                console.log('Sending immediate greeting for restaurant:', restaurantName);
+                                console.log('🎤 Triggering immediate greeting for restaurant:', restaurantName);
 
-                                // First create a conversation item with the greeting text
+                                // Create a user message to trigger the greeting response
                                 openaiWs.send(JSON.stringify({
                                     type: 'conversation.item.create',
                                     item: {
                                         type: 'message',
-                                        role: 'assistant',
+                                        role: 'user',
                                         content: [
                                             {
                                                 type: 'text',
-                                                text: `Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}`
+                                                text: `Start the call greeting for ${restaurantName}. ${deliveryText}`
                                             }
                                         ]
                                     }
                                 }));
 
-                                // Then trigger the response
+                                // Then trigger the response to generate audio
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        console.log('🎵 Creating response to generate greeting audio');
                                         openaiWs.send(JSON.stringify({
-                                            type: 'response.create'
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['text', 'audio'],
+                                                instructions: `Greet the customer warmly for ${restaurantName}. Say: "Hello! Thank you for calling ${restaurantName}. We're extremely busy right now and can't take phone calls, but I can help you place an order! ${deliveryText}" Keep it under 2 sentences and speak quickly but clearly.`
+                                            }
                                         }));
                                     }
                                 }, 100);
