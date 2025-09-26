@@ -846,7 +846,7 @@ TIMING RULES:
                     voice: 'alloy',
                     input_audio_format: 'g711_ulaw',
                     output_audio_format: 'g711_ulaw',
-                    input_audio_transcription: { model: 'whisper-1' },
+                    input_audio_transcription: null, // Disable to avoid rate limits
                     turn_detection: null, // Disable VAD for manual control
                     // Enhanced speech settings for faster, more responsive speech
                     temperature: 0.8,
@@ -1153,42 +1153,40 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured - manual greeting trigger');
-                        // Manual control approach for reliable greeting
+                        console.log('OpenAI session configured - simple greeting trigger');
+                        // Simplified approach to avoid rate limits
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Sending audio input to trigger greeting');
+                                console.log('🎯 Creating simple user message');
 
-                                // Send actual audio data (brief silence) to trigger recognition
-                                const silenceBuffer = Buffer.alloc(320, 127); // 40ms of μ-law silence (neutral value 127)
-                                const silenceBase64 = silenceBuffer.toString('base64');
-
+                                // Create a simple user message
                                 openaiWs.send(JSON.stringify({
-                                    type: 'input_audio_buffer.append',
-                                    audio: silenceBase64
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'user',
+                                        content: [{
+                                            type: 'input_text',
+                                            text: 'Hi'
+                                        }]
+                                    }
                                 }));
 
-                                // Commit the audio buffer to trigger processing
+                                // Generate response with specific greeting instructions
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                        console.log('🎵 Committing audio buffer to trigger response');
+                                        console.log('🎵 Creating greeting response');
                                         openaiWs.send(JSON.stringify({
-                                            type: 'input_audio_buffer.commit'
-                                        }));
-
-                                        // Force response generation
-                                        setTimeout(() => {
-                                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                                console.log('🚀 Creating forced response');
-                                                openaiWs.send(JSON.stringify({
-                                                    type: 'response.create'
-                                                }));
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['audio'],
+                                                instructions: `Immediately greet the customer for ${restaurant.name}: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy and can't take phone calls, but I can help you place an order! ${restaurant.delivery_enabled ? 'Would you like this for pickup or delivery?' : 'We offer pickup orders.'}"`
                                             }
-                                        }, 200);
+                                        }));
                                     }
-                                }, 100);
+                                }, 300);
                             }
-                        }, 1000);
+                        }, 1500);
                         break;
                 }
             } catch (error) {
