@@ -737,7 +737,7 @@ wss.on('connection', (ws, _req) => {
         console.log('Connecting to OpenAI Realtime API with updated model...');
 
         // Use the latest stable model
-        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
+        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
             headers: {
                 'Authorization': 'Bearer ' + OPENAI_API_KEY,
                 'OpenAI-Beta': 'realtime=v1'
@@ -745,7 +745,8 @@ wss.on('connection', (ws, _req) => {
         });
 
         openaiWs.on('open', () => {
-            console.log('Connected to OpenAI Realtime API');
+            console.log('✅ Connected to OpenAI Realtime API');
+            console.log('🔗 WebSocket ready for audio streaming');
 
             // Delivery options are handled in the greeting logic below
 
@@ -1189,11 +1190,19 @@ TIMING RULES:
         });
 
         openaiWs.on('error', async (error) => {
-            console.error('OpenAI WebSocket error:', error);
+            console.error('❌ OpenAI WebSocket error:', error);
+            console.error('🚨 Connection failure details:', {
+                message: error.message,
+                code: error.code,
+                type: error.type,
+                callSid: callSid
+            });
+
             if (callSid) {
+                console.log('🔄 Immediate hangup - OpenAI connection failed');
                 await hangup(callSid, {
                     message: 'We are experiencing technical difficulties. Please try calling again.',
-                    reason: 'websocket_error'
+                    reason: 'openai_websocket_error'
                 });
             }
         });
@@ -1856,13 +1865,38 @@ TIMING RULES:
         }
     });
 
+    // Enhanced Twilio WebSocket error handling for errors 11750 & 31920
     ws.on('error', async (error) => {
-        console.error('Twilio WebSocket error:', error);
-        if (callSid) {
-            await hangup(callSid, {
-                message: 'We are experiencing technical difficulties. Please try calling again.',
-                reason: 'websocket_error'
-            });
+        console.error('❌ Twilio WebSocket error:', error);
+        console.error('🚨 Error details:', {
+            message: error.message,
+            code: error.code,
+            type: error.type,
+            callSid: callSid
+        });
+
+        // Handle specific Twilio errors
+        if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND') {
+            console.error('🔴 Network connectivity issue - Error 11750 likely');
+        }
+        if (error.message && error.message.includes('TLS')) {
+            console.error('🔴 TLS/SSL handshake failed - Error 31920 likely');
+        }
+
+        setTimeout(async () => {
+            if (callSid) {
+                await hangup(callSid, {
+                    message: 'Connection issue. Please try calling again.',
+                    reason: 'twilio_websocket_error'
+                });
+            }
+        }, 500);
+    });
+
+    ws.on('close', (code, reason) => {
+        console.log('🔌 Twilio WebSocket closed:', { code, reason: reason?.toString() });
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
         }
     });
 });
@@ -1892,7 +1926,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('🔧 EDGE FUNCTIONS: All database operations preserved');
     console.log('💬 MESSAGE SYSTEM: Customer messages for staff requests');
     console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
-    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with 25% faster speech');
+    console.log('🌐 REALTIME API: Using gpt-4o-mini-realtime-preview with ultra-fast speech');
     console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('');
     console.log('✨ Server ready for production traffic - no more Error 11205!');
