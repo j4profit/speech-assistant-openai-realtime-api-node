@@ -224,7 +224,7 @@ app.get('/', (req, res) => {
 // API endpoints using Edge Functions
 app.get('/orders', async (req, res) => {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -272,7 +272,7 @@ app.get('/messages', async (req, res) => {
 
 async function getRestaurantByPhone(phoneNumber) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/get-restaurant', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/get-restaurant', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -306,7 +306,7 @@ async function createCallLog(callData) {
     try {
         console.log('Calling create-call-log Edge Function with data:', JSON.stringify(callData, null, 2));
         
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-call-log', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-call-log', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -348,7 +348,7 @@ async function createCallLog(callData) {
 
 async function searchRecentOrders(phoneNumber, restaurantId) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/search-orders', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -372,7 +372,7 @@ async function searchRecentOrders(phoneNumber, restaurantId) {
 
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/cancel-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/cancel-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -394,7 +394,7 @@ async function cancelOrder(orderId, reason = 'Customer cancellation') {
 
 async function updateOrder(orderId, updateData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/update-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/update-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -455,7 +455,7 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
         
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -515,7 +515,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
 async function createOrder(orderData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -547,7 +547,7 @@ async function createOrder(orderData) {
 
 async function createCustomerMessage(messageData) {
     try {
-        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/save-message', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/save-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1656,7 +1656,18 @@ wss.on('connection', (ws, req) => {
         }
     });
     
-
+    // FIXED: Properly handle WebSocket close with correct variable scoping
+    ws.on('close', async () => {
+        console.log('WebSocket connection closed');
+        
+        // Clear any pending timeouts
+        if (anythingElseTimeout) {
+            clearTimeout(anythingElseTimeout);
+            anythingElseTimeout = null;
+        }
+        
+        // Calculate call timing - FIXED: Use proper variable scoping
+        const callEndTime = new Date(); // This was missing before
         const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
         const callDuration = baseDuration + 5.5;
         
