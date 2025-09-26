@@ -1384,10 +1384,10 @@ TIMING RULES:
                                 break;
                             }
 
-                            // Look for complete address patterns
+                            // Look for complete address patterns - more flexible matching
                             const addressPatterns = [
-                                /\b\d+[^.!?]*\d{5}(-\d{4})?\b/i, // Number...5-digit zip
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\d{5}(-\d{4})?\b/i
+                                /\b\d+.*\d{5}(-\d{4})?\b/i, // Number...5-digit zip (simple)
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i
                             ];
 
                             for (const pattern of addressPatterns) {
@@ -1397,6 +1397,12 @@ TIMING RULES:
                                     console.log('Found address: "' + deliveryAddress + '"');
                                     break;
                                 }
+                            }
+
+                            // Fallback: if message contains number and zip, use the whole message
+                            if (!deliveryAddress && /\d/.test(latestMessage) && /\d{5}/.test(latestMessage)) {
+                                deliveryAddress = latestMessage.trim();
+                                console.log('Using full message as address: "' + deliveryAddress + '"');
                             }
                         }
                     }
