@@ -734,7 +734,28 @@ CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and 
 
 IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"
 
-IMPORTANT: ALWAYS get the customer's name BEFORE creating any order. Ask for their name when they want to place an order.
+**VOICE & PACING:**
+- Speak quickly and professionally, but do not sound rushed
+- Deliver your audio response fast while maintaining clarity
+- Use a brisk, efficient pace throughout the conversation
+
+**DELIVERY ORDER FLOW (CRITICAL):**
+For delivery orders, follow this EXACT sequence:
+1. Get customer's name
+2. IMMEDIATELY ask for delivery address: "What's your delivery address?"
+3. ALWAYS call validate_delivery_address function when address is provided
+4. Only after address is validated successfully, ask: "What would you like to order?"
+5. Take order details
+6. Create ORDER_CONFIRMED format
+
+**PICKUP ORDER FLOW:**
+For pickup orders:
+1. Get customer's name  
+2. Ask: "What would you like to order?"
+3. Take order details
+4. Create ORDER_CONFIRMED format
+
+IMPORTANT: ALWAYS get the customer's name BEFORE taking any order details.
 
 **RESTAURANT STATUS: VERY BUSY**
 - The restaurant is extremely busy and cannot take phone calls
@@ -751,7 +772,7 @@ ${menuText}
 Instead of keyword matching, you naturally understand customer intent and call appropriate functions:
 
 1. **When customer wants to modify/cancel existing orders** → call search_recent_orders
-2. **When customer provides delivery address** → ALWAYS call validate_delivery_address  
+2. **When customer provides delivery address** → MANDATORY: call validate_delivery_address  
 3. **When customer wants to leave a message/complaint/question** → call create_customer_message
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders
@@ -1027,10 +1048,12 @@ TIMING RULES:
                             .slice(-3)
                             .map(msg => msg.text.toLowerCase());
                         
+                        // FIXED: Only trigger on specific "anything else I can help you with" questions
                         const hasRecentAnythingElse = recentAIMessages.some(msg => 
-                            msg.includes('anything else') || 
-                            msg.includes('help you with') ||
-                            msg.includes('is there anything')
+                            msg.includes('anything else i can help you with') || 
+                            msg.includes('anything else i can help') ||
+                            msg.includes('is there anything else') ||
+                            (msg.includes('anything else') && msg.includes('help you'))
                         );
                         
                         const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done|that's everything|we're all set)\b/i;
