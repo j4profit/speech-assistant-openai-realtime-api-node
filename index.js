@@ -911,7 +911,7 @@ TIMING RULES:
                         silence_duration_ms: 2000
                     },
                     temperature: 0.6,
-                    max_response_output_tokens: 150,
+                    max_response_output_tokens: 300,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
