@@ -862,15 +862,17 @@ IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY addr
 - Only provide menu items when customer says: "What do you have?", "What's on the menu?", "I don't know what to order", or similar requests
 - The menu information is for YOUR reference only - don't recite it automatically
 
-**CALL COMPLETION:**
-After completing any task (order, cancellation, modification, or message):
-1. Complete the task (create ORDER_CONFIRMED format, etc.)
-2. Immediately ask: "Anything else I can help you with?"
+**🚨 CRITICAL ORDER COMPLETION FLOW:**
+When customer completes their order (says "that's it", "that's all", "nothing else", etc.):
+1. **IMMEDIATELY** generate the ORDER_CONFIRMED format (REQUIRED - DO NOT SKIP)
+2. Then ask: "Anything else I can help you with?"
 3. Wait for customer response
 4. If customer says no/nothing/that's all - system will auto-hangup
 5. If customer has another request - help them
 
-**ORDER_CONFIRMED FORMAT (EXACT FORMAT REQUIRED):**
+**📋 ORDER_CONFIRMED FORMAT (MANDATORY - EXACT FORMAT REQUIRED):**
+🚨 YOU MUST USE THIS EXACT FORMAT WHEN CUSTOMER COMPLETES ORDER:
+
 ORDER_CONFIRMED:
 - Customer Name: [name]
 - Phone: ${customerPhone || '[phone]'}
@@ -880,6 +882,13 @@ ORDER_CONFIRMED:
 - Total: $[amount]
 - Ready Time: [calculated minutes based on order type]
 ORDER_END
+
+**WHEN TO USE ORDER_CONFIRMED:**
+- Customer says: "that's it", "that's all", "nothing else", "I'm done", "that'll be all", "now that's it", "that will be all"
+- Customer confirms their complete order after you've repeated it back to them
+- After customer says they don't want to add anything else to their order
+- CRITICAL: The moment customer indicates they're finished ordering - IMMEDIATELY use ORDER_CONFIRMED format
+- NEVER skip this format - orders will NOT be saved without it
 
 TIMING RULES:
 - For PICKUP orders: Use ${restaurant.preparation_time || 20} minutes
@@ -901,8 +910,8 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
-                    temperature: 0.8,
-                    max_response_output_tokens: 1000,
+                    temperature: 0.3,
+                    max_response_output_tokens: 150,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
@@ -1149,6 +1158,33 @@ TIMING RULES:
                             anythingElseTimeout = null;
                         }
 
+                        // Check if customer is indicating order completion
+                        const orderCompletionPhrases = /\b(that's it|that's all|nothing else|i'm done|that'll be all|now that's it|that will be all|we're good|i'm good|that's everything|no more|complete)\b/i;
+                        const orderCompleted = orderCompletionPhrases.test(customerMessage);
+
+                        // Check if we're in an ordering context (not just general conversation)
+                        const inOrderingContext = conversationTranscript.some(msg =>
+                            msg.text.toLowerCase().includes('what would you like to order') ||
+                            msg.text.toLowerCase().includes('anything else you\'d like to add') ||
+                            msg.text.toLowerCase().includes('just to confirm')
+                        );
+
+                        // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
+                        if (orderCompleted && inOrderingContext && !orderProcessed) {
+                            console.log('🍕 Customer indicated order completion - triggering ORDER_CONFIRMED format');
+                            setTimeout(() => {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create',
+                                        response: {
+                                            modalities: ['audio', 'text'],
+                                            instructions: 'The customer has completed their order. You MUST now use the ORDER_CONFIRMED format exactly as specified in your instructions. Include all order details in the exact format required.'
+                                        }
+                                    }));
+                                }
+                            }, 500);
+                        }
+
                         const recentAIMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
                             .slice(-3)
@@ -1170,14 +1206,31 @@ TIMING RULES:
 
                             setTimeout(async () => {
                                 if (callSid && ws.readyState === WebSocket.OPEN) {
+                                    // Check if this was a delivery order by looking at recent messages
+                                    const hasDelivery = conversationTranscript.some(msg =>
+                                        msg.text.toLowerCase().includes('delivery') &&
+                                        (msg.text.toLowerCase().includes('your address is within') ||
+                                         msg.text.toLowerCase().includes('delivery area'))
+                                    );
+
+                                    let finalMessage = 'Thank you for calling ' + restaurant.name + '. Have a wonderful day!';
+                                    if (hasDelivery) {
+                                        const estimatedTime = (restaurant?.preparation_time || 20) + (restaurant?.delivery_time || 15);
+                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your delivery order will arrive in about ' + estimatedTime + ' minutes. Have a wonderful day!';
+                                    } else if (conversationTranscript.some(msg => msg.text.toLowerCase().includes('pickup'))) {
+                                        const estimatedTime = restaurant?.preparation_time || 20;
+                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your pickup order will be ready in about ' + estimatedTime + ' minutes. Have a wonderful day!';
+                                    }
+
                                     await hangup(callSid, {
                                         method: 'graceful',
                                         reason: 'customer_finished',
                                         restaurant: restaurant,
-                                        message: 'Thank you for calling ' + restaurant.name + '. Have a wonderful day!'
+                                        message: finalMessage,
+                                        delay: 2000
                                     });
                                 }
-                            }, 1500);
+                            }, 3000);
                             return;
                         }
                         break;
@@ -1408,16 +1461,16 @@ TIMING RULES:
                 case 'validate_delivery_address':
                     let deliveryAddress = parsedArgs.address;
 
-                    // If no address provided directly, extract from the most recent customer message only
+                    // If no address provided directly, extract from the most recent customer messages
                     if (!deliveryAddress || deliveryAddress.trim().length === 0) {
                         console.log('Address not provided in function args, checking latest customer message...');
 
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
-                            .slice(-1); // Only check the most recent message
+                            .slice(-2); // Check the last 2 messages for address
 
                         if (recentCustomerMessages.length > 0) {
-                            const latestMessage = recentCustomerMessages[0].text;
+                            const latestMessage = recentCustomerMessages[recentCustomerMessages.length - 1].text;
                             console.log('Checking latest message: "' + latestMessage + '"');
 
                             // FIRST: Check if this is obviously a name instead of an address
