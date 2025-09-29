@@ -910,7 +910,7 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
-                    temperature: 0.3,
+                    temperature: 0.6,
                     max_response_output_tokens: 150,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
