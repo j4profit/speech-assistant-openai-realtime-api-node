@@ -756,15 +756,37 @@ function formatOrderItems(items, totalAmount) {
 function calculateOrderReadyTime(restaurant, isDelivery = false) {
     try {
         const now = new Date();
-        const preparationMinutes = restaurant?.preparation_time || 20;
-        let deliveryAddedMinutes = 0;
 
+        // Safeguard against unreasonable database values
+        let preparationMinutes = restaurant?.preparation_time || 20;
+        if (preparationMinutes > 120) { // More than 2 hours is unreasonable for pizza
+            console.log('⚠️ Unreasonable preparation_time detected:', preparationMinutes, 'minutes - using default 20');
+            preparationMinutes = 20;
+        }
+
+        let deliveryAddedMinutes = 0;
         if (isDelivery && restaurant?.delivery_enabled) {
             deliveryAddedMinutes = restaurant?.delivery_time || 15;
+            if (deliveryAddedMinutes > 60) { // More than 1 hour delivery is unreasonable
+                console.log('⚠️ Unreasonable delivery_time detected:', deliveryAddedMinutes, 'minutes - using default 15');
+                deliveryAddedMinutes = 15;
+            }
         }
 
         const totalMinutes = preparationMinutes + deliveryAddedMinutes;
         const readyTime = new Date(now.getTime() + totalMinutes * 60000);
+
+        // Debug logging for ready time calculation
+        console.log('🕐 Ready time calculation debug:', {
+            currentTime: now.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+            preparationMinutes: preparationMinutes,
+            deliveryMinutes: deliveryAddedMinutes,
+            totalMinutes: totalMinutes,
+            isDelivery: isDelivery,
+            restaurantPrepTime: restaurant?.preparation_time,
+            restaurantDeliveryTime: restaurant?.delivery_time,
+            calculatedReadyTime: readyTime.toLocaleString('en-US', { timeZone: 'America/New_York' })
+        });
 
         const hours = readyTime.getHours();
         const minutes = readyTime.getMinutes();
@@ -883,6 +905,8 @@ wss.on('connection', (ws, _req) => {
             name: restaurant.name,
             phone: restaurant.phone_number,
             delivery_enabled: restaurant.delivery_enabled,
+            preparation_time: restaurant.preparation_time,
+            delivery_time: restaurant.delivery_time,
             tagline: restaurant.tagline,
             description: restaurant.description
         });
@@ -1387,17 +1411,32 @@ TIMING RULES:
                         if (isDeliveryOrder && hasValidAddress && !addressValidated && addressProviderAttempts === 1) {
                             console.log('🏠 First address detected in delivery order - auto-triggering validation:', customerMessage);
                             addressValidated = true; // Set immediately to prevent race conditions
-                            setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: 'Customer just provided their delivery address. You MUST immediately call the validate_delivery_address function with this exact address: "' + customerMessage + '". Do not ask for address again.'
+
+                            // Implement retry mechanism to handle response collisions
+                            const triggerValidation = (attempt = 1) => {
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        console.log(`🔄 Attempting to trigger validation (attempt ${attempt})`);
+                                        try {
+                                            openaiWs.send(JSON.stringify({
+                                                type: 'response.create',
+                                                response: {
+                                                    modalities: ['audio', 'text'],
+                                                    instructions: 'Customer just provided their delivery address. You MUST immediately call the validate_delivery_address function with this exact address: "' + customerMessage + '". Do not ask for address again.'
+                                                }
+                                            }));
+                                        } catch (error) {
+                                            console.log('⚠️ Auto-trigger failed (attempt ' + attempt + '):', error.message);
+                                            if (attempt < 3 && error.message.includes('conversation_already_has_active_response')) {
+                                                console.log('🔄 Retrying auto-trigger in ' + (attempt * 500) + 'ms...');
+                                                triggerValidation(attempt + 1);
+                                            }
                                         }
-                                    }));
-                                }
-                            }, 100);
+                                    }
+                                }, attempt === 1 ? 100 : attempt * 500);
+                            };
+
+                            triggerValidation();
                         }
 
                         // EMERGENCY STOP: If customer provides address multiple times, force immediate validation
@@ -2188,6 +2227,15 @@ TIMING RULES:
                 orderProcessed = false;
                 return;
             }
+
+            // Debug timing calculation
+            console.log('🕐 About to calculate ready time with restaurant data:', {
+                restaurant_preparation_time: restaurant?.preparation_time,
+                restaurant_delivery_time: restaurant?.delivery_time,
+                restaurant_delivery_enabled: restaurant?.delivery_enabled,
+                orderType: orderType,
+                isDelivery: orderType === 'delivery'
+            });
 
             const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
 
