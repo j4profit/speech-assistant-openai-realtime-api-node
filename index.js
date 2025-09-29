@@ -822,7 +822,7 @@ GREETING TRIGGER: When you receive the message "Start the call greeting", immedi
 EVERY caller gets this exact sequence:
 1. Greeting with pickup/delivery question:
    - If delivery enabled: "Hello! Thank you for calling [restaurant name]. Is this for pickup or delivery?"
-   - If pickup only: "Hello! Thank you for calling [restaurant name]. We offer pickup only. How can I help you?"
+   - If pickup only: "Hello! Thank you for calling [restaurant name]. What would you like for pickup?"
 2. After they respond, ask for name: "May I have your name for the order?" or "Who am I speaking with?"
 
 **ORDER TYPE RESPONSE HANDLING:**
@@ -852,6 +852,7 @@ For delivery orders, follow this EXACT sequence:
 5. ALWAYS call validation function first - do NOT make your own judgment
 6. If validation returns valid=true, say: "Great! Your address is within our delivery area. What would you like to order?"
 7. 🚨 NEVER repeat address requests - ONE address request per call maximum
+8. 🚨 If customer has already provided an address (even if unclear), do NOT ask again - call validation function instead
 6. If validation returns valid=false, use the exact message from the validation function
 7. Take order details
 8. Create ORDER_CONFIRMED format
@@ -1213,6 +1214,20 @@ TIMING RULES:
                         );
                         const hasValidAddress = addressPattern.test(customerMessage);
 
+                        // Enhanced logging for debugging
+                        console.log('🔍 Address auto-trigger check:', {
+                            customerMessage: customerMessage,
+                            isDeliveryOrder: isDeliveryOrder,
+                            hasValidAddress: hasValidAddress,
+                            addressValidated: addressValidated,
+                            patternTest: addressPattern.test(customerMessage)
+                        });
+
+                        // Check if address has already been provided in conversation
+                        const addressProvided = conversationTranscript.some(msg =>
+                            msg.speaker === 'Customer' && addressPattern.test(msg.text)
+                        );
+
                         if (isDeliveryOrder && hasValidAddress && !addressValidated) {
                             console.log('🏠 Address detected in delivery order - auto-triggering validation:', customerMessage);
                             setTimeout(() => {
@@ -1226,6 +1241,25 @@ TIMING RULES:
                                     }));
                                 }
                             }, 100);
+                        }
+
+                        // Prevent duplicate address requests
+                        if (isDeliveryOrder && addressProvided && !addressValidated &&
+                            conversationTranscript.some(msg =>
+                                msg.speaker === 'AI' && msg.text.toLowerCase().includes('delivery address')
+                            )) {
+                            console.log('🚨 Address already provided but validation not called - forcing validation');
+                            setTimeout(() => {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create',
+                                        response: {
+                                            modalities: ['audio', 'text'],
+                                            instructions: 'Customer has already provided an address. You MUST call validate_delivery_address function immediately. DO NOT ask for address again.'
+                                        }
+                                    }));
+                                }
+                            }, 200);
                         }
 
                         // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
@@ -1349,7 +1383,7 @@ TIMING RULES:
                                 // Create appropriate greeting based on delivery availability
                                 const greetingText = restaurant?.delivery_enabled
                                     ? `Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?`
-                                    : `Hello! Thank you for calling ${restaurant.name}. We offer pickup only. How can I help you?`;
+                                    : `Hello! Thank you for calling ${restaurant.name}. What would you like for pickup?`;
 
                                 console.log('🎯 Greeting text prepared:', greetingText);
 
