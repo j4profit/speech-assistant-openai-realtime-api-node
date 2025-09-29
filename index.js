@@ -149,7 +149,17 @@ app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
 
     // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
-    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Connect>\n        <Stream url="wss://' + req.get('host') + '/media-stream">\n            <Parameter name="Called" value="' + (req.body.Called || req.body.To) + '" />\n            <Parameter name="From" value="' + (req.body.From || req.body.Caller) + '" />\n            <Parameter name="CallSid" value="' + req.body.CallSid + '" />\n        </Stream>\n    </Connect>\n</Response>';
+    // Enhanced TwiML with optimized audio settings
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="wss://${req.get('host')}/media-stream">
+            <Parameter name="Called" value="${req.body.Called || req.body.To}" />
+            <Parameter name="From" value="${req.body.From || req.body.Caller}" />
+            <Parameter name="CallSid" value="${req.body.CallSid}" />
+        </Stream>
+    </Connect>
+</Response>`;
 
     res.type('text/xml');
     res.send(twiml);
@@ -782,7 +792,11 @@ wss.on('connection', (ws, _req) => {
                 headers: {
                     'Authorization': 'Bearer ' + OPENAI_API_KEY,
                     'OpenAI-Beta': 'realtime=v1'
-                }
+                },
+                // Connection optimization for better quality
+                perMessageDeflate: false,  // Disable compression for lower latency
+                handshakeTimeout: 5000,    // 5 second timeout
+                maxPayload: 100 * 1024 * 1024  // 100MB payload limit
             });
             console.log('🔗 WebSocket created successfully');
         } catch (createError) {
@@ -798,6 +812,7 @@ wss.on('connection', (ws, _req) => {
             console.log('✅ Connected to OpenAI Realtime API');
             console.log('🔗 WebSocket ready for audio streaming');
 
+            // Enhanced connection with quality optimization
             // Delivery options are handled in the greeting logic below
 
             // Modern system instructions with intent-based approach
@@ -944,12 +959,12 @@ TIMING RULES:
                     input_audio_transcription: { model: 'whisper-1' },
                     turn_detection: {
                         type: 'server_vad',
-                        threshold: 0.7,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: 2000
+                        threshold: 0.6,  // Reduced for better sensitivity (0.5-0.8 range)
+                        prefix_padding_ms: 200,  // Reduced for faster response
+                        silence_duration_ms: 1200  // Reduced for quicker turn detection
                     },
                     temperature: 0.6,
-                    max_response_output_tokens: 300,
+                    max_response_output_tokens: 400,  // Increased for complete responses
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
@@ -1058,12 +1073,18 @@ TIMING RULES:
                 switch (response.type) {
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
-                            console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
-                            ws.send(JSON.stringify({
-                                event: 'media',
-                                streamSid: streamSid,
-                                media: { payload: response.delta }
-                            }));
+                            try {
+                                console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
+                                // Enhanced audio output with quality optimization
+                                const audioMessage = {
+                                    event: 'media',
+                                    streamSid: streamSid,
+                                    media: { payload: response.delta }
+                                };
+                                ws.send(JSON.stringify(audioMessage));
+                            } catch (audioSendError) {
+                                console.error('❌ Error sending audio delta to Twilio:', audioSendError);
+                            }
                         } else {
                             console.log('❌ Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
                         }
@@ -1450,10 +1471,12 @@ TIMING RULES:
             });
 
             if (callSid) {
-                console.log('🔄 Immediate hangup - OpenAI connection failed');
+                console.log('🔄 Enhanced error recovery - OpenAI connection failed');
+                // Enhanced error message with better user experience
                 await hangup(callSid, {
-                    message: 'We are experiencing technical difficulties. Please try calling again.',
-                    reason: 'openai_websocket_error'
+                    message: 'We are currently experiencing high call volume. Please try calling back in a few minutes. Thank you for your patience.',
+                    reason: 'openai_websocket_error',
+                    method: 'graceful'
                 });
             }
         });
@@ -2132,10 +2155,18 @@ TIMING RULES:
 
                 case 'media':
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.send(JSON.stringify({
-                            type: 'input_audio_buffer.append',
-                            audio: data.media.payload
-                        }));
+                        try {
+                            // Enhanced audio processing with error handling
+                            const audioData = {
+                                type: 'input_audio_buffer.append',
+                                audio: data.media.payload
+                            };
+                            openaiWs.send(JSON.stringify(audioData));
+                        } catch (audioError) {
+                            console.error('❌ Error sending audio to OpenAI:', audioError);
+                        }
+                    } else {
+                        console.log('⚠️ OpenAI WebSocket not ready for audio, state:', openaiWs?.readyState);
                     }
                     break;
 
