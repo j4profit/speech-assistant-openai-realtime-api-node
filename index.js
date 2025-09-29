@@ -1264,6 +1264,11 @@ TIMING RULES:
                         console.log('✅ Response usage:', response.response?.usage);
                         break;
 
+                    case 'response.cancelled':
+                        console.log('🛑 OpenAI response cancelled:', response.response?.id);
+                        console.log('🔄 Response cancellation successful - ready for validation');
+                        break;
+
                     case 'response.output_item.added':
                         console.log('📋 Output item added:', response.item?.type, 'content_type:', response.item?.content?.[0]?.type);
                         break;
@@ -1439,20 +1444,28 @@ TIMING RULES:
                             console.log('🏠 First address detected in delivery order - auto-triggering validation:', customerMessage);
                             addressValidated = true; // Set immediately to prevent race conditions
 
-                            // IMMEDIATE CONTEXT INJECTION: Add context message before AI response
+                            // CANCEL ANY ACTIVE RESPONSE to prevent premature rejection messages
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🚨 INJECTING CONTEXT: Customer provided address, DO NOT ask again');
+                                console.log('🛑 CANCELLING any active response to prevent premature rejection');
                                 openaiWs.send(JSON.stringify({
-                                    type: 'conversation.item.create',
-                                    item: {
-                                        type: 'message',
-                                        role: 'user',
-                                        content: [{
-                                            type: 'input_text',
-                                            text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". Call validate_delivery_address function immediately. DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results.]'
-                                        }]
-                                    }
+                                    type: 'response.cancel'
                                 }));
+
+                                // Brief delay to ensure cancellation processes, then provide acknowledgment
+                                setTimeout(() => {
+                                    console.log('🚨 INJECTING CONTEXT: Customer provided address, acknowledge and validate');
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'conversation.item.create',
+                                        item: {
+                                            type: 'message',
+                                            role: 'user',
+                                            content: [{
+                                                type: 'input_text',
+                                                text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". First say "Let me check if you\'re within our delivery area" then immediately call validate_delivery_address function. DO NOT provide any other response until validation completes.]'
+                                            }]
+                                        }
+                                    }));
+                                }, 50);
                             }
 
                             // Implement retry mechanism to handle response collisions
@@ -1476,7 +1489,7 @@ TIMING RULES:
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results before responding.'
+                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT provide any other response until validation completes.'
                                             }
                                         }));
                                     }
@@ -1608,7 +1621,7 @@ TIMING RULES:
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". You MUST immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results before responding.'
+                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT provide any other response until validation completes.'
                                             }
                                         }));
                                     } else if (!validationRetryInfo) {
