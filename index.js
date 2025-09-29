@@ -966,6 +966,12 @@ wss.on('connection', (ws, _req) => {
 - FORBIDDEN: Asking for address multiple times, even if first attempt "failed"
 - If customer says an address, validate it - do NOT request clarification first
 
+🛑 ABSOLUTE ADDRESS REQUEST PREVENTION:
+- If conversation shows AI already asked "What's your delivery address" - NEVER ask again
+- If customer provided ANY address with numbers and street names - validate it immediately
+- DO NOT say "I need your delivery address" if customer already gave one
+- DO NOT ask for "complete address" or "street number and name" - just validate what they gave you
+
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
 GREETING TRIGGER: When you receive the message "Start the call greeting", immediately respond with the appropriate greeting based on delivery availability. This is your cue to begin the conversation.
@@ -1004,8 +1010,17 @@ For delivery orders, follow this EXACT sequence:
    - "Could you please confirm"
    - "Could you please provide a complete"
    - "I need your delivery address"
+   - "I need your delivery address with street number and name"
+   - "Could you please provide it again"
+   - "Could you please provide it"
+   - "What's your address again"
    - "I'm having trouble validating"
    - "Unfortunately, I'm still unable"
+
+7. 🛑 DUPLICATE ADDRESS PREVENTION CHECK:
+   - BEFORE asking for address, check if AI already asked "What's your delivery address?"
+   - If customer provided ANY address with numbers, call validate_delivery_address immediately
+   - NEVER ask for address twice - if validation fails, suggest pickup instead
 5. ALWAYS call validation function first - do NOT make your own judgment
 6. If validation returns valid=true, say: "Great! Your address is within our delivery area. What would you like to order?"
 7. 🚨 NEVER repeat address requests - ONE address request per call maximum
@@ -1127,13 +1142,13 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "ONLY call this function when customer provides a COMPLETE delivery address containing: STREET NUMBER + STREET NAME + (ZIP CODE OR CITY/STATE). Examples that should trigger this function: '123 Main St, 12345' or '123 Main Street, Baltimore, MD'. NEVER call this function for: names (John, Mary, etc.), single words (delivery, pickup), incomplete addresses missing numbers or street names, or questions.",
+                            description: "ONLY call this function when customer provides a COMPLETE delivery address containing: STREET NUMBER + STREET NAME + (ZIP CODE OR CITY/STATE OR CITY). Examples that should trigger this function: '123 Main St, 12345' or '123 Main Street, Baltimore, MD' or '123 Main Street, Baltimore'. NEVER call this function for: names (John, Mary, etc.), single words (delivery, pickup), incomplete addresses missing numbers or street names, or questions.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     address: {
                                         type: "string",
-                                        description: "Complete delivery address provided by customer (must include street number, street name, city, state, zip)"
+                                        description: "Complete delivery address provided by customer (must include street number, street name, and either: ZIP code, or city/state, or city)"
                                     }
                                 },
                                 required: ["address"]
@@ -1370,12 +1385,19 @@ TIMING RULES:
                             msg.text.toLowerCase().includes('just to confirm')
                         );
 
-                        // Enhanced address management to prevent duplicate requests
-                        const addressPattern = /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}/i;
+                        // Enhanced address management to prevent duplicate requests - accept multiple formats
+                        const addressPatterns = [
+                            // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
+                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}(-\d{4})?/i,
+                            // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD")
+                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+,\s*[A-Z]{2}/i,
+                            // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
+                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+[A-Za-z]{3,}/i
+                        ];
+                        const hasValidAddress = addressPatterns.some(pattern => pattern.test(customerMessage));
                         const isDeliveryOrder = conversationTranscript.some(msg =>
                             msg.text.toLowerCase().includes('delivery') && msg.speaker === 'Customer'
                         );
-                        const hasValidAddress = addressPattern.test(customerMessage);
 
                         // Check if AI has asked for address in conversation
                         const aiAskedForAddress = conversationTranscript.some(msg =>
@@ -1386,11 +1408,13 @@ TIMING RULES:
                             )
                         );
 
-                        // Enhanced logging for debugging
+                        // Enhanced logging for debugging with pattern matching details
+                        const matchedPattern = addressPatterns.findIndex(pattern => pattern.test(customerMessage));
                         console.log('🔍 Enhanced address state check:', {
                             customerMessage: customerMessage,
                             isDeliveryOrder: isDeliveryOrder,
                             hasValidAddress: hasValidAddress,
+                            matchedPattern: matchedPattern >= 0 ? `Pattern ${matchedPattern + 1}` : 'None',
                             addressValidated: addressValidated,
                             addressRequested: addressRequested,
                             addressProviderAttempts: addressProviderAttempts,
@@ -1414,6 +1438,22 @@ TIMING RULES:
                             console.log('🏠 First address detected in delivery order - auto-triggering validation:', customerMessage);
                             addressValidated = true; // Set immediately to prevent race conditions
 
+                            // IMMEDIATE CONTEXT INJECTION: Add context message before AI response
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                console.log('🚨 INJECTING CONTEXT: Customer provided address, DO NOT ask again');
+                                openaiWs.send(JSON.stringify({
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'user',
+                                        content: [{
+                                            type: 'text',
+                                            text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". Call validate_delivery_address function immediately. DO NOT ask for address again.]'
+                                        }]
+                                    }
+                                }));
+                            }
+
                             // Implement retry mechanism to handle response collisions
                             const triggerValidation = (attempt = 1) => {
                                 setTimeout(() => {
@@ -1424,7 +1464,7 @@ TIMING RULES:
                                                 type: 'response.create',
                                                 response: {
                                                     modalities: ['audio', 'text'],
-                                                    instructions: 'Customer just provided their delivery address. You MUST immediately call the validate_delivery_address function with this exact address: "' + customerMessage + '". Do not ask for address again.'
+                                                    instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function. DO NOT ask for address again - they already provided it.'
                                                 }
                                             }));
                                         } catch (error) {
@@ -1435,7 +1475,7 @@ TIMING RULES:
                                             }
                                         }
                                     }
-                                }, attempt === 1 ? 100 : attempt * 500);
+                                }, attempt === 1 ? 50 : attempt * 300);
                             };
 
                             triggerValidation();
@@ -1796,11 +1836,16 @@ TIMING RULES:
                                 break;
                             }
 
-                            // Look for complete address patterns - more flexible matching
+                            // Look for complete address patterns - flexible matching for multiple formats
                             const addressPatterns = [
-                                /\d+\s+[\w\s\.,]+\d{5}(-\d{4})?/i, // Simple: number + words + zip
+                                // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i,
-                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*/i // Without zip for partial addresses
+                                // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD")
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+,\s*[A-Z]{2}/i,
+                                // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+[A-Za-z]{3,}/i,
+                                // Format 4: Simple number + words + zip (backup pattern)
+                                /\d+\s+[\w\s\.,]+\d{5}(-\d{4})?/i
                             ];
 
                             for (const pattern of addressPatterns) {
