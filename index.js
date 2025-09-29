@@ -746,13 +746,25 @@ wss.on('connection', (ws, _req) => {
 
         console.log('Connecting to OpenAI Realtime API with updated model...');
 
-        // Use the latest stable model
-        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
-            headers: {
-                'Authorization': 'Bearer ' + OPENAI_API_KEY,
-                'OpenAI-Beta': 'realtime=v1'
-            }
-        });
+        // Use the latest stable model - try without specifying model first
+        console.log('🔗 Attempting OpenAI connection with API key:', OPENAI_API_KEY ? 'Present' : 'Missing');
+
+        try {
+            openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
+                headers: {
+                    'Authorization': 'Bearer ' + OPENAI_API_KEY,
+                    'OpenAI-Beta': 'realtime=v1'
+                }
+            });
+            console.log('🔗 WebSocket created successfully');
+        } catch (createError) {
+            console.error('❌ Failed to create OpenAI WebSocket:', createError);
+            await hangup(callId, {
+                message: 'Technical difficulties. Please try again.',
+                reason: 'websocket_creation_failed'
+            });
+            return;
+        }
 
         openaiWs.on('open', () => {
             console.log('✅ Connected to OpenAI Realtime API');
@@ -1278,7 +1290,10 @@ TIMING RULES:
                 message: error.message,
                 code: error.code,
                 type: error.type,
-                callSid: callSid
+                callSid: callSid,
+                url: 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+                apiKeyPresent: !!OPENAI_API_KEY,
+                apiKeyLength: OPENAI_API_KEY ? OPENAI_API_KEY.length : 0
             });
 
             if (callSid) {
