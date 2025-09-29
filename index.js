@@ -788,15 +788,17 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
             calculatedReadyTime: readyTime.toLocaleString('en-US', { timeZone: 'America/New_York' })
         });
 
-        const hours = readyTime.getHours();
-        const minutes = readyTime.getMinutes();
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        const displayHours = hours % 12 || 12;
-        const displayMinutes = minutes.toString().padStart(2, '0');
+        // Use proper timezone conversion for display
+        const timeInEastern = readyTime.toLocaleString('en-US', {
+            timeZone: 'America/New_York',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
 
         return {
             readyTime: readyTime,
-            readyTimeString: displayHours + ':' + displayMinutes + ' ' + ampm,
+            readyTimeString: timeInEastern,
             preparationMinutes: preparationMinutes,
             deliveryMinutes: deliveryAddedMinutes,
             totalMinutes: totalMinutes
