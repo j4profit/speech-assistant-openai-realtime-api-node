@@ -1447,7 +1447,7 @@ TIMING RULES:
                                         type: 'message',
                                         role: 'user',
                                         content: [{
-                                            type: 'text',
+                                            type: 'input_text',
                                             text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". Call validate_delivery_address function immediately. DO NOT ask for address again.]'
                                         }]
                                     }
