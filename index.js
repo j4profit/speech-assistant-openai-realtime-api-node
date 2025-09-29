@@ -1449,7 +1449,7 @@ TIMING RULES:
                                         role: 'user',
                                         content: [{
                                             type: 'input_text',
-                                            text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". Call validate_delivery_address function immediately. DO NOT ask for address again.]'
+                                            text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". Call validate_delivery_address function immediately. DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results.]'
                                         }]
                                     }
                                 }));
@@ -1476,7 +1476,7 @@ TIMING RULES:
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT ask for address again - they already provided it.'
+                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results before responding.'
                                             }
                                         }));
                                     }
@@ -1608,7 +1608,7 @@ TIMING RULES:
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". You MUST immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT ask for address again.'
+                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". You MUST immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT speak, ask questions, or provide any response until after the function call completes. WAIT for validation results before responding.'
                                             }
                                         }));
                                     } else if (!validationRetryInfo) {
