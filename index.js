@@ -1446,10 +1446,14 @@ TIMING RULES:
 
                             // CANCEL ANY ACTIVE RESPONSE to prevent premature rejection messages
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🛑 CANCELLING any active response to prevent premature rejection');
-                                openaiWs.send(JSON.stringify({
-                                    type: 'response.cancel'
-                                }));
+                                console.log('🛑 ATTEMPTING to cancel any active response to prevent premature rejection');
+                                try {
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.cancel'
+                                    }));
+                                } catch (error) {
+                                    console.log('🛑 Response cancellation not needed (no active response)');
+                                }
 
                                 // Brief delay to ensure cancellation processes, then provide acknowledgment
                                 setTimeout(() => {
@@ -1629,6 +1633,8 @@ TIMING RULES:
                                     }
                                 }, 1000);
                             }
+                        } else if (response.error?.code === 'response_cancel_not_active') {
+                            console.log('🛑 Response cancellation not needed (no active response) - ignoring');
                         } else {
                             setTimeout(async () => {
                                 if (callSid) {
