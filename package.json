@@ -1,6 +1,6 @@
 {
   "name": "Ring2Serv Voice Answering Service",
-  "version": "1.0.0",
+  "version": "1.8.1",
   "description": "Multi-tenant voice agent for restaurant ordering",
   "main": "index.js",
   "scripts": {
