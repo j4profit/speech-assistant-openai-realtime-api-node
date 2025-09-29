@@ -1401,9 +1401,15 @@ TIMING RULES:
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+[A-Za-z]{3,}/i
                         ];
                         const hasValidAddress = addressPatterns.some(pattern => pattern.test(customerMessage));
-                        const isDeliveryOrder = conversationTranscript.some(msg =>
-                            msg.text.toLowerCase().includes('delivery') && msg.speaker === 'Customer'
-                        );
+                        const isDeliveryOrder = conversationTranscript.some(msg => {
+                            if (msg.speaker !== 'Customer') return false;
+                            const text = msg.text.toLowerCase();
+                            return text.includes('delivery') ||
+                                   text.includes('deliver') ||
+                                   text.includes('delivered') ||
+                                   text.includes('for delivery') ||
+                                   text.includes('to deliver');
+                        });
 
                         // Check if AI has asked for address in conversation
                         const aiAskedForAddress = conversationTranscript.some(msg =>
