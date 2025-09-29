@@ -900,7 +900,7 @@ TIMING RULES:
                 session: {
                     modalities: ['text', 'audio'],
                     instructions: instructions,
-                    voice: 'alloy',
+                    voice: 'coral',
                     input_audio_format: 'g711_ulaw',
                     output_audio_format: 'g711_ulaw',
                     input_audio_transcription: { model: 'whisper-1' },
