@@ -791,12 +791,16 @@ When customer responds to "Is this for pickup or delivery?":
 For delivery orders, follow this EXACT sequence:
 1. Ask for delivery address: "What's your delivery address?"
 2. When customer provides ANY address that contains numbers and words, IMMEDIATELY call validate_delivery_address function
-3. NEVER EVER say these forbidden phrases:
+3. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
    - "It seems there might be an issue"
    - "seems there's an issue"
+   - "It seems there was an issue"
+   - "seems there was an issue"
    - "address is incomplete"
    - "Could you please confirm"
    - "Could you please provide a complete"
+   - "I'm having trouble validating"
+   - "Unfortunately, I'm still unable"
 4. ALWAYS call validation function first - do NOT make your own judgment
 5. If validation returns valid=true, say: "Great! Your address is within our delivery area. What would you like to order?"
 6. If validation returns valid=false, use the exact message from the validation function
@@ -1205,14 +1209,18 @@ TIMING RULES:
                         break;
 
                     case 'session.updated':
-                        console.log('OpenAI session configured');
+                        console.log('OpenAI session configured with updated instructions');
                         // Add a conversation item first, then create response like working version
                         setTimeout(() => {
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                console.log('🎯 Initiating greeting sequence for restaurant:', restaurant?.name);
+
                                 // Create appropriate greeting based on delivery availability
-                                const greetingText = restaurant.delivery_enabled
+                                const greetingText = restaurant?.delivery_enabled
                                     ? `Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?`
                                     : `Hello! Thank you for calling ${restaurant.name}. We offer pickup only. How can I help you?`;
+
+                                console.log('🎯 Greeting text prepared:', greetingText);
 
                                 // First add a conversation item to trigger the greeting
                                 openaiWs.send(JSON.stringify({
@@ -1228,6 +1236,7 @@ TIMING RULES:
                                         ]
                                     }
                                 }));
+                                console.log('🎯 Sent conversation item to trigger greeting');
 
                                 // Then create the response with the specific greeting
                                 setTimeout(() => {
@@ -1239,8 +1248,13 @@ TIMING RULES:
                                                 instructions: `Say exactly: "${greetingText}"`
                                             }
                                         }));
+                                        console.log('🎯 Sent response.create with greeting instructions');
+                                    } else {
+                                        console.error('❌ OpenAI websocket not available for response.create');
                                     }
                                 }, 100);
+                            } else {
+                                console.error('❌ OpenAI websocket not available for greeting setup');
                             }
                         }, 500);
                         break;
@@ -1467,6 +1481,11 @@ TIMING RULES:
                         hasStreetName: /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(deliveryAddress),
                         hasFiveDigitZip: /\b\d{5}(-\d{4})?\b/.test(deliveryAddress),
                         restaurant_delivery_enabled: restaurant.delivery_enabled
+                    });
+                    console.log('About to call validation edge function with:', {
+                        address: deliveryAddress.trim(),
+                        restaurant_id: restaurant.id,
+                        delivery_enabled: restaurant.delivery_enabled
                     });
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
 
