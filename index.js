@@ -1811,18 +1811,24 @@ TIMING RULES:
             const hasOrderConfirmed = transcript.includes('ORDER_CONFIRMED:');
             const hasOrderEnd = transcript.includes('ORDER_END');
 
-            if (!hasOrderConfirmed || !hasOrderEnd) {
+            if (!hasOrderConfirmed) {
                 console.log('Order format not found in transcript');
                 return;
+            }
+
+            // If ORDER_CONFIRMED exists but ORDER_END is missing, check if it was cut off
+            if (!hasOrderEnd) {
+                console.log('ORDER_CONFIRMED found but ORDER_END missing - likely cut off due to token limit');
+                // We'll still process what we have
             }
 
             orderProcessed = true;
             console.log('Processing NEW order from transcript...');
 
-            const orderSection = transcript.substring(
-                transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
-                transcript.indexOf('ORDER_END')
-            ).trim();
+            // Extract order section, handling cases where ORDER_END might be missing
+            const startIndex = transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length;
+            const endIndex = hasOrderEnd ? transcript.indexOf('ORDER_END') : transcript.length;
+            const orderSection = transcript.substring(startIndex, endIndex).trim();
 
             let customerName = '';
             let items = '';
