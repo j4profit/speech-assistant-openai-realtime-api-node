@@ -646,6 +646,113 @@ async function createCustomerMessage(messageData) {
 // UTILITY FUNCTIONS
 // =============================================================================
 
+function createOrderTicket(orderInfo) {
+    const {
+        customerName,
+        customerPhone,
+        orderType,
+        deliveryAddress,
+        items,
+        specialInstructions,
+        totalAmount,
+        readyTime,
+        restaurantName
+    } = orderInfo;
+
+    const timestamp = new Date().toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    let ticket = `
+═══════════════════════════════════════
+              ORDER TICKET
+═══════════════════════════════════════
+
+Restaurant: ${restaurantName}
+Order Time: ${timestamp}
+
+CUSTOMER INFORMATION:
+• Name: ${customerName}
+• Phone: ${customerPhone}
+
+ORDER TYPE: ${orderType.toUpperCase()}`;
+
+    if (orderType === 'delivery' && deliveryAddress) {
+        ticket += `
+• Delivery Address: ${deliveryAddress}`;
+    }
+
+    ticket += `
+
+ORDER ITEMS:
+${formatOrderItems(items, totalAmount)}
+
+TIMING:
+• Order should be ready: ${readyTime}`;
+
+    if (specialInstructions && specialInstructions.trim()) {
+        ticket += `
+
+SPECIAL INSTRUCTIONS:
+${specialInstructions}`;
+    }
+
+    ticket += `
+
+═══════════════════════════════════════
+            END ORDER TICKET
+═══════════════════════════════════════`;
+
+    return ticket;
+}
+
+function formatOrderItems(items, totalAmount) {
+    if (!items || typeof items !== 'string') {
+        return '• Order details not available';
+    }
+
+    // Parse items if they're in ORDER_CONFIRMED format
+    if (items.includes('ORDER_CONFIRMED')) {
+        const lines = items.split('\n');
+        let formattedItems = '';
+        let currentItem = '';
+
+        for (const line of lines) {
+            if (line.includes('• ') || line.includes('- ')) {
+                if (currentItem) formattedItems += currentItem + '\n';
+                currentItem = line.trim();
+            } else if (line.trim() && !line.includes('ORDER_') && !line.includes('Customer') && !line.includes('Phone')) {
+                currentItem += ' ' + line.trim();
+            }
+        }
+        if (currentItem) formattedItems += currentItem;
+
+        return formattedItems || '• ' + items.replace(/ORDER_CONFIRMED.*?\n/g, '').trim();
+    }
+
+    // Format simple item descriptions
+    const itemLines = items.split(/[,\n]/).filter(item => item.trim());
+    let formattedItems = '';
+
+    itemLines.forEach((item) => {
+        const cleanItem = item.trim().replace(/^\d+\.?\s*/, '').replace(/^[\-\*]\s*/, '');
+        if (cleanItem) {
+            formattedItems += `• ${cleanItem}\n`;
+        }
+    });
+
+    if (totalAmount && totalAmount > 0) {
+        formattedItems += `\nTOTAL: $${totalAmount.toFixed(2)}`;
+    }
+
+    return formattedItems || '• ' + items;
+}
+
 function calculateOrderReadyTime(restaurant, isDelivery = false) {
     try {
         const now = new Date();
@@ -750,6 +857,8 @@ wss.on('connection', (ws, _req) => {
     let orderProcessed = false;
     let addressValidated = false;
     let validatedDeliveryAddress = null;
+    let addressRequested = false; // Track if address has been requested to prevent duplicates
+    let addressProviderAttempts = 0; // Track how many times customer provided address
     let recentOrders = [];
     let anythingElseTimeout = null;
 
@@ -823,6 +932,13 @@ wss.on('connection', (ws, _req) => {
 - NEVER proceed to ordering without validating delivery address first
 - NEVER say "What would you like to order" until address validation succeeds
 - Do NOT ask for clarification or mention issues - just call the function
+
+🚨🚨 CRITICAL DUPLICATE PREVENTION RULES:
+- NEVER ask for delivery address more than ONCE per call
+- If customer already provided an address, DO NOT ask again under ANY circumstances
+- If you hear ANY address with numbers and streets, IMMEDIATELY call validate_delivery_address
+- FORBIDDEN: Asking for address multiple times, even if first attempt "failed"
+- If customer says an address, validate it - do NOT request clarification first
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
@@ -1228,59 +1344,77 @@ TIMING RULES:
                             msg.text.toLowerCase().includes('just to confirm')
                         );
 
-                        // Auto-trigger address validation if customer provides delivery address
+                        // Enhanced address management to prevent duplicate requests
                         const addressPattern = /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}/i;
                         const isDeliveryOrder = conversationTranscript.some(msg =>
                             msg.text.toLowerCase().includes('delivery') && msg.speaker === 'Customer'
                         );
                         const hasValidAddress = addressPattern.test(customerMessage);
 
+                        // Check if AI has asked for address in conversation
+                        const aiAskedForAddress = conversationTranscript.some(msg =>
+                            msg.speaker === 'AI' && (
+                                msg.text.toLowerCase().includes('delivery address') ||
+                                msg.text.toLowerCase().includes('what\'s your address') ||
+                                msg.text.toLowerCase().includes('your address')
+                            )
+                        );
+
                         // Enhanced logging for debugging
-                        console.log('🔍 Address auto-trigger check:', {
+                        console.log('🔍 Enhanced address state check:', {
                             customerMessage: customerMessage,
                             isDeliveryOrder: isDeliveryOrder,
                             hasValidAddress: hasValidAddress,
                             addressValidated: addressValidated,
-                            patternTest: addressPattern.test(customerMessage)
+                            addressRequested: addressRequested,
+                            addressProviderAttempts: addressProviderAttempts,
+                            aiAskedForAddress: aiAskedForAddress
                         });
 
-                        // Check if address has already been provided in conversation
-                        const addressProvided = conversationTranscript.some(msg =>
-                            msg.speaker === 'Customer' && addressPattern.test(msg.text)
-                        );
+                        // Track when customer provides address
+                        if (isDeliveryOrder && hasValidAddress) {
+                            addressProviderAttempts++;
+                            console.log('📍 Customer provided address (attempt #' + addressProviderAttempts + '):', customerMessage);
+                        }
 
-                        if (isDeliveryOrder && hasValidAddress && !addressValidated) {
-                            console.log('🏠 Address detected in delivery order - auto-triggering validation:', customerMessage);
+                        // Track when AI asks for address to prevent future duplicates
+                        if (aiAskedForAddress && !addressRequested) {
+                            addressRequested = true;
+                            console.log('📝 Marked address as requested to prevent duplicates');
+                        }
+
+                        // STRONG DUPLICATE PREVENTION: Only trigger validation if address provided and not already validated
+                        if (isDeliveryOrder && hasValidAddress && !addressValidated && addressProviderAttempts === 1) {
+                            console.log('🏠 First address detected in delivery order - auto-triggering validation:', customerMessage);
+                            addressValidated = true; // Set immediately to prevent race conditions
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                     openaiWs.send(JSON.stringify({
                                         type: 'response.create',
                                         response: {
                                             modalities: ['audio', 'text'],
-                                            instructions: 'Customer just provided a delivery address. You MUST immediately call the validate_delivery_address function with this address. Do not proceed to ordering until validation is complete.'
+                                            instructions: 'Customer just provided their delivery address. You MUST immediately call the validate_delivery_address function with this exact address: "' + customerMessage + '". Do not ask for address again.'
                                         }
                                     }));
                                 }
                             }, 100);
                         }
 
-                        // Prevent duplicate address requests
-                        if (isDeliveryOrder && addressProvided && !addressValidated &&
-                            conversationTranscript.some(msg =>
-                                msg.speaker === 'AI' && msg.text.toLowerCase().includes('delivery address')
-                            )) {
-                            console.log('🚨 Address already provided but validation not called - forcing validation');
+                        // EMERGENCY STOP: If customer provides address multiple times, force immediate validation
+                        else if (isDeliveryOrder && hasValidAddress && addressProviderAttempts > 1 && !addressValidated) {
+                            console.log('🚨 DUPLICATE ADDRESS DETECTED - Customer provided address ' + addressProviderAttempts + ' times - forcing immediate validation');
+                            addressValidated = true; // Prevent further duplicates
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                     openaiWs.send(JSON.stringify({
                                         type: 'response.create',
                                         response: {
                                             modalities: ['audio', 'text'],
-                                            instructions: 'Customer has already provided an address. You MUST call validate_delivery_address function immediately. DO NOT ask for address again.'
+                                            instructions: 'STOP asking for address. Customer has provided it multiple times. Use this address: "' + customerMessage + '" and call validate_delivery_address function immediately.'
                                         }
                                     }));
                                 }
-                            }, 200);
+                            }, 50);
                         }
 
                         // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
@@ -1710,9 +1844,11 @@ TIMING RULES:
                             proceed_to_order: true
                         };
                     } else {
+                        // For invalid addresses, don't reset addressValidated to prevent asking again
+                        console.log('Address validation failed but keeping addressValidated=true to prevent duplicate requests');
                         result = {
                             ...validationResult,
-                            instruction: 'Address validation failed. Ask customer for a complete address or suggest pickup.'
+                            instruction: 'Address validation failed. Inform customer we cannot deliver to this area and suggest pickup instead. Do NOT ask for address again.'
                         };
                     }
                     break;
@@ -2055,6 +2191,19 @@ TIMING RULES:
 
             const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
 
+            // Create formatted order ticket
+            const orderTicket = createOrderTicket({
+                customerName,
+                customerPhone,
+                orderType,
+                deliveryAddress,
+                items,
+                specialInstructions,
+                totalAmount,
+                readyTime: timing.readyTimeString,
+                restaurantName: restaurant.name
+            });
+
             const orderData = {
                 restaurant_id: restaurant.id,
                 customer_phone: customerPhone,
@@ -2062,7 +2211,7 @@ TIMING RULES:
                 total_amount: totalAmount || 0,
                 order_type: orderType,
                 delivery_address: deliveryAddress,
-                order_details: items,
+                order_details: orderTicket,
                 special_instructions: specialInstructions || '',
                 ready_time: timing.readyTimeString,
                 estimated_ready_at: timing.readyTime?.toISOString(),
