@@ -486,7 +486,11 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
 
-        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery', {
+        // Use the correct Supabase Edge function URL
+        const edgeFunctionUrl = 'https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery';
+        console.log('Calling Edge function:', edgeFunctionUrl);
+
+        const response = await fetch(edgeFunctionUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -507,27 +511,42 @@ async function validateDeliveryAddress(address, restaurant) {
         });
 
         if (!response.ok) {
-            console.error('Address validation HTTP error:', response.status, response.statusText);
+            console.error('❌ Edge function HTTP error:', {
+                status: response.status,
+                statusText: response.statusText,
+                url: edgeFunctionUrl,
+                address: address.trim()
+            });
             const errorText = await response.text();
-            console.error('Address validation error response:', errorText);
+            console.error('❌ Edge function error response:', errorText);
             return {
                 valid: false,
                 message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
                 address: address,
-                error: 'http_error_' + response.status
+                error: 'http_error_' + response.status,
+                edge_function_called: true,
+                edge_function_url: edgeFunctionUrl
             };
         }
 
         const result = await response.json();
-        console.log('Address validation result:', result);
+        console.log('✅ Edge function response received:', {
+            valid: result.valid,
+            reason: result.reason,
+            message: result.message,
+            address: address.trim(),
+            url: edgeFunctionUrl
+        });
 
         if (result.error) {
-            console.error('Address validation returned error:', result.error);
+            console.error('❌ Edge function returned error:', result.error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
                 address: address,
-                error: result.error
+                error: result.error,
+                edge_function_called: true,
+                edge_function_url: edgeFunctionUrl
             };
         }
 
@@ -537,11 +556,18 @@ async function validateDeliveryAddress(address, restaurant) {
             address: address,
             estimated_delivery_time: result.estimated_delivery_time,
             delivery_radius: result.delivery_radius,
-            reason: result.reason
+            reason: result.reason,
+            edge_function_called: true,
+            edge_function_url: edgeFunctionUrl
         };
 
     } catch (error) {
-        console.error('Error calling validate-delivery-address Edge Function:', error);
+        console.error('❌ Error calling Edge function:', {
+            error: error.message,
+            stack: error.stack,
+            url: edgeFunctionUrl || 'unknown',
+            address: address
+        });
         return {
             valid: false,
             message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
