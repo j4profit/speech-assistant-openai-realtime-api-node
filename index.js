@@ -1409,6 +1409,10 @@ TIMING RULES:
                                    text.includes('delivered') ||
                                    text.includes('for delivery') ||
                                    text.includes('to deliver');
+                        }) || conversationTranscript.some(msg => {
+                            // If AI asked for delivery address, treat as delivery order
+                            return msg.speaker === 'AI' &&
+                                   msg.text.toLowerCase().includes('delivery address');
                         });
 
                         // Check if AI has asked for address in conversation
