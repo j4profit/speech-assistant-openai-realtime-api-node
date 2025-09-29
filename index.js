@@ -6,7 +6,6 @@ const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // Environment Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -23,7 +22,7 @@ if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
 }
 
 // Initialize Twilio for hangup functionality
-const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? 
+const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ?
     twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
 
 if (!twilioClient) {
@@ -34,11 +33,11 @@ if (!twilioClient) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Global state management
-const activeCalls = new Map();
+// Note: activeCalls map removed as it was unused
 
 // Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
-const wss = new WebSocket.Server({ 
+const wss = new WebSocket.Server({
     server,
     path: '/media-stream'
 });
@@ -81,8 +80,8 @@ async function hangup(callSid, options = {}) {
         if (method === 'graceful') {
             let finalMessage = message;
             if (!finalMessage) {
-                finalMessage = restaurant ? 
-                    'Thank you for calling ' + restaurant.name + '. Have a great day!' : 
+                finalMessage = restaurant ?
+                    'Thank you for calling ' + restaurant.name + '. Have a great day!' :
                     'Thank you for calling. Have a great day!';
             }
 
@@ -93,10 +92,10 @@ async function hangup(callSid, options = {}) {
                 timestamp: new Date().toISOString()
             };
 
-            const hangupUrl = BASE_URL ? 
-                BASE_URL + '/hangup-twiml?call_sid=' + callSid : 
+            const hangupUrl = BASE_URL ?
+                BASE_URL + '/hangup-twiml?call_sid=' + callSid :
                 'https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com/hangup-twiml?call_sid=' + callSid;
-            
+
             await twilioClient.calls(callSid).update({
                 url: hangupUrl,
                 method: 'POST'
@@ -116,10 +115,10 @@ async function hangup(callSid, options = {}) {
 
     } catch (error) {
         console.error('Hangup failed for call ' + callSid + ':', error);
-        return { 
-            success: false, 
+        return {
+            success: false,
             error: error.message,
-            call_sid: callSid 
+            call_sid: callSid
         };
     }
 }
@@ -131,16 +130,16 @@ async function hangup(callSid, options = {}) {
 // Hangup TwiML endpoint
 app.post('/hangup-twiml', (req, res) => {
     const callSid = req.query.call_sid || req.body.CallSid;
-    
+
     let message = 'Thank you for calling. Goodbye!';
-    
+
     if (global.pendingHangupTwiML?.[callSid]) {
         message = global.pendingHangupTwiML[callSid].message;
         delete global.pendingHangupTwiML[callSid];
     }
-    
+
     const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Say voice="alice">' + message + '</Say>\n    <Hangup/>\n</Response>';
-    
+
     res.type('text/xml');
     res.send(twiml);
 });
@@ -148,13 +147,13 @@ app.post('/hangup-twiml', (req, res) => {
 // FIXED: Fast-responding Twilio webhook endpoint for incoming calls
 app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
-    
+
     // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
     const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Connect>\n        <Stream url="wss://' + req.get('host') + '/media-stream">\n            <Parameter name="Called" value="' + (req.body.Called || req.body.To) + '" />\n            <Parameter name="From" value="' + (req.body.From || req.body.Caller) + '" />\n            <Parameter name="CallSid" value="' + req.body.CallSid + '" />\n        </Stream>\n    </Connect>\n</Response>';
-    
+
     res.type('text/xml');
     res.send(twiml);
-    
+
     // FIXED: Do restaurant lookup and call data storage AFTER responding to Twilio
     setImmediate(async () => {
         try {
@@ -180,17 +179,17 @@ app.post('/voice', (req, res) => {
                 conversation_transcript: null,
                 order_id: null
             };
-            
+
             // Look up restaurant to get restaurant_id for the call log (non-blocking)
             const restaurant = await getRestaurantByPhone(callData.to_number);
             if (restaurant) {
                 callData.restaurant_id = restaurant.id;
             }
-            
+
             // Store call data for final logging at call completion
             global.pendingCallData = global.pendingCallData || {};
             global.pendingCallData[req.body.CallSid] = callData;
-            
+
             console.log('Stored call data for:', req.body.CallSid, {
                 from: callData.from_number,
                 to: callData.to_number,
@@ -204,7 +203,7 @@ app.post('/voice', (req, res) => {
 });
 
 // IMPROVED: Health check endpoint with Twilio connectivity test
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     const healthData = {
         status: 'healthy',
         port: process.env.PORT || 3000,
@@ -219,17 +218,17 @@ app.get('/health', (req, res) => {
         twilio_response_optimized: true,
         last_health_check: new Date().toISOString()
     };
-    
+
     // Return immediately for health checks (important for load balancers)
     res.status(200).json(healthData);
 });
 
-app.get('/ping', (req, res) => {
+app.get('/ping', (_req, res) => {
     res.status(200).send('pong');
 });
 
 app.get('/', (req, res) => {
-    res.status(200).json({ 
+    res.status(200).json({
         message: 'Restaurant AI Ordering System - FIXED: Twilio Timeout Issue',
         status: 'running',
         port: process.env.PORT || 3000,
@@ -241,7 +240,7 @@ app.get('/', (req, res) => {
 });
 
 // API endpoints using Edge Functions
-app.get('/orders', async (req, res) => {
+app.get('/orders', async (_req, res) => {
     try {
         const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
@@ -267,7 +266,7 @@ app.get('/orders', async (req, res) => {
     }
 });
 
-app.get('/messages', async (req, res) => {
+app.get('/messages', async (_req, res) => {
     try {
         const { data, error } = await supabase
             .from('customer_messages')
@@ -294,7 +293,7 @@ async function getRestaurantByPhone(phoneNumber) {
         // Add timeout to prevent hanging requests
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-        
+
         const response = await fetch(SUPABASE_URL + '/functions/v1/get-restaurant', {
             method: 'POST',
             headers: {
@@ -304,7 +303,7 @@ async function getRestaurantByPhone(phoneNumber) {
             body: JSON.stringify({ phone_number: phoneNumber }),
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
 
         if (!response.ok) return null;
@@ -335,7 +334,7 @@ async function getRestaurantByPhone(phoneNumber) {
 async function createCallLog(callData) {
     try {
         console.log('Calling create-call-log Edge Function with data:', JSON.stringify(callData, null, 2));
-        
+
         const response = await fetch(SUPABASE_URL + '/functions/v1/create-call-log', {
             method: 'POST',
             headers: {
@@ -346,7 +345,7 @@ async function createCallLog(callData) {
         });
 
         console.log('Edge Function response status:', response.status);
-        
+
         const responseText = await response.text();
         console.log('Edge Function raw response:', responseText);
 
@@ -356,7 +355,7 @@ async function createCallLog(callData) {
         }
 
         const result = JSON.parse(responseText);
-        
+
         if (result.error) {
             console.error('Edge Function returned error:', result.error);
             return null;
@@ -372,15 +371,16 @@ async function createCallLog(callData) {
 
 async function searchRecentOrders(phoneNumber, restaurantId) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/lookup-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-                restaurant_phone: restaurantId,
-                customer_phone: phoneNumber
+                phone_number: phoneNumber,
+                restaurant_id: restaurantId,
+                days_back: 7
             })
         });
 
@@ -388,7 +388,7 @@ async function searchRecentOrders(phoneNumber, restaurantId) {
         const result = await response.json();
         return result.orders || [];
     } catch (error) {
-        console.error('Error calling lookup-order Edge Function:', error);
+        console.error('Error calling search-orders Edge Function:', error);
         return [];
     }
 }
@@ -447,11 +447,20 @@ async function validateDeliveryAddress(address, restaurant) {
                 address: address
             };
         }
-        
+
         const hasStreetNumber = /^\d+/.test(address.trim());
-        const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
+        const hasStreetName = /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address) ||
+                             /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address) ||
+                             /(old|new|north|south|east|west)\s+\w+\s+(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
         const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
-        
+        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}\b/.test(address); // City, State pattern
+
+        console.log('Detailed validation for address:', address);
+        console.log('hasStreetNumber:', hasStreetNumber);
+        console.log('hasStreetName:', hasStreetName);
+        console.log('hasFiveDigitZip:', hasFiveDigitZip);
+        console.log('hasCityState:', hasCityState);
+
         if (!hasStreetNumber) {
             return {
                 valid: false,
@@ -459,7 +468,7 @@ async function validateDeliveryAddress(address, restaurant) {
                 address: address
             };
         }
-        
+
         if (!hasStreetName) {
             return {
                 valid: false,
@@ -467,42 +476,58 @@ async function validateDeliveryAddress(address, restaurant) {
                 address: address
             };
         }
-        
-        if (!hasFiveDigitZip) {
+
+        // Accept either zip code OR city/state combination
+        if (!hasFiveDigitZip && !hasCityState) {
             return {
                 valid: false,
-                message: 'Please include a valid 5-digit zip code.',
+                message: 'Please include either a 5-digit zip code or city and state (e.g., Baltimore, MD).',
                 address: address
             };
         }
-        
-        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery-address', {
+
+        const response = await fetch(SUPABASE_URL + '/functions/v1/validate-delivery', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-                restaurant_phone: restaurant.phone_number,
-                address: address.trim()
+                address: address.trim(),
+                restaurant_id: restaurant.id,
+                delivery_enabled: restaurant.delivery_enabled,
+                delivery_radius: restaurant.delivery_radius || 5,
+                delivery_hours: restaurant.delivery_hours,
+                delivery_time: restaurant.delivery_time || 15,
+                preparation_time: restaurant.preparation_time || 20,
+                restaurant_address: restaurant.address,
+                restaurant_latitude: restaurant.latitude,
+                restaurant_longitude: restaurant.longitude
             })
         });
 
         if (!response.ok) {
+            console.error('Address validation HTTP error:', response.status, response.statusText);
+            const errorText = await response.text();
+            console.error('Address validation error response:', errorText);
             return {
                 valid: false,
                 message: 'Unable to validate address at this time. Please provide a complete address or choose pickup.',
-                address: address
+                address: address,
+                error: 'http_error_' + response.status
             };
         }
 
         const result = await response.json();
-        
+        console.log('Address validation result:', result);
+
         if (result.error) {
+            console.error('Address validation returned error:', result.error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
-                address: address
+                address: address,
+                error: result.error
             };
         }
 
@@ -514,7 +539,7 @@ async function validateDeliveryAddress(address, restaurant) {
             delivery_radius: result.delivery_radius,
             reason: result.reason
         };
-        
+
     } catch (error) {
         console.error('Error calling validate-delivery-address Edge Function:', error);
         return {
@@ -528,7 +553,7 @@ async function validateDeliveryAddress(address, restaurant) {
 
 async function createOrder(orderData) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/save-order', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -543,7 +568,7 @@ async function createOrder(orderData) {
             console.error('Order creation error response:', errorText);
             return null;
         }
-        
+
         const result = await response.json();
         if (result.error) {
             console.error('Order creation returned error:', result.error);
@@ -553,14 +578,14 @@ async function createOrder(orderData) {
         console.log('Order created successfully:', result.data?.id);
         return result.data;
     } catch (error) {
-        console.error('Error calling save-order Edge Function:', error);
+        console.error('Error calling create-order Edge Function:', error);
         return null;
     }
 }
 
 async function createCustomerMessage(messageData) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/save-message', {
+        const response = await fetch(SUPABASE_URL + '/functions/v1/create-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -576,7 +601,7 @@ async function createCustomerMessage(messageData) {
         console.log('Customer message created successfully:', result.data?.id || result.message_id);
         return result.data || result;
     } catch (error) {
-        console.error('Error calling save-message Edge Function:', error);
+        console.error('Error calling create-message Edge Function:', error);
         return null;
     }
 }
@@ -590,20 +615,20 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         const now = new Date();
         const preparationMinutes = restaurant?.preparation_time || 20;
         let deliveryAddedMinutes = 0;
-        
+
         if (isDelivery && restaurant?.delivery_enabled) {
             deliveryAddedMinutes = restaurant?.delivery_time || 15;
         }
-        
+
         const totalMinutes = preparationMinutes + deliveryAddedMinutes;
         const readyTime = new Date(now.getTime() + totalMinutes * 60000);
-        
+
         const hours = readyTime.getHours();
         const minutes = readyTime.getMinutes();
         const ampm = hours >= 12 ? 'PM' : 'AM';
         const displayHours = hours % 12 || 12;
         const displayMinutes = minutes.toString().padStart(2, '0');
-        
+
         return {
             readyTime: readyTime,
             readyTimeString: displayHours + ':' + displayMinutes + ' ' + ampm,
@@ -628,7 +653,7 @@ function formatMenuForAI(menuItems, restaurant) {
     const categories = {};
     menuItems.forEach(item => {
         if (!item.available) return;
-        
+
         const categoryName = item.category || 'Other';
         if (!categories[categoryName]) {
             categories[categoryName] = [];
@@ -642,12 +667,12 @@ function formatMenuForAI(menuItems, restaurant) {
     });
 
     let menuText = "MENU:\n";
-    
+
     const sortedCategories = Object.keys(categories).sort();
-    
+
     sortedCategories.forEach(category => {
         menuText += '\n' + category.toUpperCase() + ':\n';
-        
+
         categories[category]
             .sort((a, b) => a.name.localeCompare(b.name))
             .forEach(item => {
@@ -658,7 +683,7 @@ function formatMenuForAI(menuItems, restaurant) {
     if (restaurant) {
         menuText += '\n\nDELIVERY INFORMATION:\n';
         menuText += '- Delivery Available: ' + (restaurant.delivery_enabled ? 'Yes' : 'No') + '\n';
-        
+
         if (restaurant.delivery_enabled) {
             menuText += '- Delivery Hours: ' + (restaurant.delivery_hours || 'Same as restaurant hours') + '\n';
             menuText += '- Delivery Radius: ' + (restaurant.delivery_radius || 'Contact restaurant') + ' miles\n';
@@ -675,9 +700,9 @@ function formatMenuForAI(menuItems, restaurant) {
 // WEBSOCKET CONNECTION WITH INTENT-BASED FUNCTION CALLING
 // =============================================================================
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws, _req) => {
     console.log('New WebSocket connection');
-    
+
     // Connection-specific variables
     let openaiWs = null;
     let streamSid = null;
@@ -693,10 +718,10 @@ wss.on('connection', (ws, req) => {
     // Initialize OpenAI with modern approach
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
-        
+
         const phoneToLookup = calledNumber || '+14108880091';
         restaurant = await getRestaurantByPhone(phoneToLookup);
-        
+
         if (!restaurant) {
             console.error('Restaurant not found for phone:', phoneToLookup);
             await hangup(callId, {
@@ -706,56 +731,103 @@ wss.on('connection', (ws, req) => {
             return;
         }
 
+        console.log('Restaurant loaded:', {
+            id: restaurant.id,
+            name: restaurant.name,
+            phone: restaurant.phone_number,
+            delivery_enabled: restaurant.delivery_enabled,
+            tagline: restaurant.tagline,
+            description: restaurant.description
+        });
+
         customerPhone = fromNumber;
         callSid = callId;
         const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
-        
+
         console.log('Connecting to OpenAI Realtime API with updated model...');
-        
-        // Use the latest stable model
-        openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
-            headers: {
-                'Authorization': 'Bearer ' + OPENAI_API_KEY,
-                'OpenAI-Beta': 'realtime=v1'
-            }
-        });
-        
+
+        // Use the latest stable model - try without specifying model first
+        console.log('🔗 Attempting OpenAI connection with API key:', OPENAI_API_KEY ? 'Present' : 'Missing');
+
+        try {
+            openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
+                headers: {
+                    'Authorization': 'Bearer ' + OPENAI_API_KEY,
+                    'OpenAI-Beta': 'realtime=v1'
+                }
+            });
+            console.log('🔗 WebSocket created successfully');
+        } catch (createError) {
+            console.error('❌ Failed to create OpenAI WebSocket:', createError);
+            await hangup(callId, {
+                message: 'Technical difficulties. Please try again.',
+                reason: 'websocket_creation_failed'
+            });
+            return;
+        }
+
         openaiWs.on('open', () => {
-            console.log('Connected to OpenAI Realtime API');
-            
-            const deliveryOptions = restaurant.delivery_enabled ? 
-                'Would you like this for pickup or delivery?' : 
-                'All orders are for pickup only.';
-            
+            console.log('✅ Connected to OpenAI Realtime API');
+            console.log('🔗 WebSocket ready for audio streaming');
+
+            // Delivery options are handled in the greeting logic below
+
             // Modern system instructions with intent-based approach
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 
+🚨 CRITICAL ADDRESS RULE: When customer provides ANY address with numbers and street names, IMMEDIATELY call validate_delivery_address function. NEVER say "seems there's an issue" or ask for clarification first.
+
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
-IMPORTANT: Start every call with: "Hello! Thank you for calling ${restaurant.name}. We're extremely busy right now and can't take calls, but I can help you! ${deliveryOptions}"
+GREETING TRIGGER: When you receive the message "Start the call greeting", immediately respond with the appropriate greeting based on delivery availability. This is your cue to begin the conversation.
 
 **VOICE & PACING:**
 - Speak quickly and professionally, but do not sound rushed
 - Deliver your audio response fast while maintaining clarity
 - Use a brisk, efficient pace throughout the conversation
 
-**DELIVERY ORDER FLOW (CRITICAL):**
+**STANDARD GREETING FLOW:**
+EVERY caller gets this exact sequence:
+1. Greeting with pickup/delivery question:
+   - If delivery enabled: "Hello! Thank you for calling [restaurant name]. Is this for pickup or delivery?"
+   - If pickup only: "Hello! Thank you for calling [restaurant name]. We offer pickup only. How can I help you?"
+2. After they respond, ask for name: "May I have your name for the order?" or "Who am I speaking with?"
+
+**ORDER TYPE RESPONSE HANDLING:**
+When customer responds to "Is this for pickup or delivery?":
+- If they say "pickup" → Ask for name, then follow PICKUP ORDER FLOW
+- If they say "delivery" → Ask for name, then follow DELIVERY ORDER FLOW
+- If unclear, ask: "Will this be for pickup or delivery?"
+
+**DELIVERY ORDER FLOW (CRITICAL - NEVER DEVIATE):**
 For delivery orders, follow this EXACT sequence:
-1. Get customer's name
-2. IMMEDIATELY ask for delivery address: "What's your delivery address?"
-3. ALWAYS call validate_delivery_address function when address is provided
-4. Only after address is validated successfully, ask: "What would you like to order?"
-5. Take order details
-6. Create ORDER_CONFIRMED format
+1. Ask for delivery address: "What's your delivery address?"
+2. When customer provides ANY address that contains numbers and words, IMMEDIATELY call validate_delivery_address function
+3. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
+   - "It seems there might be an issue"
+   - "seems there's an issue"
+   - "It seems there was an issue"
+   - "seems there was an issue"
+   - "address is incomplete"
+   - "Could you please confirm"
+   - "Could you please provide a complete"
+   - "I'm having trouble validating"
+   - "Unfortunately, I'm still unable"
+4. ALWAYS call validation function first - do NOT make your own judgment
+5. If validation returns valid=true, say: "Great! Your address is within our delivery area. What would you like to order?"
+6. If validation returns valid=false, use the exact message from the validation function
+7. Take order details
+8. Create ORDER_CONFIRMED format
 
 **PICKUP ORDER FLOW:**
 For pickup orders:
-1. Get customer's name  
-2. Ask: "What would you like to order?"
-3. Take order details
-4. Create ORDER_CONFIRMED format
+1. Ask: "What would you like to order?"
+2. Take order details
+3. Create ORDER_CONFIRMED format
 
-IMPORTANT: ALWAYS get the customer's name BEFORE taking any order details.
+IMPORTANT:
+- Do NOT ask for delivery address if customer chose pickup
+- Do NOT call validate_delivery_address unless customer specifically chose delivery and provided a complete address
 
 **RESTAURANT STATUS: VERY BUSY**
 - The restaurant is extremely busy and cannot take phone calls
@@ -772,14 +844,16 @@ ${menuText}
 Instead of keyword matching, you naturally understand customer intent and call appropriate functions:
 
 1. **When customer wants to modify/cancel existing orders** → call search_recent_orders
-2. **When customer provides delivery address** → MANDATORY: call validate_delivery_address  
+2. **When customer provides ANY delivery address (with numbers and street names)** → call validate_delivery_address
 3. **When customer wants to leave a message/complaint/question** → call create_customer_message
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders
 
+IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY address with numbers and street names - let the validation function determine if it's complete.
+
 **RESPONSE LENGTH RULES:**
 - ALL responses must be 1-2 sentences maximum
-- Be direct and concise  
+- Be direct and concise
 - Only exception: ORDER_CONFIRMED format (required for order processing)
 - No long explanations or detailed descriptions
 
@@ -827,6 +901,8 @@ TIMING RULES:
                         prefix_padding_ms: 300,
                         silence_duration_ms: 2000
                     },
+                    temperature: 0.8,
+                    max_response_output_tokens: 1000,
                     // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
                     tools: [
                         {
@@ -836,8 +912,8 @@ TIMING RULES:
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    phone_number: { 
-                                        type: "string", 
+                                    phone_number: {
+                                        type: "string",
                                         description: "Only use if customer provides a different number than caller ID"
                                     }
                                 },
@@ -847,20 +923,20 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "validate_delivery_address",
-                            description: "MANDATORY: Must call this function every time a customer provides a delivery address. Required before confirming address validity. Never assume address is valid without calling this function.",
+                            description: "ONLY call this function when customer provides a COMPLETE delivery address containing: STREET NUMBER + STREET NAME + (ZIP CODE OR CITY/STATE). Examples that should trigger this function: '123 Main St, 12345' or '123 Main Street, Baltimore, MD'. NEVER call this function for: names (John, Mary, etc.), single words (delivery, pickup), incomplete addresses missing numbers or street names, or questions.",
                             parameters: {
                                 type: "object",
                                 properties: {
-                                    address: { 
-                                        type: "string", 
-                                        description: "Complete delivery address provided by customer" 
+                                    address: {
+                                        type: "string",
+                                        description: "Complete delivery address provided by customer (must include street number, street name, city, state, zip)"
                                     }
                                 },
                                 required: ["address"]
                             }
                         },
                         {
-                            type: "function", 
+                            type: "function",
                             name: "cancel_order",
                             description: "Cancel a PENDING order only. Call search_recent_orders first to get order details.",
                             parameters: {
@@ -873,7 +949,7 @@ TIMING RULES:
                             }
                         },
                         {
-                            type: "function", 
+                            type: "function",
                             name: "update_order",
                             description: "Update a PENDING order only. Call search_recent_orders first to get order details.",
                             parameters: {
@@ -895,10 +971,10 @@ TIMING RULES:
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
                                     message_content: { type: "string", description: "The customer's message, request, or concern" },
-                                    priority: { 
-                                        type: "string", 
+                                    priority: {
+                                        type: "string",
                                         enum: ["high", "medium", "normal"],
-                                        description: "Priority: high for urgent issues, normal for general messages" 
+                                        description: "Priority: high for urgent issues, normal for general messages"
                                     },
                                     subject: { type: "string", description: "Brief subject like 'Callback Request' or 'Customer Question'" }
                                 },
@@ -907,7 +983,7 @@ TIMING RULES:
                         },
                         {
                             type: "function",
-                            name: "send_message_to_restaurant", 
+                            name: "send_message_to_restaurant",
                             description: "Send message about non-pending order modifications or other restaurant communications",
                             parameters: {
                                 type: "object",
@@ -923,26 +999,56 @@ TIMING RULES:
                     ]
                 }
             };
-            
+
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
-        
+
         // Message handling logic with function call processing
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
-                
+
                 switch (response.type) {
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
+                            console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
                             ws.send(JSON.stringify({
                                 event: 'media',
                                 streamSid: streamSid,
                                 media: { payload: response.delta }
                             }));
+                        } else {
+                            console.log('❌ Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
                         }
                         break;
-                        
+
+                    case 'response.audio.done':
+                        console.log('✅ Audio response completed');
+                        break;
+
+                    case 'response.created':
+                        console.log('🎯 OpenAI response created:', response.response?.id);
+                        console.log('🎯 Response modalities:', response.response?.modalities);
+                        console.log('🎯 Response status:', response.response?.status);
+                        break;
+
+                    case 'response.done':
+                        console.log('✅ OpenAI response completed:', response.response?.id);
+                        console.log('✅ Response status_details:', response.response?.status_details);
+                        console.log('✅ Response usage:', response.response?.usage);
+                        break;
+
+                    case 'response.output_item.added':
+                        console.log('📋 Output item added:', response.item?.type, 'content_type:', response.item?.content?.[0]?.type);
+                        break;
+
+                    case 'response.output_item.done':
+                        console.log('📋 Output item completed:', response.item?.type);
+                        if (response.item?.type === 'message' && response.item?.content?.[0]?.type === 'audio') {
+                            console.log('🎵 Audio content generated, length:', response.item.content[0].audio?.length || 0);
+                        }
+                        break;
+
                     case 'response.audio_transcript.done':
                         console.log('AI said:', response.transcript);
                         conversationTranscript.push({
@@ -950,12 +1056,12 @@ TIMING RULES:
                             speaker: 'AI',
                             text: response.transcript
                         });
-                        
+
                         // Process order confirmation
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
                         }
-                        
+
                         // Handle "anything else" flow
                         const completionPhrases = [
                             'order_confirmed:',
@@ -969,21 +1075,21 @@ TIMING RULES:
                             'i\'ve sent your message',
                             'your message has been recorded'
                         ];
-                        
-                        const isCompletionPhrase = completionPhrases.some(phrase => 
+
+                        const isCompletionPhrase = completionPhrases.some(phrase =>
                             response.transcript.toLowerCase().includes(phrase)
                         );
-                        
+
                         const alreadyAskedAnythingElse = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
                             .some(msg => msg.text.toLowerCase().includes('anything else'));
-                        
-                        const isOrderConfirmationResponse = response.transcript.includes('ORDER_CONFIRMED:') && 
+
+                        const isOrderConfirmationResponse = response.transcript.includes('ORDER_CONFIRMED:') &&
                                                           response.transcript.includes('Anything else I can help you with?');
-                        
+
                         if (isOrderConfirmationResponse) {
                             console.log('Order confirmation with "anything else" detected - setting up response timeout');
-                            
+
                             anythingElseTimeout = setTimeout(async () => {
                                 if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
                                     console.log('No response to "anything else" in order confirmation - hanging up');
@@ -997,7 +1103,7 @@ TIMING RULES:
                                     });
                                 }
                             }, 10000);
-                            
+
                         } else if (isCompletionPhrase && !alreadyAskedAnythingElse) {
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
@@ -1009,7 +1115,7 @@ TIMING RULES:
                                             instructions: 'Say exactly: "Anything else I can help you with?"'
                                         }
                                     }));
-                                    
+
                                     anythingElseTimeout = setTimeout(async () => {
                                         if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
                                             console.log('No response to "anything else" - hanging up');
@@ -1027,7 +1133,7 @@ TIMING RULES:
                             }, 2000);
                         }
                         break;
-                        
+
                     case 'conversation.item.input_audio_transcription.completed':
                         console.log('Customer said:', response.transcript);
                         conversationTranscript.push({
@@ -1035,33 +1141,33 @@ TIMING RULES:
                             speaker: 'Customer',
                             text: response.transcript
                         });
-                        
+
                         const customerMessage = response.transcript.trim();
-                        
+
                         if (anythingElseTimeout) {
                             clearTimeout(anythingElseTimeout);
                             anythingElseTimeout = null;
                         }
-                        
+
                         const recentAIMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'AI')
                             .slice(-3)
                             .map(msg => msg.text.toLowerCase());
-                        
+
                         // FIXED: Only trigger on specific "anything else I can help you with" questions
-                        const hasRecentAnythingElse = recentAIMessages.some(msg => 
-                            msg.includes('anything else i can help you with') || 
+                        const hasRecentAnythingElse = recentAIMessages.some(msg =>
+                            msg.includes('anything else i can help you with') ||
                             msg.includes('anything else i can help') ||
                             msg.includes('is there anything else') ||
                             (msg.includes('anything else') && msg.includes('help you'))
                         );
-                        
+
                         const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done|that's everything|we're all set)\b/i;
                         const startsWithNo = /^no[,\s]/i;
-                        
+
                         if ((anythingElseResponses.test(customerMessage) || startsWithNo.test(customerMessage)) && hasRecentAnythingElse) {
                             console.log('Customer responded "no" to recent anything else question - initiating hangup');
-                            
+
                             setTimeout(async () => {
                                 if (callSid && ws.readyState === WebSocket.OPEN) {
                                     await hangup(callSid, {
@@ -1075,27 +1181,29 @@ TIMING RULES:
                             return;
                         }
                         break;
-                        
+
                     case 'input_audio_buffer.speech_started':
                         if (anythingElseTimeout) {
                             clearTimeout(anythingElseTimeout);
                             anythingElseTimeout = null;
                         }
                         break;
-                        
+
                     // Handle function calls with modern approach
                     case 'response.function_call_done':
                         console.log('Function call completed:', response.name);
                         handleFunctionCall(response);
                         break;
-                        
+
                     case 'conversation.item.created':
                         if (response.item?.type === 'function_call') {
                             console.log('Function call item created:', response.item.name);
                             handleFunctionCall(response.item);
+                        } else if (response.item?.type === 'message') {
+                            console.log('Message item created:', response.item.role, 'content length:', response.item.content?.[0]?.text?.length || 0);
                         }
                         break;
-                        
+
                     case 'error':
                         console.error('OpenAI error:', response.error);
                         if (response.error?.code === 'conversation_already_has_active_response') {
@@ -1111,11 +1219,63 @@ TIMING RULES:
                             }, 1000);
                         }
                         break;
-                        
+
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        // REMOVED: Programmed greeting to prevent duplication
-                        // The AI will greet naturally based on system instructions
+                        console.log('🔍 Restaurant available for greeting?', {
+                            hasRestaurant: !!restaurant,
+                            restaurantName: restaurant?.name,
+                            deliveryEnabled: restaurant?.delivery_enabled,
+                            wsState: openaiWs?.readyState
+                        });
+                        // Add a conversation item first, then create response like working version
+                        setTimeout(() => {
+                            console.log('🎯 setTimeout callback executing...');
+                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                console.log('🎯 Initiating greeting sequence for restaurant:', restaurant?.name);
+
+                                // Create appropriate greeting based on delivery availability
+                                const greetingText = restaurant?.delivery_enabled
+                                    ? `Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?`
+                                    : `Hello! Thank you for calling ${restaurant.name}. We offer pickup only. How can I help you?`;
+
+                                console.log('🎯 Greeting text prepared:', greetingText);
+
+                                // First add a conversation item to trigger the greeting
+                                openaiWs.send(JSON.stringify({
+                                    type: 'conversation.item.create',
+                                    item: {
+                                        type: 'message',
+                                        role: 'user',
+                                        content: [
+                                            {
+                                                type: 'input_text',
+                                                text: 'Start the call greeting'
+                                            }
+                                        ]
+                                    }
+                                }));
+                                console.log('🎯 Sent conversation item to trigger greeting');
+
+                                // Then create the response with the specific greeting
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['audio', 'text'],
+                                                instructions: `Say exactly: "${greetingText}"`
+                                            }
+                                        }));
+                                        console.log('🎯 Sent response.create with greeting instructions');
+                                    } else {
+                                        console.error('❌ OpenAI websocket not available for response.create');
+                                    }
+                                }, 100);
+                            } else {
+                                console.error('❌ OpenAI websocket not available for greeting setup');
+                            }
+                        }, 500);
                         break;
                 }
             } catch (error) {
@@ -1130,17 +1290,28 @@ TIMING RULES:
                 }, 1000);
             }
         });
-        
+
         openaiWs.on('error', async (error) => {
-            console.error('OpenAI WebSocket error:', error);
+            console.error('❌ OpenAI WebSocket error:', error);
+            console.error('🚨 Connection failure details:', {
+                message: error.message,
+                code: error.code,
+                type: error.type,
+                callSid: callSid,
+                url: 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+                apiKeyPresent: !!OPENAI_API_KEY,
+                apiKeyLength: OPENAI_API_KEY ? OPENAI_API_KEY.length : 0
+            });
+
             if (callSid) {
+                console.log('🔄 Immediate hangup - OpenAI connection failed');
                 await hangup(callSid, {
                     message: 'We are experiencing technical difficulties. Please try calling again.',
-                    reason: 'websocket_error'
+                    reason: 'openai_websocket_error'
                 });
             }
         });
-        
+
         openaiWs.on('close', () => {
             console.log('OpenAI connection closed');
         });
@@ -1170,11 +1341,11 @@ TIMING RULES:
             switch (name) {
                 case 'search_recent_orders':
                     let phoneNumber = customerPhone;
-                    
+
                     if (parsedArgs.phone_number && parsedArgs.phone_number !== customerPhone) {
                         phoneNumber = parsedArgs.phone_number;
                     }
-                    
+
                     if (!phoneNumber) {
                         result = {
                             orders: [],
@@ -1184,13 +1355,13 @@ TIMING RULES:
                         };
                         break;
                     }
-                    
+
                     const orders = await searchRecentOrders(phoneNumber, restaurant.id);
                     recentOrders = orders;
-                    
+
                     const pendingOrders = orders.filter(order => order.status === 'pending');
                     const nonPendingOrders = orders.filter(order => order.status !== 'pending');
-                    
+
                     if (orders.length === 0) {
                         result = {
                             orders: [],
@@ -1236,42 +1407,59 @@ TIMING RULES:
 
                 case 'validate_delivery_address':
                     let deliveryAddress = parsedArgs.address;
-                    
-                    // Better address extraction from conversation context
+
+                    // If no address provided directly, extract from the most recent customer message only
                     if (!deliveryAddress || deliveryAddress.trim().length === 0) {
-                        console.log('Address not provided in function args, extracting from conversation...');
-                        
+                        console.log('Address not provided in function args, checking latest customer message...');
+
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
-                            .slice(-3)
-                            .map(msg => msg.text);
-                        
-                        console.log('Searching for address in:', recentCustomerMessages.join(' '));
-                        
-                        for (let i = recentCustomerMessages.length - 1; i >= 0; i--) {
-                            const message = recentCustomerMessages[i];
-                            console.log('Checking message ' + i + ': "' + message + '"');
-                            
-                            const patterns = [
-                                /\b\d+[^.!?]*\d{5}\b/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\d{5}\b/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)[^.!?]*\s+in\s+[\w\s,]+/i,
-                                /\b\d+\s+[\w\s]+(road|street|avenue|lane|drive|way|court|place|blvd|ave|rd|st|ct|pl|ln|dr)\b[^.!?]*/i
+                            .slice(-1); // Only check the most recent message
+
+                        if (recentCustomerMessages.length > 0) {
+                            const latestMessage = recentCustomerMessages[0].text;
+                            console.log('Checking latest message: "' + latestMessage + '"');
+
+                            // FIRST: Check if this is obviously a name instead of an address
+                            const isName = /^[A-Za-z]+(\s+[A-Za-z]+)*\.?$/.test(latestMessage.trim());
+                            const hasNumber = /\d/.test(latestMessage);
+
+                            if (isName && !hasNumber) {
+                                console.log('Message appears to be a name, rejecting validation call');
+                                result = {
+                                    valid: false,
+                                    message: 'I need your delivery address with street number and name.',
+                                    address: '',
+                                    needs_address: true,
+                                    instruction: 'Customer provided their name instead of address. Do not call validation again until they provide a complete street address.'
+                                };
+                                break;
+                            }
+
+                            // Look for complete address patterns - more flexible matching
+                            const addressPatterns = [
+                                /\d+\s+[\w\s\.,]+\d{5}(-\d{4})?/i, // Simple: number + words + zip
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i,
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*/i // Without zip for partial addresses
                             ];
-                            
-                            for (const pattern of patterns) {
-                                const match = message.match(pattern);
+
+                            for (const pattern of addressPatterns) {
+                                const match = latestMessage.match(pattern);
                                 if (match) {
                                     deliveryAddress = match[0].trim();
-                                    console.log('Found address with pattern: "' + deliveryAddress + '"');
+                                    console.log('Found address: "' + deliveryAddress + '"');
                                     break;
                                 }
                             }
-                            
-                            if (deliveryAddress) break;
+
+                            // Fallback: if message contains number and zip, use the whole message
+                            if (!deliveryAddress && /\d/.test(latestMessage) && /\d{5}/.test(latestMessage)) {
+                                deliveryAddress = latestMessage.trim();
+                                console.log('Using full message as address: "' + deliveryAddress + '"');
+                            }
                         }
                     }
-                    
+
                     if (!restaurant.delivery_enabled) {
                         result = {
                             valid: false,
@@ -1280,7 +1468,23 @@ TIMING RULES:
                         };
                         break;
                     }
-                    
+
+                    // Detect if this looks like a name instead of an address
+                    const possibleName = /^[A-Za-z]+(\s+[A-Za-z]+)*\.?$/.test(deliveryAddress?.trim() || '');
+                    const hasNumber = /\d/.test(deliveryAddress || '');
+
+                    if (possibleName && !hasNumber) {
+                        console.log('Input appears to be a name, not an address:', deliveryAddress);
+                        result = {
+                            valid: false,
+                            message: 'I need your delivery address.',
+                            address: '',
+                            needs_address: true,
+                            instruction: 'Customer provided their name instead of address. Ask for their delivery address.'
+                        };
+                        break;
+                    }
+
                     if (!deliveryAddress || deliveryAddress.trim().length < 10) {
                         console.log('No valid address found in conversation');
                         result = {
@@ -1292,7 +1496,7 @@ TIMING RULES:
                         };
                         break;
                     }
-                    
+
                     console.log('Validating extracted address:', deliveryAddress);
                     console.log('Address validation details:', {
                         hasStreetNumber: /^\d+/.test(deliveryAddress.trim()),
@@ -1300,12 +1504,17 @@ TIMING RULES:
                         hasFiveDigitZip: /\b\d{5}(-\d{4})?\b/.test(deliveryAddress),
                         restaurant_delivery_enabled: restaurant.delivery_enabled
                     });
+                    console.log('About to call validation edge function with:', {
+                        address: deliveryAddress.trim(),
+                        restaurant_id: restaurant.id,
+                        delivery_enabled: restaurant.delivery_enabled
+                    });
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
-                    
+
                     if (validationResult.valid) {
                         result = {
                             ...validationResult,
-                            instruction: 'SUCCESS! Address is valid for delivery. Now ask "What would you like to order?" and wait for customer to specify their food items.',
+                            instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. IMMEDIATELY say "Great! Your address is within our delivery area. What would you like to order?" Do NOT ask for the address again. Proceed directly to taking the food order.',
                             status: 'APPROVED',
                             confirmed_address: deliveryAddress,
                             proceed_to_order: true
@@ -1320,21 +1529,21 @@ TIMING RULES:
 
                 case 'cancel_order':
                     let cancelOrderId = parsedArgs.order_id;
-                    
+
                     if (!cancelOrderId && recentOrders?.length > 0) {
                         if (recentOrders[0].status === 'pending') {
                             cancelOrderId = recentOrders[0].id;
                         }
                     }
-                    
+
                     if (!cancelOrderId) {
-                        result = { 
+                        result = {
                             error: 'No pending order ID provided. Only pending orders can be cancelled.',
                             success: false
                         };
                         break;
                     }
-                    
+
                     const cancelResult = await cancelOrder(cancelOrderId, parsedArgs.reason);
                     result = {
                         success: !!cancelResult,
@@ -1345,26 +1554,26 @@ TIMING RULES:
 
                 case 'update_order':
                     let orderId = parsedArgs.order_id;
-                    
+
                     if (!orderId && recentOrders?.length > 0) {
                         if (recentOrders[0].status === 'pending') {
                             orderId = recentOrders[0].id;
                         }
                     }
-                    
+
                     if (!orderId) {
-                        result = { 
+                        result = {
                             error: 'No pending order ID provided. Only pending orders can be modified.',
                             success: false
                         };
                         break;
                     }
-                    
+
                     const updateResult = await updateOrder(orderId, {
                         modifications: parsedArgs.modifications,
                         new_total: parsedArgs.new_total
                     });
-                    
+
                     result = {
                         success: !!updateResult,
                         message: updateResult ? 'Order updated successfully' : 'Failed to update order',
@@ -1379,30 +1588,30 @@ TIMING RULES:
                     let custMessageContent = parsedArgs.message_content || '';
                     let custSubject = parsedArgs.subject || 'Customer Message';
                     let custPriority = parsedArgs.priority || 'normal';
-                    
+
                     if (!custMessageContent || custMessageContent.trim().length === 0) {
                         const recentCustomerMessages = conversationTranscript
                             .filter(msg => msg.speaker === 'Customer')
                             .slice(-3)
                             .map(msg => msg.text)
                             .join(' ');
-                        
+
                         custMessageContent = recentCustomerMessages || 'Customer requested to leave a message';
                         console.log('Extracted message content from conversation:', custMessageContent);
-                        
-                        if (custMessageContent.toLowerCase().includes('call me back') || 
+
+                        if (custMessageContent.toLowerCase().includes('call me back') ||
                             custMessageContent.toLowerCase().includes('call back') ||
                             (custMessageContent.toLowerCase().includes('have') && custMessageContent.toLowerCase().includes('call'))) {
                             custSubject = 'Owner Callback Request';
                             custPriority = 'normal';
                         }
                     }
-                    
+
                     if (!parsedArgs.customer_name && conversationTranscript.length > 0) {
                         const conversationText = conversationTranscript
                             .map(msg => msg.text)
                             .join(' ');
-                        
+
                         const nameMatch = conversationText.match(/Customer Name:\s*([^,\n]+)|my name is\s+(\w+)|I'm\s+(\w+)|this is\s+(\w+)/i);
                         if (nameMatch) {
                             custName = (nameMatch[1] || nameMatch[2] || nameMatch[3] || nameMatch[4]).trim();
@@ -1429,7 +1638,7 @@ TIMING RULES:
                     };
 
                     const messageResult = await createCustomerMessage(customerMessageData);
-                    
+
                     if (messageResult) {
                         result = {
                             success: true,
@@ -1446,7 +1655,7 @@ TIMING RULES:
 
                 case 'send_message_to_restaurant':
                     const restMsgContent = parsedArgs.message_content;
-                    
+
                     if (!restMsgContent) {
                         result = {
                             success: false,
@@ -1497,24 +1706,29 @@ TIMING RULES:
                         output: JSON.stringify(result)
                     }
                 }));
-                
+
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        openaiWs.send(JSON.stringify({ type: 'response.create' }));
+                        openaiWs.send(JSON.stringify({
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text']
+                            }
+                        }));
                     }
                 }, 200);
             }
 
         } catch (error) {
             console.error('Error handling function call:', error);
-            
+
             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                 openaiWs.send(JSON.stringify({
                     type: 'conversation.item.create',
                     item: {
                         type: 'function_call_output',
                         call_id: functionCall.call_id || 'unknown',
-                        output: JSON.stringify({ 
+                        output: JSON.stringify({
                             error: 'Function execution failed: ' + error.message,
                             success: false
                         })
@@ -1540,39 +1754,39 @@ TIMING RULES:
                 console.log('Order already processed, skipping...');
                 return;
             }
-            
+
             const hasOrderConfirmed = transcript.includes('ORDER_CONFIRMED:');
             const hasOrderEnd = transcript.includes('ORDER_END');
-            
+
             if (!hasOrderConfirmed || !hasOrderEnd) {
                 console.log('Order format not found in transcript');
                 return;
             }
-            
+
             orderProcessed = true;
             console.log('Processing NEW order from transcript...');
-            
+
             const orderSection = transcript.substring(
                 transcript.indexOf('ORDER_CONFIRMED:') + 'ORDER_CONFIRMED:'.length,
                 transcript.indexOf('ORDER_END')
             ).trim();
-            
+
             let customerName = '';
             let items = '';
             let orderType = 'pickup';
             let deliveryAddress = null;
             let specialInstructions = '';
             let totalAmount = 0;
-            
+
             const lines = orderSection.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-            
+
             for (const line of lines) {
                 const colonIndex = line.indexOf(':');
                 if (colonIndex === -1) continue;
-                
+
                 const key = line.substring(0, colonIndex).trim().toLowerCase();
                 const value = line.substring(colonIndex + 1).trim();
-                
+
                 if (key.includes('customer name')) {
                     customerName = value;
                 } else if (key.includes('order type')) {
@@ -1594,30 +1808,30 @@ TIMING RULES:
                     }
                 }
             }
-            
+
             // Validate required fields
             if (!customerName || customerName === 'Unknown Customer' || customerName === '[N/A]' || customerName.includes('[')) {
                 console.log('Order processing failed: Missing or invalid customer name:', customerName);
                 orderProcessed = false;
                 return;
             }
-            
+
             if (!items || items.includes('[') || items.toLowerCase().includes('please let me know')) {
                 console.log('Order processing failed: Missing or incomplete items');
                 orderProcessed = false;
                 return;
             }
-            
+
             if (orderType === 'delivery' && !deliveryAddress) {
                 console.log('Order processing failed: Missing delivery address for delivery order');
                 orderProcessed = false;
                 return;
             }
-            
+
             const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
-            
+
             const orderData = {
-                restaurant_phone: restaurant.phone_number,
+                restaurant_id: restaurant.id,
                 customer_phone: customerPhone,
                 customer_name: customerName,
                 total_amount: totalAmount || 0,
@@ -1625,27 +1839,29 @@ TIMING RULES:
                 delivery_address: deliveryAddress,
                 order_details: items,
                 special_instructions: specialInstructions || '',
-                pickup_time: timing.readyTime?.toISOString()
+                ready_time: timing.readyTimeString,
+                estimated_ready_at: timing.readyTime?.toISOString(),
+                call_sid: callSid
             };
 
             console.log('Creating order with data:', orderData);
-            
+
             const order = await createOrder(orderData);
             if (order) {
                 console.log('NEW order saved successfully with ID:', order.id);
-                
+
                 // Store order ID for final call log
                 if (callSid && global.pendingCallData?.[callSid]) {
                     global.pendingCallData[callSid].order_id = order.id;
                 }
-                
+
                 // Send timing confirmation message to AI after successful order creation
                 setTimeout(() => {
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        const timingMessage = orderType === 'delivery' 
+                        const timingMessage = orderType === 'delivery'
                             ? 'Your order should arrive within the next ' + timing.totalMinutes + ' minutes.'
                             : 'Your pickup order will be ready in about ' + timing.totalMinutes + ' minutes.';
-                        
+
                         openaiWs.send(JSON.stringify({
                             type: 'response.create',
                             response: {
@@ -1655,7 +1871,7 @@ TIMING RULES:
                         }));
                     }
                 }, 1000);
-                
+
             } else {
                 console.log('Order creation failed');
                 orderProcessed = false;
@@ -1677,31 +1893,31 @@ TIMING RULES:
             }, 1000);
         }
     }
-    
+
     // Handle WebSocket messages from Twilio
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            
+
             switch (data.event) {
                 case 'connected':
                     console.log('Twilio connected');
                     break;
-                    
+
                 case 'start':
                     streamSid = data.start.streamSid;
                     const calledNumber = data.start.customParameters?.Called || data.start.customParameters?.To;
                     const fromNumber = data.start.customParameters?.From || data.start.customParameters?.Caller;
                     const callId = data.start.customParameters?.CallSid || data.start.callSid;
-                    
+
                     console.log('Stream started:', streamSid);
                     console.log('Called number:', calledNumber);
                     console.log('From number (caller ID):', fromNumber);
                     console.log('Call ID:', callId);
-                    
+
                     initializeOpenAI(calledNumber, fromNumber, callId);
                     break;
-                    
+
                 case 'media':
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                         openaiWs.send(JSON.stringify({
@@ -1710,7 +1926,7 @@ TIMING RULES:
                         }));
                     }
                     break;
-                    
+
                 case 'stop':
                     console.log('Stream stopped');
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1730,23 +1946,23 @@ TIMING RULES:
             }, 1000);
         }
     });
-    
+
     // WebSocket close handling
     ws.on('close', async () => {
         console.log('WebSocket connection closed');
-        
+
         if (anythingElseTimeout) {
             clearTimeout(anythingElseTimeout);
             anythingElseTimeout = null;
         }
-        
+
         const callEndTime = new Date();
         const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
         const callDuration = Math.round(baseDuration + 5.5); // FIXED: Convert to integer for database
-        
+
         if (callSid) {
             const initialCallData = global.pendingCallData?.[callSid] || {};
-            
+
             const completeCallData = {
                 call_sid: callSid,
                 restaurant_id: restaurant?.id || initialCallData.restaurant_id || null,
@@ -1790,26 +2006,51 @@ TIMING RULES:
             } catch (error) {
                 console.error('Call log creation error:', error);
             }
-            
+
             if (global.pendingCallData?.[callSid]) {
                 delete global.pendingCallData[callSid];
             }
-            
+
             console.log('Call completed with intent-based function calling. Duration: ' + callDuration + ' seconds');
         }
-        
+
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }
     });
-    
+
+    // Enhanced Twilio WebSocket error handling for errors 11750 & 31920
     ws.on('error', async (error) => {
-        console.error('Twilio WebSocket error:', error);
-        if (callSid) {
-            await hangup(callSid, {
-                message: 'We are experiencing technical difficulties. Please try calling again.',
-                reason: 'websocket_error'
-            });
+        console.error('❌ Twilio WebSocket error:', error);
+        console.error('🚨 Error details:', {
+            message: error.message,
+            code: error.code,
+            type: error.type,
+            callSid: callSid
+        });
+
+        // Handle specific Twilio errors
+        if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND') {
+            console.error('🔴 Network connectivity issue - Error 11750 likely');
+        }
+        if (error.message && error.message.includes('TLS')) {
+            console.error('🔴 TLS/SSL handshake failed - Error 31920 likely');
+        }
+
+        setTimeout(async () => {
+            if (callSid) {
+                await hangup(callSid, {
+                    message: 'Connection issue. Please try calling again.',
+                    reason: 'twilio_websocket_error'
+                });
+            }
+        }, 500);
+    });
+
+    ws.on('close', (code, reason) => {
+        console.log('🔌 Twilio WebSocket closed:', { code, reason: reason?.toString() });
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.close();
         }
     });
 });
@@ -1825,7 +2066,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
         console.error('Server failed to start:', error);
         process.exit(1);
     }
-    
+
     console.log('🚀 Restaurant AI System FIXED - Twilio Error 11205 Resolved');
     console.log('📞 Server running on port ' + PORT);
     console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
@@ -1836,10 +2077,10 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('');
     console.log('✅ MIGRATION STATUS: READY');
     console.log('🎯 INTENT-BASED: Natural conversation flow with function calling');
-    console.log('🔧 EDGE FUNCTIONS: All database operations preserved');  
+    console.log('🔧 EDGE FUNCTIONS: All database operations preserved');
     console.log('💬 MESSAGE SYSTEM: Customer messages for staff requests');
     console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
-    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with 25% faster speech');
+    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
     console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('');
     console.log('✨ Server ready for production traffic - no more Error 11205!');
@@ -1864,7 +2105,7 @@ process.on('SIGTERM', () => {
 });
 
 process.on('SIGINT', () => {
-    console.log('Received SIGINT, shutting down gracefully');  
+    console.log('Received SIGINT, shutting down gracefully');
     server.close(() => {
         console.log('Server closed');
         process.exit(0);
