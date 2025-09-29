@@ -712,6 +712,8 @@ wss.on('connection', (ws, _req) => {
     let callStartTime = new Date();
     let conversationTranscript = [];
     let orderProcessed = false;
+    let addressValidated = false;
+    let validatedDeliveryAddress = null;
     let recentOrders = [];
     let anythingElseTimeout = null;
 
@@ -1459,6 +1461,19 @@ TIMING RULES:
                     break;
 
                 case 'validate_delivery_address':
+                    // Check if address is already validated to prevent duplicates
+                    if (addressValidated && validatedDeliveryAddress) {
+                        console.log('Address already validated:', validatedDeliveryAddress);
+                        result = {
+                            valid: true,
+                            message: 'Address already validated successfully',
+                            address: validatedDeliveryAddress,
+                            status: 'ALREADY_APPROVED',
+                            instruction: 'Address was previously validated. Do not ask for address again. Proceed with taking the food order.'
+                        };
+                        break;
+                    }
+
                     let deliveryAddress = parsedArgs.address;
 
                     // If no address provided directly, extract from the most recent customer messages
@@ -1565,6 +1580,11 @@ TIMING RULES:
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
 
                     if (validationResult.valid) {
+                        // Mark address as validated to prevent duplicate requests
+                        addressValidated = true;
+                        validatedDeliveryAddress = deliveryAddress;
+                        console.log('Address validation successful - marked as validated:', deliveryAddress);
+
                         result = {
                             ...validationResult,
                             instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. IMMEDIATELY say "Great! Your address is within our delivery area. What would you like to order?" Do NOT ask for the address again. Proceed directly to taking the food order.',
@@ -1868,6 +1888,35 @@ TIMING RULES:
                 }
             }
 
+            // If items are missing from ORDER_CONFIRMED format, try to extract from conversation
+            if (!items || items.includes('[') || items.toLowerCase().includes('please let me know')) {
+                console.log('Items missing from ORDER_CONFIRMED, attempting to extract from conversation...');
+
+                // Look for food items mentioned by customer in conversation
+                const customerMessages = conversationTranscript
+                    .filter(msg => msg.speaker === 'Customer')
+                    .map(msg => msg.text.toLowerCase());
+
+                const foodKeywords = ['pizza', 'pepperoni', 'cheese', 'large', 'small', 'medium', 'pasta', 'salad', 'wings', 'breadsticks', 'cappelloni'];
+                const extractedItems = [];
+
+                for (const message of customerMessages) {
+                    for (const keyword of foodKeywords) {
+                        if (message.includes(keyword)) {
+                            extractedItems.push(message);
+                            break;
+                        }
+                    }
+                }
+
+                if (extractedItems.length > 0) {
+                    items = extractedItems.join(', ');
+                    console.log('Extracted items from conversation:', items);
+                } else {
+                    console.log('No food items found in conversation');
+                }
+            }
+
             // Validate required fields
             if (!customerName || customerName === 'Unknown Customer' || customerName === '[N/A]' || customerName.includes('[')) {
                 console.log('Order processing failed: Missing or invalid customer name:', customerName);
@@ -1925,9 +1974,19 @@ TIMING RULES:
                             type: 'response.create',
                             response: {
                                 modalities: ['audio', 'text'],
-                                instructions: 'Say exactly: "' + timingMessage + '"'
+                                instructions: 'Say exactly: "' + timingMessage + ' Thank you for choosing us! Have a great day!"'
                             }
                         }));
+
+                        // Schedule hangup after delivery message is spoken (allow time for speech)
+                        setTimeout(async () => {
+                            console.log('Order processing complete - hanging up gracefully');
+                            await hangup(callSid, {
+                                message: 'Order completed successfully',
+                                reason: 'order_completed',
+                                method: 'graceful'
+                            });
+                        }, 4000); // 4 seconds to allow full message delivery
                     }
                 }, 1000);
 
