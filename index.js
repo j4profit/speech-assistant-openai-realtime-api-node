@@ -803,7 +803,11 @@ wss.on('connection', (ws, _req) => {
             // Modern system instructions with intent-based approach
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 
-🚨 CRITICAL ADDRESS RULE: When customer provides ANY address with numbers and street names, IMMEDIATELY call validate_delivery_address function. NEVER say "seems there's an issue" or ask for clarification first.
+🚨 MANDATORY ADDRESS VALIDATION:
+- When customer provides ANY address containing numbers and words, you MUST call validate_delivery_address function IMMEDIATELY
+- NEVER proceed to ordering without validating delivery address first
+- NEVER say "What would you like to order" until address validation succeeds
+- Do NOT ask for clarification or mention issues - just call the function
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
@@ -832,7 +836,9 @@ For delivery orders, follow this EXACT sequence:
 1. Ask for delivery address ONLY ONCE: "What's your delivery address?"
 2. When customer provides ANY address that contains numbers and words, IMMEDIATELY call validate_delivery_address function
 3. 🚨 CRITICAL - NEVER ASK FOR ADDRESS AGAIN after calling validation function
-4. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
+4. 🚨 CRITICAL - Do NOT proceed to "What would you like to order?" without successful address validation
+5. 🚨 CRITICAL - If customer provides address like "7805 Old Harford Road, Parkville, Maryland, 21234" you MUST call validate_delivery_address
+6. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
    - "It seems there might be an issue"
    - "seems there's an issue"
    - "It seems there was an issue"
@@ -1200,6 +1206,28 @@ TIMING RULES:
                             msg.text.toLowerCase().includes('just to confirm')
                         );
 
+                        // Auto-trigger address validation if customer provides delivery address
+                        const addressPattern = /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}/i;
+                        const isDeliveryOrder = conversationTranscript.some(msg =>
+                            msg.text.toLowerCase().includes('delivery') && msg.speaker === 'Customer'
+                        );
+                        const hasValidAddress = addressPattern.test(customerMessage);
+
+                        if (isDeliveryOrder && hasValidAddress && !addressValidated) {
+                            console.log('🏠 Address detected in delivery order - auto-triggering validation:', customerMessage);
+                            setTimeout(() => {
+                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    openaiWs.send(JSON.stringify({
+                                        type: 'response.create',
+                                        response: {
+                                            modalities: ['audio', 'text'],
+                                            instructions: 'Customer just provided a delivery address. You MUST immediately call the validate_delivery_address function with this address. Do not proceed to ordering until validation is complete.'
+                                        }
+                                    }));
+                                }
+                            }, 100);
+                        }
+
                         // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
                         if (orderCompleted && inOrderingContext && !orderProcessed) {
                             console.log('🍕 Customer indicated order completion - triggering ORDER_CONFIRMED format');
@@ -1490,9 +1518,12 @@ TIMING RULES:
                     break;
 
                 case 'validate_delivery_address':
+                    console.log('🔍 validate_delivery_address function called with args:', JSON.stringify(parsedArgs));
+                    console.log('🔍 Current state - addressValidated:', addressValidated, 'validatedDeliveryAddress:', validatedDeliveryAddress);
+
                     // Check if address is already validated to prevent duplicates
                     if (addressValidated && validatedDeliveryAddress) {
-                        console.log('Address already validated:', validatedDeliveryAddress);
+                        console.log('✅ Address already validated:', validatedDeliveryAddress);
                         result = {
                             valid: true,
                             message: 'Address already validated successfully',
