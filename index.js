@@ -463,7 +463,7 @@ async function validateDeliveryAddress(address, restaurant) {
                              /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address) ||
                              /(old|new|north|south|east|west)\s+\w+\s+(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
         const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
-        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}\b/.test(address); // City, State pattern
+        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}/.test(address); // City, State pattern (removed word boundary at end to catch full state names)
 
         console.log('Detailed validation for address:', address);
         console.log('hasStreetNumber:', hasStreetNumber);
@@ -1390,8 +1390,8 @@ TIMING RULES:
                         const addressPatterns = [
                             // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}(-\d{4})?/i,
-                            // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD")
-                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+,\s*[A-Z]{2}/i,
+                            // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD" or "123 Main Street, Baltimore, Maryland")
+                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+,\s*[A-Za-z]{2,}/i,
                             // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+[A-Za-z]{3,}/i
                         ];
@@ -1600,7 +1600,7 @@ TIMING RULES:
                             if (validationRetryInfo && validationRetryInfo.attempts < validationRetryInfo.maxAttempts) {
                                 console.log(`🔄 Collision during validation attempt ${validationRetryInfo.attempts}, retrying in 1 second...`);
                                 setTimeout(() => {
-                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationRetryInfo) {
                                         console.log(`🔄 Retry validation attempt ${validationRetryInfo.attempts + 1}`);
                                         validationRetryInfo.attempts++;
 
@@ -1611,6 +1611,8 @@ TIMING RULES:
                                                 instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". You MUST immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT ask for address again.'
                                             }
                                         }));
+                                    } else if (!validationRetryInfo) {
+                                        console.log('🔄 Validation retry cancelled - validation already completed');
                                     }
                                 }, 1000);
                             }
@@ -1864,8 +1866,8 @@ TIMING RULES:
                             const addressPatterns = [
                                 // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i,
-                                // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD")
-                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+,\s*[A-Z]{2}/i,
+                                // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD" or "123 Main Street, Baltimore, Maryland")
+                                /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+,\s*[A-Za-z]{2,}/i,
                                 // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+[A-Za-z]{3,}/i,
                                 // Format 4: Simple number + words + zip (backup pattern)
