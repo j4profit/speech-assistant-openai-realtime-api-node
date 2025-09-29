@@ -883,6 +883,7 @@ wss.on('connection', (ws, _req) => {
     let validatedDeliveryAddress = null;
     let addressRequested = false; // Track if address has been requested to prevent duplicates
     let addressProviderAttempts = 0; // Track how many times customer provided address
+    let validationRetryInfo = null; // Track validation retry state for collision handling
     let recentOrders = [];
     let anythingElseTimeout = null;
 
@@ -1455,27 +1456,31 @@ TIMING RULES:
                             }
 
                             // Implement retry mechanism to handle response collisions
+                            let validationAttempts = 0;
+                            const maxValidationAttempts = 3;
+
                             const triggerValidation = (attempt = 1) => {
                                 setTimeout(() => {
-                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationAttempts < maxValidationAttempts) {
                                         console.log(`🔄 Attempting to trigger validation (attempt ${attempt})`);
-                                        try {
-                                            openaiWs.send(JSON.stringify({
-                                                type: 'response.create',
-                                                response: {
-                                                    modalities: ['audio', 'text'],
-                                                    instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function. DO NOT ask for address again - they already provided it.'
-                                                }
-                                            }));
-                                        } catch (error) {
-                                            console.log('⚠️ Auto-trigger failed (attempt ' + attempt + '):', error.message);
-                                            if (attempt < 3 && error.message.includes('conversation_already_has_active_response')) {
-                                                console.log('🔄 Retrying auto-trigger in ' + (attempt * 500) + 'ms...');
-                                                triggerValidation(attempt + 1);
+                                        validationAttempts++;
+
+                                        // Store attempt info for collision handling
+                                        validationRetryInfo = {
+                                            address: customerMessage,
+                                            attempts: validationAttempts,
+                                            maxAttempts: maxValidationAttempts
+                                        };
+
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['audio', 'text'],
+                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". You MUST immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT ask for address again - they already provided it.'
                                             }
-                                        }
+                                        }));
                                     }
-                                }, attempt === 1 ? 50 : attempt * 300);
+                                }, attempt === 1 ? 100 : attempt * 500);
                             };
 
                             triggerValidation();
@@ -1590,6 +1595,25 @@ TIMING RULES:
                         console.error('OpenAI error:', response.error);
                         if (response.error?.code === 'conversation_already_has_active_response') {
                             console.log('Response collision detected - ignoring (these are expected)');
+
+                            // Check if this was a validation retry attempt
+                            if (validationRetryInfo && validationRetryInfo.attempts < validationRetryInfo.maxAttempts) {
+                                console.log(`🔄 Collision during validation attempt ${validationRetryInfo.attempts}, retrying in 1 second...`);
+                                setTimeout(() => {
+                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                        console.log(`🔄 Retry validation attempt ${validationRetryInfo.attempts + 1}`);
+                                        validationRetryInfo.attempts++;
+
+                                        openaiWs.send(JSON.stringify({
+                                            type: 'response.create',
+                                            response: {
+                                                modalities: ['audio', 'text'],
+                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". You MUST immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT ask for address again.'
+                                            }
+                                        }));
+                                    }
+                                }, 1000);
+                            }
                         } else {
                             setTimeout(async () => {
                                 if (callSid) {
@@ -1922,6 +1946,9 @@ TIMING RULES:
                         validatedDeliveryAddress = deliveryAddress;
                         console.log('Address validation successful - marked as validated:', deliveryAddress);
 
+                        // Clear retry info since validation succeeded
+                        validationRetryInfo = null;
+
                         result = {
                             ...validationResult,
                             instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. IMMEDIATELY say "Great! Your address is within our delivery area. What would you like to order?" Do NOT ask for the address again. Proceed directly to taking the food order.',
@@ -1932,6 +1959,10 @@ TIMING RULES:
                     } else {
                         // For invalid addresses, don't reset addressValidated to prevent asking again
                         console.log('Address validation failed but keeping addressValidated=true to prevent duplicate requests');
+
+                        // Clear retry info since validation completed (failed)
+                        validationRetryInfo = null;
+
                         result = {
                             ...validationResult,
                             instruction: 'Address validation failed. Inform customer we cannot deliver to this area and suggest pickup instead. Do NOT ask for address again.'
