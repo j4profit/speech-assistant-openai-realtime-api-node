@@ -1156,9 +1156,9 @@ TIMING RULES:
                     input_audio_transcription: { model: 'whisper-1' },
                     turn_detection: {
                         type: 'server_vad',
-                        threshold: 0.6,
+                        threshold: 0.8,
                         prefix_padding_ms: 200,
-                        silence_duration_ms: 1200
+                        silence_duration_ms: 500
                     },
                     temperature: 0.6,
                     max_response_output_tokens: 400,
