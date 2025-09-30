@@ -215,8 +215,8 @@ async function hangup(callSid, options = {}) {
             let finalMessage = message;
             if (!finalMessage) {
                 finalMessage = restaurant ?
-                    'Thank you for calling ' + restaurant.name + '. Have a great day!' :
-                    'Thank you for calling. Have a great day!';
+                    'Your call was prcoessed by ring 2 tech.  Thank you for calling ' + restaurant.name + '. Have a great day!' :
+                    'Your call was prcoessed by ring 2 tech.  Thank you for calling. Have a great day!';
             }
 
             // Store the TwiML for the hangup endpoint
@@ -264,7 +264,7 @@ async function hangup(callSid, options = {}) {
 // Hangup TwiML endpoint
 app.post('/hangup-twiml', (req, res) => {
     const callSid = req.query.call_sid || req.body.CallSid;
-    let message = 'Thank you for calling. Goodbye!';
+    let message = 'Your call was prcoessed by ring 2 tech. Thank you for calling. Goodbye!';
 
     if (global.pendingHangupTwiML?.[callSid]) {
         message = global.pendingHangupTwiML[callSid].message;
