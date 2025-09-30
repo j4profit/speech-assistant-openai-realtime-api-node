@@ -1137,6 +1137,7 @@ wss.on('connection', (ws, _req) => {
     let validationRetryInfo = null;
     let recentOrders = [];
     let anythingElseTimeout = null;
+    let extractedAddressForValidation = null; // Store extracted address directly
 
     // Initialize OpenAI with enhanced address validation
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -1540,7 +1541,11 @@ ORDER_END
                                 }
                             }
                             
+                            // Store the extracted address for the function to use
+                            extractedAddressForValidation = extractedAddress;
+                            
                             console.log('🏠 Extracted address for validation:', extractedAddress);
+                            console.log('🏠 Stored address in extractedAddressForValidation:', extractedAddressForValidation);
                             
                             // Cancel any active response to prevent conflicts
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1564,6 +1569,19 @@ ORDER_END
                                             }]
                                         }
                                     }));
+
+                                    // Also create a response that explicitly calls the function with the address
+                                    setTimeout(() => {
+                                        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                                            openaiWs.send(JSON.stringify({
+                                                type: 'response.create',
+                                                response: {
+                                                    modalities: ['audio', 'text'],
+                                                    instructions: `Say "Let me check if you're within our delivery area" then call the validate_delivery_address function with the exact address: "${extractedAddress}". The function call should use address="${extractedAddress}" as the parameter.`
+                                                }
+                                            }));
+                                        }
+                                    }, 100);
                                 }, 50);
                             }
                         }
