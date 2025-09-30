@@ -49,136 +49,30 @@ app.use(express.json());
 function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
     const message = customerMessage.toLowerCase().trim();
     
-    console.log('🔍 Analyzing message intent:', message);
+    console.log('🔍 Analyzing message intent with natural language understanding:', message);
     
-    // ❌ HARD BLOCKS - Never create messages for normal call endings
-    const normalCallEndings = [
-        'call back',
-        'call you back', 
+    // ❌ ONLY BLOCK obvious normal call endings - let AI handle everything else
+    const definiteCallEndings = [
         'i\'ll call back',
-        'let me call back',
+        'let me call back', 
         'call back later',
-        'call back in',
-        'call again',
-        'try again',
-        'call later',
         'maybe later',
-        'not right now',
-        'another time',
         'changed my mind',
         'never mind',
-        'nevermind',
-        'that\'s okay',
-        'no thanks',
-        'no thank you',
-        'think about it',
-        'let me think',
-        'decide later',
-        'not sure',
-        'maybe not',
-        'actually no'
+        'think about it'
     ];
     
-    // Check for normal call ending phrases
-    for (const phrase of normalCallEndings) {
-        if (message.includes(phrase)) {
-            console.log('🚫 Normal call ending detected:', phrase, '- NOT creating customer message');
+    // Only block if the message is CLEARLY a call ending
+    for (const phrase of definiteCallEndings) {
+        if (message.includes(phrase) && message.length < 30) { // Short messages that are clearly endings
+            console.log('🚫 Definite call ending detected:', phrase, '- NOT creating customer message');
             return false;
         }
     }
     
-    // ✅ STRONG SERVICE INDICATORS - Definitely create message
-    const strongServiceTriggers = [
-        // Explicit callback requests for issues
-        'can you have someone call me',
-        'have someone call me back',
-        'manager call me',
-        'owner call me',
-        'call me about',
-        'need someone to call',
-        'someone needs to call',
-        
-        // Complaints and issues
-        'complaint',
-        'complain',
-        'problem with',
-        'issue with',
-        'wrong with',
-        'messed up',
-        'screwed up',
-        'terrible',
-        'awful',
-        'horrible',
-        'disgusting',
-        'cold food',
-        'late delivery',
-        'missing items',
-        'wrong order',
-        'bad service',
-        'rude',
-        
-        // Management requests
-        'speak to manager',
-        'talk to manager',
-        'speak to owner',
-        'talk to owner',
-        'file a complaint',
-        'leave a message',
-        'take a message',
-        'tell them',
-        'let them know',
-        
-        // Payment/refund issues
-        'refund',
-        'charge',
-        'charged',
-        'money back',
-        'overcharged',
-        'billing',
-        'credit card',
-        'didn\'t order',
-        'cancel my card',
-        
-        // Serious service requests
-        'catering',
-        'large order',
-        'party order',
-        'special event',
-        'dietary restriction',
-        'allergy',
-        'allergic',
-        'kosher',
-        'halal',
-        'vegan',
-        'gluten free'
-    ];
-    
-    // Check for strong service triggers
-    for (const trigger of strongServiceTriggers) {
-        if (message.includes(trigger)) {
-            console.log('✅ Strong service trigger detected:', trigger, '- creating customer message');
-            return true;
-        }
-    }
-    
-    // ❌ Additional context check - Don't create messages during normal ordering
-    const isInOrderingFlow = conversationHistory.some(msg => 
-        msg.speaker === 'AI' && (
-            msg.text.includes('What would you like to order') ||
-            msg.text.includes('delivery area') ||
-            msg.text.includes('pickup or delivery') ||
-            msg.text.includes('ready in') ||
-            msg.text.includes('ORDER_CONFIRMED')
-        )
-    );
-    
-    if (isInOrderingFlow) {
-        console.log('🚫 In normal ordering flow - NOT creating message unless strong trigger present');
-        return false;
-    }
-    
-    console.log('🤔 Ambiguous case - letting AI decide based on context');
-    return false; // Default to NOT creating messages unless clear intent
+    // ✅ LET AI DECIDE - Trust natural language understanding for all other cases
+    console.log('✅ Allowing AI to use natural language understanding to determine message intent');
+    return true; // Let the AI decide based on context and natural understanding
 }
 
 // =============================================================================
@@ -215,8 +109,8 @@ async function hangup(callSid, options = {}) {
             let finalMessage = message;
             if (!finalMessage) {
                 finalMessage = restaurant ?
-                    'Your call was prcoessed by ring 2 tech.  Thank you for calling ' + restaurant.name + '. Have a great day!' :
-                    'Your call was prcoessed by ring 2 tech.  Thank you for calling. Have a great day!';
+                    'Thank you for calling ' + restaurant.name + '. Have a great day!' :
+                    'Thank you for calling. Have a great day!';
             }
 
             // Store the TwiML for the hangup endpoint
@@ -264,7 +158,7 @@ async function hangup(callSid, options = {}) {
 // Hangup TwiML endpoint
 app.post('/hangup-twiml', (req, res) => {
     const callSid = req.query.call_sid || req.body.CallSid;
-    let message = 'Your call was prcoessed by ring 2 tech. Thank you for calling. Goodbye!';
+    let message = 'Thank you for calling. Goodbye!';
 
     if (global.pendingHangupTwiML?.[callSid]) {
         message = global.pendingHangupTwiML[callSid].message;
@@ -1095,23 +989,24 @@ wss.on('connection', (ws, _req) => {
 - DO NOT say "I need your delivery address" if customer already gave one
 - DO NOT ask for "complete address" or "street number and name" - just validate what they gave you
 
-**🚨 CRITICAL MESSAGE CREATION RULES:**
-ONLY call create_customer_message function for ACTUAL customer service issues:
+**🚨 NATURAL LANGUAGE MESSAGE CREATION:**
+Use your natural language understanding to determine when customers want to leave messages. Trust your intelligence to distinguish between:
 
-✅ DO create message for:
-- Complaints: "The food was cold", "Wrong order", "Bad service"
-- Payment issues: "I was overcharged", "Need a refund"
-- Explicit callback requests: "Have someone call me back about my order"
-- Management requests: "I need to speak to the manager"
-- Special requests: "Need catering information", "Large party order"
+✅ CREATE MESSAGE when customers want to:
+- Leave complaints or feedback for staff
+- Request callbacks about issues
+- Ask for manager/owner contact
+- Report problems with orders/service
+- Make special requests requiring staff attention
+- Ask questions that need restaurant staff to answer
+- Leave any message they want the restaurant to receive
 
-❌ NEVER create message for:
-- Normal call endings: "I'll call back later", "Let me think about it"
-- Simple postponements: "Maybe another time", "Not right now"
-- Mind changes: "Changed my mind", "Never mind", "Actually no"
-- Polite departures: "Thanks anyway", "That's okay"
+❌ DON'T create message ONLY for obvious call endings:
+- "I'll call back later" (short, clearly ending call)
+- "Let me think about it" (clearly postponing)
+- "Never mind" (clearly canceling)
 
-🎯 Key test: Is the customer asking for staff help with a problem, or just ending the call normally?
+🎯 Use natural language understanding: If a customer sounds like they want to communicate something to the restaurant staff, create the message. Be helpful and inclusive rather than restrictive.
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
@@ -1323,18 +1218,18 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "create_customer_message",
-                            description: "CRITICAL: ONLY call this for ACTUAL customer service issues - complaints, payment problems, explicit callback requests, or management requests. NEVER call for normal call endings like 'I'll call back later' or 'changed my mind'. Only for real problems requiring staff attention.",
+                            description: "Save customer messages, complaints, questions, callback requests, or any communication the customer wants the restaurant staff to receive. Use your natural language understanding to determine when customers want to leave messages. Be helpful and inclusive - if a customer sounds like they want to communicate something to restaurant staff, create the message.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
-                                    message_content: { type: "string", description: "The customer's actual complaint, issue, or service request" },
+                                    message_content: { type: "string", description: "The customer's message, request, question, or concern" },
                                     priority: {
                                         type: "string",
                                         enum: ["high", "medium", "normal"],
-                                        description: "Priority: high for urgent issues, normal for general complaints"
+                                        description: "Priority: high for urgent issues, normal for general messages"
                                     },
-                                    subject: { type: "string", description: "Brief subject like 'Customer Complaint' or 'Billing Issue'" }
+                                    subject: { type: "string", description: "Brief subject like 'Customer Question', 'Callback Request', or 'General Message'" }
                                 },
                                 required: ["customer_name", "message_content", "priority", "subject"]
                             }
@@ -2530,20 +2425,20 @@ TIMING RULES:
                     global.pendingCallData[callSid].order_id = order.id;
                 }
 
-// Send SHORT confirmation message to AI after successful order creation
-setTimeout(() => {
-    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-        const shortMessage = orderType === 'delivery'
-            ? `Thanks ${customerName}, your delivery order will be delivered within ${timing.totalMinutes} minutes.`
-            : `Thanks ${customerName}, your pickup order will be ready in ${timing.totalMinutes} minutes.`;
+                // Send timing confirmation message to AI after successful order creation
+                setTimeout(() => {
+                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                        const timingMessage = orderType === 'delivery'
+                            ? 'Your order should arrive within the next ' + timing.totalMinutes + ' minutes.'
+                            : 'Your pickup order will be ready in about ' + timing.totalMinutes + ' minutes.';
 
-        openaiWs.send(JSON.stringify({
-            type: 'response.create',
-            response: {
-                modalities: ['audio', 'text'],
-                instructions: 'Say exactly: "' + shortMessage + '"'
-            }
-        }));
+                        openaiWs.send(JSON.stringify({
+                            type: 'response.create',
+                            response: {
+                                modalities: ['audio', 'text'],
+                                instructions: 'Say exactly: "' + timingMessage + ' Thank you for choosing us! Have a great day!"'
+                            }
+                        }));
 
                         // Schedule hangup after delivery message is spoken (allow time for speech)
                         setTimeout(async () => {
