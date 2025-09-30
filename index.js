@@ -645,7 +645,7 @@ async function createOrder(orderData) {
 
 async function createCustomerMessage(messageData) {
     try {
-        const response = await fetch(SUPABASE_URL + '/functions/v1/create-message', {
+        const response = await fetch('https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/create-message', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -990,23 +990,24 @@ wss.on('connection', (ws, _req) => {
 - DO NOT ask for "complete address" or "street number and name" - just validate what they gave you
 
 **🚨 NATURAL LANGUAGE MESSAGE CREATION:**
-Use your natural language understanding to determine when customers want to leave messages. Trust your intelligence to distinguish between:
+When customers want to leave messages, you MUST call the create_customer_message function:
 
-✅ CREATE MESSAGE when customers want to:
-- Leave complaints or feedback for staff
-- Request callbacks about issues
+✅ ALWAYS CALL create_customer_message function when customers:
+- Want to leave complaints or feedback for staff
+- Request callbacks about issues  
 - Ask for manager/owner contact
 - Report problems with orders/service
 - Make special requests requiring staff attention
 - Ask questions that need restaurant staff to answer
-- Leave any message they want the restaurant to receive
+- Say things like "I want to leave a message", "call me back", "I have a problem"
+- Express any intent to communicate with restaurant staff
 
-❌ DON'T create message ONLY for obvious call endings:
-- "I'll call back later" (short, clearly ending call)
-- "Let me think about it" (clearly postponing)
+🎯 CRITICAL: Don't just SAY you'll create a message - actually CALL the create_customer_message function immediately when the customer expresses this intent.
+
+❌ ONLY avoid calling the function for obvious call endings:
+- "I'll call back later" (clearly ending call)
 - "Never mind" (clearly canceling)
-
-🎯 Use natural language understanding: If a customer sounds like they want to communicate something to the restaurant staff, create the message. Be helpful and inclusive rather than restrictive.
+- "Let me think about it" (clearly postponing)
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
@@ -1088,12 +1089,14 @@ ${!restaurant.delivery_enabled ? 'IMPORTANT: This restaurant does NOT offer deli
 ${menuText}
 
 **INTENT-BASED FUNCTION CALLING:**
-Instead of keyword matching, you naturally understand customer intent and call appropriate functions:
+You must actually CALL the functions when customers express these intents:
 1. **When customer wants to modify/cancel existing orders** → call search_recent_orders
 2. **When customer provides ANY delivery address (with numbers and street names)** → call validate_delivery_address
-3. **When customer has ACTUAL service issues/complaints** → call create_customer_message (NOT for normal call endings)
+3. **When customer wants to leave ANY message for staff** → IMMEDIATELY call create_customer_message
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders
+
+🚨 CRITICAL: When customer says "I want to leave a message", "call me back", "I have a problem", or similar - don't just SAY you'll create a message, actually CALL the create_customer_message function immediately!
 
 IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY address with numbers and street names - let the validation function determine if it's complete.
 
