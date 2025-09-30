@@ -1,5 +1,5 @@
-// Restaurant AI Ordering System - FIXED: Customer Message Intent Detection
-// Updated for OpenAI Migration with Proper Message Creation Logic
+// Restaurant AI Ordering System - UPDATED: Address Retry System
+// Updated for OpenAI Migration with Address Validation Retry Support
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -251,6 +251,7 @@ app.get('/health', (_req, res) => {
         migration_status: 'updated_for_modern_openai_apis',
         architecture: 'twilio_websocket_with_intent_based_functions',
         message_intent_fixed: true,
+        address_retry_enabled: true,
         last_health_check: new Date().toISOString()
     };
 
@@ -263,13 +264,13 @@ app.get('/ping', (_req, res) => {
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Restaurant AI Ordering System - FIXED: Message Intent Detection',
+        message: 'Restaurant AI Ordering System - UPDATED: Address Retry System',
         status: 'running',
         port: process.env.PORT || 3000,
         websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
         migration_ready: true,
-        message_intent_fixed: true
+        address_retry_enabled: true
     });
 });
 
@@ -883,13 +884,13 @@ function formatMenuForAI(menuItems, restaurant) {
 }
 
 // =============================================================================
-// WEBSOCKET CONNECTION WITH FIXED MESSAGE INTENT DETECTION
+// WEBSOCKET CONNECTION WITH ADDRESS RETRY SYSTEM
 // =============================================================================
 
 wss.on('connection', (ws, _req) => {
     console.log('New WebSocket connection');
 
-    // Connection-specific variables
+    // Connection-specific variables - UPDATED WITH RETRY SYSTEM
     let openaiWs = null;
     let streamSid = null;
     let callSid = null;
@@ -902,11 +903,13 @@ wss.on('connection', (ws, _req) => {
     let validatedDeliveryAddress = null;
     let addressRequested = false;
     let addressProviderAttempts = 0;
+    let addressValidationAttempts = 0; // NEW: Track validation attempts separately
+    let maxAddressRetries = 1; // NEW: Allow one retry (2 total attempts)
     let validationRetryInfo = null;
     let recentOrders = [];
     let anythingElseTimeout = null;
 
-    // Initialize OpenAI with fixed message intent detection
+    // Initialize OpenAI with address retry system
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
 
@@ -967,27 +970,26 @@ wss.on('connection', (ws, _req) => {
             console.log('✅ Connected to OpenAI Realtime API');
             console.log('🔗 WebSocket ready for audio streaming');
 
-            // FIXED: Enhanced instructions with proper message intent detection
+            // UPDATED: Enhanced instructions with address retry support
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 
-🚨 MANDATORY ADDRESS VALIDATION:
+🚨 MANDATORY ADDRESS VALIDATION WITH RETRY SUPPORT:
 - When customer provides ANY address containing numbers and words, you MUST call validate_delivery_address function IMMEDIATELY
 - NEVER proceed to ordering without validating delivery address first
 - NEVER say "What would you like to order" until address validation succeeds
-- Do NOT ask for clarification or mention issues - just call the function
+- If validation fails on FIRST attempt, you MAY ask customer to provide address again with correction guidance
+- If validation fails on SECOND attempt, suggest pickup only
 
-🚨🚨 CRITICAL DUPLICATE PREVENTION RULES:
-- NEVER ask for delivery address more than ONCE per call
-- If customer already provided an address, DO NOT ask again under ANY circumstances
+🚨🚨 CRITICAL ADDRESS RETRY RULES:
+- Allow UP TO TWO address validation attempts per call maximum
+- If customer already provided an address, validate it first before asking for another
 - If you hear ANY address with numbers and streets, IMMEDIATELY call validate_delivery_address
-- FORBIDDEN: Asking for address multiple times, even if first attempt "failed"
-- If customer says an address, validate it - do NOT request clarification first
+- After TWO failed validation attempts, do NOT ask for address again - suggest pickup only
 
-🛑 ABSOLUTE ADDRESS REQUEST PREVENTION:
-- If conversation shows AI already asked "What's your delivery address" - NEVER ask again
-- If customer provided ANY address with numbers and street names - validate it immediately
-- DO NOT say "I need your delivery address" if customer already gave one
-- DO NOT ask for "complete address" or "street number and name" - just validate what they gave you
+🛑 ADDRESS RETRY FLOW:
+- FIRST address attempt: Customer provides address → validate → if fails, provide specific guidance and ask for corrected address
+- SECOND address attempt: Customer provides corrected address → validate → if fails, suggest pickup only
+- NO THIRD attempts allowed
 
 **🚨 NATURAL LANGUAGE MESSAGE CREATION:**
 When customers want to leave messages, you MUST call the create_customer_message function:
@@ -1031,41 +1033,20 @@ When customer responds to "Is this for pickup or delivery?":
 - If they say "delivery" → Ask for name, then follow DELIVERY ORDER FLOW
 - If unclear, ask: "Will this be for pickup or delivery?"
 
-**DELIVERY ORDER FLOW (CRITICAL - NEVER DEVIATE):**
+**DELIVERY ORDER FLOW WITH RETRY SUPPORT (CRITICAL - UPDATED):**
 For delivery orders, follow this EXACT sequence:
-1. Ask for delivery address ONLY ONCE: "What's your delivery address?"
+1. Ask for delivery address: "What's your delivery address?"
 2. When customer provides ANY address that contains numbers and words, IMMEDIATELY call validate_delivery_address function
-3. 🚨 CRITICAL - NEVER ASK FOR ADDRESS AGAIN after calling validation function
-4. 🚨 CRITICAL - Do NOT proceed to "What would you like to order?" without successful address validation
-5. 🚨 CRITICAL - If customer provides address like "7805 Old Harford Road, Parkville, Maryland, 21234" you MUST call validate_delivery_address
-6. 🚨 CRITICAL - If validation returns needs_address=true, use the exact message provided and ask for address again
-7. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
-   - "It seems there might be an issue"
-   - "seems there's an issue"
-   - "It seems there was an issue"
-   - "seems there was an issue"
-   - "address is incomplete"
-   - "Could you please confirm"
-   - "Could you please provide a complete"
-   - "I need your delivery address"
-   - "I need your delivery address with street number and name"
-   - "Could you please provide it again"
-   - "Could you please provide it"
-   - "What's your address again"
-   - "I'm having trouble validating"
-   - "Unfortunately, I'm still unable"
-   - "It seems the delivery address is not within our delivery area" (when no address was provided)
-8. 🛑 DUPLICATE ADDRESS PREVENTION CHECK:
-   - BEFORE asking for address, check if AI already asked "What's your delivery address?"
-   - If customer provided ANY address with numbers, call validate_delivery_address immediately
-   - NEVER ask for address twice - if validation fails, suggest pickup instead
-5. ALWAYS call validation function first - do NOT make your own judgment
-6. If validation returns valid=true, say: "Great! Your address is within our delivery area. What would you like to order?"
-7. 🚨 NEVER repeat address requests - ONE address request per call maximum
-8. 🚨 If customer has already provided an address (even if unclear), do NOT ask again - call validation function instead
-6. If validation returns valid=false, use the exact message from the validation function
-7. Take order details
-8. Create ORDER_CONFIRMED format
+3. 🚨 CRITICAL - If validation returns valid=true: say "Great! Your address is within our delivery area. What would you like to order?"
+4. 🚨 CRITICAL - If validation returns valid=false AND this is FIRST attempt: 
+   - Use the exact message from validation function 
+   - Add specific guidance based on the error: "Please double-check the street spelling or provide your complete address with zip code"
+   - Ask: "Could you please provide your delivery address again?"
+5. 🚨 CRITICAL - If validation returns valid=false AND this is SECOND attempt:
+   - Say: "I'm sorry, we cannot deliver to that area. Would you like to place a pickup order instead?"
+   - Do NOT ask for address again
+6. 🚨 NEVER ask for address more than TWICE total
+7. 🚨 NEVER proceed to "What would you like to order?" without successful address validation
 
 **PICKUP ORDER FLOW:**
 For pickup orders:
@@ -1259,7 +1240,7 @@ TIMING RULES:
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
 
-        // Message handling logic with FIXED function call processing
+        // Message handling logic with UPDATED function call processing for retry system
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
@@ -1424,7 +1405,7 @@ TIMING RULES:
                             msg.text.toLowerCase().includes('just to confirm')
                         );
 
-                        // Enhanced address management to prevent duplicate requests - accept multiple formats
+                        // UPDATED: Enhanced address management with retry system
                         const addressPatterns = [
                             // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}(-\d{4})?/i,
@@ -1459,9 +1440,9 @@ TIMING RULES:
                             )
                         );
 
-                        // Enhanced logging for debugging with pattern matching details
+                        // UPDATED: Enhanced logging for debugging with retry system
                         const matchedPattern = addressPatterns.findIndex(pattern => pattern.test(customerMessage));
-                        console.log('🔍 Enhanced address state check:', {
+                        console.log('🔍 Enhanced address state check (with retry):', {
                             customerMessage: customerMessage,
                             isDeliveryOrder: isDeliveryOrder,
                             hasValidAddress: hasValidAddress,
@@ -1469,7 +1450,10 @@ TIMING RULES:
                             addressValidated: addressValidated,
                             addressRequested: addressRequested,
                             addressProviderAttempts: addressProviderAttempts,
-                            aiAskedForAddress: aiAskedForAddress
+                            addressValidationAttempts: addressValidationAttempts,
+                            maxAddressRetries: maxAddressRetries,
+                            aiAskedForAddress: aiAskedForAddress,
+                            canRetry: addressValidationAttempts <= maxAddressRetries
                         });
 
                         // Track when customer provides address
@@ -1484,10 +1468,10 @@ TIMING RULES:
                             console.log('📝 Marked address as requested to prevent duplicates');
                         }
 
-                        // STRONG DUPLICATE PREVENTION: Only trigger validation if address provided and not already validated
-                        if (isDeliveryOrder && hasValidAddress && !addressValidated && addressProviderAttempts === 1) {
-                            console.log('🏠 First address detected in delivery order - auto-triggering validation:', customerMessage);
-                            addressValidated = true; // Set immediately to prevent race conditions
+                        // UPDATED: Address validation with retry support
+                        if (isDeliveryOrder && hasValidAddress && !addressValidated && addressValidationAttempts <= maxAddressRetries) {
+                            addressValidationAttempts++;
+                            console.log('🏠 Address detected in delivery order - triggering validation (attempt #' + addressValidationAttempts + '):', customerMessage);
 
                             // CANCEL ANY ACTIVE RESPONSE to prevent premature rejection messages
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1510,7 +1494,7 @@ TIMING RULES:
                                             role: 'user',
                                             content: [{
                                                 type: 'input_text',
-                                                text: '[SYSTEM: Customer just provided delivery address: "' + customerMessage + '". First say "Let me check if you\'re within our delivery area" then immediately call validate_delivery_address function. DO NOT provide any other response until validation completes.]'
+                                                text: '[SYSTEM: Customer provided delivery address: "' + customerMessage + '". This is validation attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. First say "Let me check if you\'re within our delivery area" then immediately call validate_delivery_address function. DO NOT provide any other response until validation completes.]'
                                             }]
                                         }
                                     }));
@@ -1524,21 +1508,22 @@ TIMING RULES:
                             const triggerValidation = (attempt = 1) => {
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationAttempts < maxValidationAttempts) {
-                                        console.log(`🔄 Attempting to trigger validation (attempt ${attempt})`);
+                                        console.log(`🔄 Attempting to trigger validation (API attempt ${attempt})`);
                                         validationAttempts++;
 
                                         // Store attempt info for collision handling
                                         validationRetryInfo = {
                                             address: customerMessage,
                                             attempts: validationAttempts,
-                                            maxAttempts: maxValidationAttempts
+                                            maxAttempts: maxValidationAttempts,
+                                            validationAttemptNumber: addressValidationAttempts
                                         };
 
                                         openaiWs.send(JSON.stringify({
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer just provided their delivery address: "' + customerMessage + '". First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT provide any other response until validation completes.'
+                                                instructions: 'Customer provided their delivery address: "' + customerMessage + '". This is validation attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT provide any other response until validation completes.'
                                             }
                                         }));
                                     }
@@ -1546,23 +1531,6 @@ TIMING RULES:
                             };
 
                             triggerValidation();
-                        }
-                        // EMERGENCY STOP: If customer provides address multiple times, force immediate validation
-                        else if (isDeliveryOrder && hasValidAddress && addressProviderAttempts > 1 && !addressValidated) {
-                            console.log('🚨 DUPLICATE ADDRESS DETECTED - Customer provided address ' + addressProviderAttempts + ' times - forcing immediate validation');
-                            addressValidated = true; // Prevent further duplicates
-
-                            setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: 'STOP asking for address. Customer has provided it multiple times. Use this address: "' + customerMessage + '" and call validate_delivery_address function immediately.'
-                                        }
-                                    }));
-                                }
-                            }, 50);
                         }
 
                         // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
@@ -1668,7 +1636,7 @@ TIMING RULES:
                                             type: 'response.create',
                                             response: {
                                                 modalities: ['audio', 'text'],
-                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT provide any other response until validation completes.'
+                                                instructions: 'Customer provided their delivery address: "' + validationRetryInfo.address + '". This is validation attempt #' + validationRetryInfo.validationAttemptNumber + ' of ' + (maxAddressRetries + 1) + '. First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + validationRetryInfo.address + '". DO NOT provide any other response until validation completes.'
                                             }
                                         }));
                                     } else if (!validationRetryInfo) {
@@ -1791,7 +1759,7 @@ TIMING RULES:
         });
     }
 
-    // FIXED: Function call handler with proper message intent detection
+    // UPDATED: Function call handler with address retry support
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -1881,6 +1849,7 @@ TIMING RULES:
                 case 'validate_delivery_address':
                     console.log('🔍 validate_delivery_address function called with args:', JSON.stringify(parsedArgs));
                     console.log('🔍 Current state - addressValidated:', addressValidated, 'validatedDeliveryAddress:', validatedDeliveryAddress);
+                    console.log('🔍 Retry state - validationAttempts:', addressValidationAttempts, 'maxRetries:', maxAddressRetries);
 
                     // Check if address is already validated to prevent duplicates
                     if (addressValidated && validatedDeliveryAddress) {
@@ -1992,16 +1961,18 @@ TIMING RULES:
                     console.log('About to call validation edge function with:', {
                         address: deliveryAddress.trim(),
                         restaurant_id: restaurant.id,
-                        delivery_enabled: restaurant.delivery_enabled
+                        delivery_enabled: restaurant.delivery_enabled,
+                        validation_attempt: addressValidationAttempts,
+                        max_retries: maxAddressRetries
                     });
 
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
 
                     if (validationResult.valid) {
-                        // Mark address as validated to prevent duplicate requests
+                        // SUCCESSFUL VALIDATION: Mark as validated and store address
                         addressValidated = true;
                         validatedDeliveryAddress = deliveryAddress;
-                        console.log('Address validation successful - marked as validated:', deliveryAddress);
+                        console.log('✅ Address validation successful - marked as validated:', deliveryAddress);
 
                         // Clear retry info since validation succeeded
                         validationRetryInfo = null;
@@ -2011,19 +1982,41 @@ TIMING RULES:
                             instruction: 'SUCCESS! Address is valid for delivery and within our delivery area. IMMEDIATELY say "Great! Your address is within our delivery area. What would you like to order?" Do NOT ask for the address again. Proceed directly to taking the food order.',
                             status: 'APPROVED',
                             confirmed_address: deliveryAddress,
-                            proceed_to_order: true
+                            proceed_to_order: true,
+                            validation_attempt: addressValidationAttempts,
+                            retry_allowed: false
                         };
                     } else {
-                        // For invalid addresses, don't reset addressValidated to prevent asking again
-                        console.log('Address validation failed but keeping addressValidated=true to prevent duplicate requests');
+                        // FAILED VALIDATION: Check if retry is allowed
+                        console.log('❌ Address validation failed (attempt #' + addressValidationAttempts + ')');
 
-                        // Clear retry info since validation completed (failed)
+                        // Clear retry info since validation completed
                         validationRetryInfo = null;
 
-                        result = {
-                            ...validationResult,
-                            instruction: 'Address validation failed. Inform customer we cannot deliver to this area and suggest pickup instead. Do NOT ask for address again.'
-                        };
+                        if (addressValidationAttempts <= maxAddressRetries) {
+                            // RETRY ALLOWED
+                            console.log('🔄 Retry allowed - customer can provide address again');
+                            result = {
+                                ...validationResult,
+                                instruction: 'First address validation failed. Provide helpful guidance and ask customer to provide their delivery address again. This is attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. Be specific about what might be wrong (street spelling, zip code, etc.).',
+                                status: 'RETRY_ALLOWED',
+                                validation_attempt: addressValidationAttempts,
+                                retry_allowed: true,
+                                max_attempts: maxAddressRetries + 1
+                            };
+                        } else {
+                            // NO MORE RETRIES - Force pickup
+                            console.log('🚫 Maximum retries exceeded - forcing pickup');
+                            addressValidated = true; // Prevent further attempts
+                            result = {
+                                ...validationResult,
+                                instruction: 'Maximum address validation attempts exceeded. Inform customer we cannot deliver to any address they provided and suggest pickup only. Do NOT ask for address again.',
+                                status: 'MAX_RETRIES_EXCEEDED',
+                                validation_attempt: addressValidationAttempts,
+                                retry_allowed: false,
+                                force_pickup: true
+                            };
+                        }
                     }
                     break;
 
@@ -2586,7 +2579,7 @@ TIMING RULES:
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
                 migration_status: 'ready',
-                message_intent_fixed: true
+                address_retry_enabled: true
             });
 
             try {
@@ -2604,7 +2597,7 @@ TIMING RULES:
                 delete global.pendingCallData[callSid];
             }
 
-            console.log('Call completed with FIXED message intent detection. Duration: ' + callDuration + ' seconds');
+            console.log('Call completed with ADDRESS RETRY SYSTEM. Duration: ' + callDuration + ' seconds');
         }
 
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -2660,7 +2653,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
 
-    console.log('🚀 Restaurant AI System - FIXED: Message Intent Detection');
+    console.log('🚀 Restaurant AI System - UPDATED: Address Retry System');
     console.log('📞 Server running on port ' + PORT);
     console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
     console.log('🎯 WebSocket ready for Twilio Media Streams');
@@ -2675,10 +2668,11 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
     console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
     console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
-    console.log('🏠 ADDRESS VALIDATION: Fixed - addresses properly passed to Edge Function');
+    console.log('🏠 ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
+    console.log('🔄 ADDRESS RETRY: Customer can provide address again if first validation fails');
     console.log('🚫 MESSAGE INTENT: Fixed - will NOT create messages for "I\'ll call back later"');
     console.log('');
-    console.log('✨ Server ready for production traffic - message intent detection fixed!');
+    console.log('✨ Server ready for production traffic - address retry system enabled!');
 });
 
 server.on('error', (error) => {
