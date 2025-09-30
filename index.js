@@ -2530,20 +2530,20 @@ TIMING RULES:
                     global.pendingCallData[callSid].order_id = order.id;
                 }
 
-                // Send timing confirmation message to AI after successful order creation
-                setTimeout(() => {
-                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                        const timingMessage = orderType === 'delivery'
-                            ? 'Your order should arrive within the next ' + timing.totalMinutes + ' minutes.'
-                            : 'Your pickup order will be ready in about ' + timing.totalMinutes + ' minutes.';
+// Send SHORT confirmation message to AI after successful order creation
+setTimeout(() => {
+    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        const shortMessage = orderType === 'delivery'
+            ? `Thanks ${customerName}, your delivery order will be delivered within ${timing.totalMinutes} minutes.`
+            : `Thanks ${customerName}, your pickup order will be ready in ${timing.totalMinutes} minutes.`;
 
-                        openaiWs.send(JSON.stringify({
-                            type: 'response.create',
-                            response: {
-                                modalities: ['audio', 'text'],
-                                instructions: 'Say exactly: "' + timingMessage + ' Thank you for choosing us! Have a great day!"'
-                            }
-                        }));
+        openaiWs.send(JSON.stringify({
+            type: 'response.create',
+            response: {
+                modalities: ['audio', 'text'],
+                instructions: 'Say exactly: "' + shortMessage + '"'
+            }
+        }));
 
                         // Schedule hangup after delivery message is spoken (allow time for speech)
                         setTimeout(async () => {
