@@ -1525,9 +1525,9 @@ ORDER_END
                         });
 
                         // Enhanced address validation trigger with better argument passing
-                        if (isDeliveryOrder && hasValidAddress && !addressValidated && addressProviderAttempts < 1) {
+                        if (isDeliveryOrder && hasValidAddress && !validatedDeliveryAddress && addressProviderAttempts < 2) {
                             addressProviderAttempts++;
-                            addressValidated = true; // Prevent race conditions
+                            // DON'T set addressValidated = true here - only set it after successful validation
                             
                             console.log('🏠 Enhanced address validation triggered:', customerMessage);
                             
@@ -1850,7 +1850,7 @@ ORDER_END
                     console.log('🚀 Enhanced validate_delivery_address called with:', JSON.stringify(parsedArgs));
 
                     // Check if already validated to prevent duplicates
-                    if (addressValidated && validatedDeliveryAddress) {
+                    if (validatedDeliveryAddress && addressValidated) {
                         console.log('✅ Address already validated:', validatedDeliveryAddress);
                         result = {
                             valid: true,
