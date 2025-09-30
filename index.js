@@ -1,5 +1,5 @@
-// Restaurant AI Ordering System - UPDATED: Address Retry System
-// Updated for OpenAI Migration with Address Validation Retry Support
+// Restaurant AI Ordering System - UPDATED: Ring Two Tech TwiML Message
+// Updated for OpenAI Migration with Address Validation Retry Support + Ring Two Tech Message
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -117,6 +117,7 @@ async function hangup(callSid, options = {}) {
             global.pendingHangupTwiML = global.pendingHangupTwiML || {};
             global.pendingHangupTwiML[callSid] = {
                 message: finalMessage,
+                restaurant: restaurant,
                 timestamp: new Date().toISOString()
             };
 
@@ -152,22 +153,29 @@ async function hangup(callSid, options = {}) {
 }
 
 // =============================================================================
-// HTTP ENDPOINTS - FIXED FOR FAST TWILIO RESPONSE
+// HTTP ENDPOINTS - UPDATED WITH RING TWO TECH MESSAGE
 // =============================================================================
 
-// Hangup TwiML endpoint
+// UPDATED: Hangup TwiML endpoint with Ring Two Tech message ONLY
 app.post('/hangup-twiml', (req, res) => {
     const callSid = req.query.call_sid || req.body.CallSid;
-    let message = 'Thank you for calling. Goodbye!';
+    let restaurantName = '';
 
     if (global.pendingHangupTwiML?.[callSid]) {
-        message = global.pendingHangupTwiML[callSid].message;
+        restaurantName = global.pendingHangupTwiML[callSid].restaurant?.name || '';
         delete global.pendingHangupTwiML[callSid];
     }
+
+    // FIXED: Use ONLY the Ring Two Tech message as specified
+    const message = restaurantName ? 
+        'Your call was processed by Ring two tech. Thank you for calling ' + restaurantName + '.' :
+        'Your call was processed by Ring two tech. Thank you for calling.';
 
     const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Say voice="alice">' + message + '</Say>\n    <Hangup/>\n</Response>';
     res.type('text/xml');
     res.send(twiml);
+    
+    console.log('TwiML hangup message sent:', message);
 });
 
 // FIXED: Fast-responding Twilio webhook endpoint for incoming calls
@@ -252,6 +260,7 @@ app.get('/health', (_req, res) => {
         architecture: 'twilio_websocket_with_intent_based_functions',
         message_intent_fixed: true,
         address_retry_enabled: true,
+        ring_two_tech_branding: true,
         last_health_check: new Date().toISOString()
     };
 
@@ -264,13 +273,14 @@ app.get('/ping', (_req, res) => {
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Restaurant AI Ordering System - UPDATED: Address Retry System',
+        message: 'Restaurant AI Ordering System - UPDATED: Ring Two Tech Branding',
         status: 'running',
         port: process.env.PORT || 3000,
         websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
         migration_ready: true,
-        address_retry_enabled: true
+        address_retry_enabled: true,
+        ring_two_tech_branding: true
     });
 });
 
@@ -2653,13 +2663,14 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
 
-    console.log('🚀 Restaurant AI System - UPDATED: Address Retry System');
+    console.log('🚀 Restaurant AI System - UPDATED: Ring Two Tech Branding');
     console.log('📞 Server running on port ' + PORT);
     console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
     console.log('🎯 WebSocket ready for Twilio Media Streams');
     console.log('🤖 OpenAI configured: ' + !!OPENAI_API_KEY);
     console.log('🗄️ Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
     console.log('📱 Twilio configured: ' + !!twilioClient);
+    console.log('🏷️ Ring Two Tech branding: ENABLED');
     console.log('');
     console.log('✅ MIGRATION STATUS: READY');
     console.log('🎯 INTENT-BASED: Natural conversation flow with function calling');
@@ -2671,8 +2682,9 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('🏠 ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
     console.log('🔄 ADDRESS RETRY: Customer can provide address again if first validation fails');
     console.log('🚫 MESSAGE INTENT: Fixed - will NOT create messages for "I\'ll call back later"');
+    console.log('🏷️ RING TWO TECH: All hangup messages include Ring Two Tech branding');
     console.log('');
-    console.log('✨ Server ready for production traffic - address retry system enabled!');
+    console.log('✨ Server ready for production traffic - Ring Two Tech branding enabled!');
 });
 
 server.on('error', (error) => {
