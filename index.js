@@ -1005,7 +1005,8 @@ For delivery orders, follow this EXACT sequence:
 3. 🚨 CRITICAL - NEVER ASK FOR ADDRESS AGAIN after calling validation function
 4. 🚨 CRITICAL - Do NOT proceed to "What would you like to order?" without successful address validation
 5. 🚨 CRITICAL - If customer provides address like "7805 Old Harford Road, Parkville, Maryland, 21234" you MUST call validate_delivery_address
-6. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
+6. 🚨 CRITICAL - If validation returns needs_address=true, use the exact message provided and ask for address again
+7. 🚨 CRITICAL - FORBIDDEN PHRASES (NEVER USE THESE):
    - "It seems there might be an issue"
    - "seems there's an issue"
    - "It seems there was an issue"
@@ -1020,7 +1021,8 @@ For delivery orders, follow this EXACT sequence:
    - "What's your address again"
    - "I'm having trouble validating"
    - "Unfortunately, I'm still unable"
-7. 🛑 DUPLICATE ADDRESS PREVENTION CHECK:
+   - "It seems the delivery address is not within our delivery area" (when no address was provided)
+8. 🛑 DUPLICATE ADDRESS PREVENTION CHECK:
    - BEFORE asking for address, check if AI already asked "What's your delivery address?"
    - If customer provided ANY address with numbers, call validate_delivery_address immediately
    - NEVER ask for address twice - if validation fails, suggest pickup instead
