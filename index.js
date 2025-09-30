@@ -1,5 +1,5 @@
-// Restaurant AI Ordering System - FIXED: Twilio Error 11205 (Timeout Issue)
-// Updated for OpenAI Migration with Fast Twilio Response
+// Restaurant AI Ordering System - FIXED: Customer Message Intent Detection
+// Updated for OpenAI Migration with Proper Message Creation Logic
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -31,9 +31,6 @@ if (!twilioClient) {
 // Initialize Supabase client (only for Edge Function calls)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Global state management
-// Note: activeCalls map removed as it was unused
-
 // Create HTTP server and WebSocket server
 const server = require('http').createServer(app);
 const wss = new WebSocket.Server({
@@ -44,6 +41,145 @@ const wss = new WebSocket.Server({
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// =============================================================================
+// CUSTOMER MESSAGE INTENT DETECTION - FIXED
+// =============================================================================
+
+function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
+    const message = customerMessage.toLowerCase().trim();
+    
+    console.log('🔍 Analyzing message intent:', message);
+    
+    // ❌ HARD BLOCKS - Never create messages for normal call endings
+    const normalCallEndings = [
+        'call back',
+        'call you back', 
+        'i\'ll call back',
+        'let me call back',
+        'call back later',
+        'call back in',
+        'call again',
+        'try again',
+        'call later',
+        'maybe later',
+        'not right now',
+        'another time',
+        'changed my mind',
+        'never mind',
+        'nevermind',
+        'that\'s okay',
+        'no thanks',
+        'no thank you',
+        'think about it',
+        'let me think',
+        'decide later',
+        'not sure',
+        'maybe not',
+        'actually no'
+    ];
+    
+    // Check for normal call ending phrases
+    for (const phrase of normalCallEndings) {
+        if (message.includes(phrase)) {
+            console.log('🚫 Normal call ending detected:', phrase, '- NOT creating customer message');
+            return false;
+        }
+    }
+    
+    // ✅ STRONG SERVICE INDICATORS - Definitely create message
+    const strongServiceTriggers = [
+        // Explicit callback requests for issues
+        'can you have someone call me',
+        'have someone call me back',
+        'manager call me',
+        'owner call me',
+        'call me about',
+        'need someone to call',
+        'someone needs to call',
+        
+        // Complaints and issues
+        'complaint',
+        'complain',
+        'problem with',
+        'issue with',
+        'wrong with',
+        'messed up',
+        'screwed up',
+        'terrible',
+        'awful',
+        'horrible',
+        'disgusting',
+        'cold food',
+        'late delivery',
+        'missing items',
+        'wrong order',
+        'bad service',
+        'rude',
+        
+        // Management requests
+        'speak to manager',
+        'talk to manager',
+        'speak to owner',
+        'talk to owner',
+        'file a complaint',
+        'leave a message',
+        'take a message',
+        'tell them',
+        'let them know',
+        
+        // Payment/refund issues
+        'refund',
+        'charge',
+        'charged',
+        'money back',
+        'overcharged',
+        'billing',
+        'credit card',
+        'didn\'t order',
+        'cancel my card',
+        
+        // Serious service requests
+        'catering',
+        'large order',
+        'party order',
+        'special event',
+        'dietary restriction',
+        'allergy',
+        'allergic',
+        'kosher',
+        'halal',
+        'vegan',
+        'gluten free'
+    ];
+    
+    // Check for strong service triggers
+    for (const trigger of strongServiceTriggers) {
+        if (message.includes(trigger)) {
+            console.log('✅ Strong service trigger detected:', trigger, '- creating customer message');
+            return true;
+        }
+    }
+    
+    // ❌ Additional context check - Don't create messages during normal ordering
+    const isInOrderingFlow = conversationHistory.some(msg => 
+        msg.speaker === 'AI' && (
+            msg.text.includes('What would you like to order') ||
+            msg.text.includes('delivery area') ||
+            msg.text.includes('pickup or delivery') ||
+            msg.text.includes('ready in') ||
+            msg.text.includes('ORDER_CONFIRMED')
+        )
+    );
+    
+    if (isInOrderingFlow) {
+        console.log('🚫 In normal ordering flow - NOT creating message unless strong trigger present');
+        return false;
+    }
+    
+    console.log('🤔 Ambiguous case - letting AI decide based on context');
+    return false; // Default to NOT creating messages unless clear intent
+}
 
 // =============================================================================
 // UNIVERSAL HANGUP FUNCTION
@@ -145,7 +281,6 @@ app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
 
     // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
-    // Enhanced TwiML with optimized audio settings
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
@@ -209,7 +344,7 @@ app.post('/voice', (req, res) => {
     });
 });
 
-// IMPROVED: Health check endpoint with Twilio connectivity test
+// Health check endpoints
 app.get('/health', (_req, res) => {
     const healthData = {
         status: 'healthy',
@@ -221,12 +356,10 @@ app.get('/health', (_req, res) => {
         uptime: process.uptime(),
         migration_status: 'updated_for_modern_openai_apis',
         architecture: 'twilio_websocket_with_intent_based_functions',
-        // ADDED: Fast response time indicator for Twilio
-        twilio_response_optimized: true,
+        message_intent_fixed: true,
         last_health_check: new Date().toISOString()
     };
 
-    // Return immediately for health checks (important for load balancers)
     res.status(200).json(healthData);
 });
 
@@ -236,13 +369,13 @@ app.get('/ping', (_req, res) => {
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Restaurant AI Ordering System - FIXED: Twilio Timeout Issue',
+        message: 'Restaurant AI Ordering System - FIXED: Message Intent Detection',
         status: 'running',
         port: process.env.PORT || 3000,
         websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
         migration_ready: true,
-        twilio_timeout_fixed: true
+        message_intent_fixed: true
     });
 });
 
@@ -297,9 +430,8 @@ app.get('/messages', async (_req, res) => {
 
 async function getRestaurantByPhone(phoneNumber) {
     try {
-        // Add timeout to prevent hanging requests
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         const response = await fetch(SUPABASE_URL + '/functions/v1/get-restaurant', {
             method: 'POST',
@@ -468,7 +600,7 @@ async function validateDeliveryAddress(address, restaurant) {
                              /\b\w+\s+(st|street|rd|road|ave|avenue|ln|lane|dr|drive|way|ct|court|pl|place|blvd|boulevard)\b/i.test(address) ||
                              /(old|new|north|south|east|west)\s+\w+\s+(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(address);
         const hasFiveDigitZip = /\b\d{5}(-\d{4})?\b/.test(address);
-        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}/.test(address); // City, State pattern (removed word boundary at end to catch full state names)
+        const hasCityState = /\b[A-Za-z\s]+,\s*[A-Za-z]{2,}/.test(address);
 
         console.log('Detailed validation for address:', address);
         console.log('hasStreetNumber:', hasStreetNumber);
@@ -492,7 +624,6 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
 
-        // Accept either zip code OR city/state combination
         if (!hasFiveDigitZip && !hasCityState) {
             return {
                 valid: false,
@@ -501,7 +632,6 @@ async function validateDeliveryAddress(address, restaurant) {
             };
         }
 
-        // FIXED: Use validate-delivery-address Edge Function instead of old validate-delivery
         const edgeFunctionUrl = SUPABASE_URL + '/functions/v1/validate-delivery-address';
         console.log('Calling Edge function:', edgeFunctionUrl);
 
@@ -717,7 +847,6 @@ function formatOrderItems(items, totalAmount) {
         return '• Order details not available';
     }
 
-    // Parse items if they're in ORDER_CONFIRMED format
     if (items.includes('ORDER_CONFIRMED')) {
         const lines = items.split('\n');
         let formattedItems = '';
@@ -736,7 +865,6 @@ function formatOrderItems(items, totalAmount) {
         return formattedItems || '• ' + items.replace(/ORDER_CONFIRMED.*?\n/g, '').trim();
     }
 
-    // Format simple item descriptions
     const itemLines = items.split(/[,\n]/).filter(item => item.trim());
     let formattedItems = '';
 
@@ -758,9 +886,8 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
     try {
         const now = new Date();
 
-        // Safeguard against unreasonable database values
         let preparationMinutes = restaurant?.preparation_time || 20;
-        if (preparationMinutes > 120) { // More than 2 hours is unreasonable for pizza
+        if (preparationMinutes > 120) {
             console.log('⚠️ Unreasonable preparation_time detected:', preparationMinutes, 'minutes - using default 20');
             preparationMinutes = 20;
         }
@@ -768,7 +895,7 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         let deliveryAddedMinutes = 0;
         if (isDelivery && restaurant?.delivery_enabled) {
             deliveryAddedMinutes = restaurant?.delivery_time || 15;
-            if (deliveryAddedMinutes > 60) { // More than 1 hour delivery is unreasonable
+            if (deliveryAddedMinutes > 60) {
                 console.log('⚠️ Unreasonable delivery_time detected:', deliveryAddedMinutes, 'minutes - using default 15');
                 deliveryAddedMinutes = 15;
             }
@@ -777,7 +904,6 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         const totalMinutes = preparationMinutes + deliveryAddedMinutes;
         const readyTime = new Date(now.getTime() + totalMinutes * 60000);
 
-        // Debug logging for ready time calculation
         console.log('🕐 Ready time calculation debug:', {
             currentTime: now.toLocaleString('en-US', { timeZone: 'America/New_York' }),
             preparationMinutes: preparationMinutes,
@@ -789,7 +915,6 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
             calculatedReadyTime: readyTime.toLocaleString('en-US', { timeZone: 'America/New_York' })
         });
 
-        // Use proper timezone conversion for display
         const timeInEastern = readyTime.toLocaleString('en-US', {
             timeZone: 'America/New_York',
             hour: 'numeric',
@@ -864,7 +989,7 @@ function formatMenuForAI(menuItems, restaurant) {
 }
 
 // =============================================================================
-// WEBSOCKET CONNECTION WITH INTENT-BASED FUNCTION CALLING
+// WEBSOCKET CONNECTION WITH FIXED MESSAGE INTENT DETECTION
 // =============================================================================
 
 wss.on('connection', (ws, _req) => {
@@ -881,13 +1006,13 @@ wss.on('connection', (ws, _req) => {
     let orderProcessed = false;
     let addressValidated = false;
     let validatedDeliveryAddress = null;
-    let addressRequested = false; // Track if address has been requested to prevent duplicates
-    let addressProviderAttempts = 0; // Track how many times customer provided address
-    let validationRetryInfo = null; // Track validation retry state for collision handling
+    let addressRequested = false;
+    let addressProviderAttempts = 0;
+    let validationRetryInfo = null;
     let recentOrders = [];
     let anythingElseTimeout = null;
 
-    // Initialize OpenAI with modern approach
+    // Initialize OpenAI with fixed message intent detection
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
 
@@ -920,8 +1045,6 @@ wss.on('connection', (ws, _req) => {
         const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
         console.log('Connecting to OpenAI Realtime API with updated model...');
-
-        // Use the latest stable model - try without specifying model first
         console.log('🔗 Attempting OpenAI connection with API key:', OPENAI_API_KEY ? 'Present' : 'Missing');
 
         try {
@@ -930,10 +1053,9 @@ wss.on('connection', (ws, _req) => {
                     'Authorization': 'Bearer ' + OPENAI_API_KEY,
                     'OpenAI-Beta': 'realtime=v1'
                 },
-                // Connection optimization for better quality
-                perMessageDeflate: false,  // Disable compression for lower latency
-                handshakeTimeout: 5000,    // 5 second timeout
-                maxPayload: 100 * 1024 * 1024  // 100MB payload limit
+                perMessageDeflate: false,
+                handshakeTimeout: 5000,
+                maxPayload: 100 * 1024 * 1024
             });
 
             console.log('🔗 WebSocket created successfully');
@@ -951,10 +1073,7 @@ wss.on('connection', (ws, _req) => {
             console.log('✅ Connected to OpenAI Realtime API');
             console.log('🔗 WebSocket ready for audio streaming');
 
-            // Enhanced connection with quality optimization
-            // Delivery options are handled in the greeting logic below
-
-            // Modern system instructions with intent-based approach
+            // FIXED: Enhanced instructions with proper message intent detection
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 
 🚨 MANDATORY ADDRESS VALIDATION:
@@ -975,6 +1094,24 @@ wss.on('connection', (ws, _req) => {
 - If customer provided ANY address with numbers and street names - validate it immediately
 - DO NOT say "I need your delivery address" if customer already gave one
 - DO NOT ask for "complete address" or "street number and name" - just validate what they gave you
+
+**🚨 CRITICAL MESSAGE CREATION RULES:**
+ONLY call create_customer_message function for ACTUAL customer service issues:
+
+✅ DO create message for:
+- Complaints: "The food was cold", "Wrong order", "Bad service"
+- Payment issues: "I was overcharged", "Need a refund"
+- Explicit callback requests: "Have someone call me back about my order"
+- Management requests: "I need to speak to the manager"
+- Special requests: "Need catering information", "Large party order"
+
+❌ NEVER create message for:
+- Normal call endings: "I'll call back later", "Let me think about it"
+- Simple postponements: "Maybe another time", "Not right now"
+- Mind changes: "Changed my mind", "Never mind", "Actually no"
+- Polite departures: "Thanks anyway", "That's okay"
+
+🎯 Key test: Is the customer asking for staff help with a problem, or just ending the call normally?
 
 CRITICAL: ALL RESPONSES MUST BE 1-2 SENTENCES MAXIMUM. Be extremely concise and direct.
 
@@ -1059,7 +1196,7 @@ ${menuText}
 Instead of keyword matching, you naturally understand customer intent and call appropriate functions:
 1. **When customer wants to modify/cancel existing orders** → call search_recent_orders
 2. **When customer provides ANY delivery address (with numbers and street names)** → call validate_delivery_address
-3. **When customer wants to leave a message/complaint/question** → call create_customer_message
+3. **When customer has ACTUAL service issues/complaints** → call create_customer_message (NOT for normal call endings)
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders
 
@@ -1119,13 +1256,12 @@ TIMING RULES:
                     input_audio_transcription: { model: 'whisper-1' },
                     turn_detection: {
                         type: 'server_vad',
-                        threshold: 0.6,  // Reduced for better sensitivity (0.5-0.8 range)
-                        prefix_padding_ms: 200,  // Reduced for faster response
-                        silence_duration_ms: 1200  // Reduced for quicker turn detection
+                        threshold: 0.6,
+                        prefix_padding_ms: 200,
+                        silence_duration_ms: 1200
                     },
                     temperature: 0.6,
-                    max_response_output_tokens: 400,  // Increased for complete responses
-                    // REMOVED: voice_settings parameter doesn't exist in OpenAI Realtime API
+                    max_response_output_tokens: 400,
                     tools: [
                         {
                             type: "function",
@@ -1187,18 +1323,18 @@ TIMING RULES:
                         {
                             type: "function",
                             name: "create_customer_message",
-                            description: "Save customer messages, complaints, questions, callback requests, or any non-order requests. Critical for busy restaurant messaging system.",
+                            description: "CRITICAL: ONLY call this for ACTUAL customer service issues - complaints, payment problems, explicit callback requests, or management requests. NEVER call for normal call endings like 'I'll call back later' or 'changed my mind'. Only for real problems requiring staff attention.",
                             parameters: {
                                 type: "object",
                                 properties: {
                                     customer_name: { type: "string", description: "Customer's name" },
-                                    message_content: { type: "string", description: "The customer's message, request, or concern" },
+                                    message_content: { type: "string", description: "The customer's actual complaint, issue, or service request" },
                                     priority: {
                                         type: "string",
                                         enum: ["high", "medium", "normal"],
-                                        description: "Priority: high for urgent issues, normal for general messages"
+                                        description: "Priority: high for urgent issues, normal for general complaints"
                                     },
-                                    subject: { type: "string", description: "Brief subject like 'Callback Request' or 'Customer Question'" }
+                                    subject: { type: "string", description: "Brief subject like 'Customer Complaint' or 'Billing Issue'" }
                                 },
                                 required: ["customer_name", "message_content", "priority", "subject"]
                             }
@@ -1225,7 +1361,7 @@ TIMING RULES:
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
 
-        // Message handling logic with function call processing
+        // Message handling logic with FIXED function call processing
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
@@ -1235,7 +1371,6 @@ TIMING RULES:
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
                             try {
                                 console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
-                                // Enhanced audio output with quality optimization
                                 const audioMessage = {
                                     event: 'media',
                                     streamSid: streamSid,
@@ -1745,7 +1880,6 @@ TIMING RULES:
 
             if (callSid) {
                 console.log('🔄 Enhanced error recovery - OpenAI connection failed');
-                // Enhanced error message with better user experience
                 await hangup(callSid, {
                     message: 'We are currently experiencing high call volume. Please try calling back in a few minutes. Thank you for your patience.',
                     reason: 'openai_websocket_error',
@@ -1759,7 +1893,7 @@ TIMING RULES:
         });
     }
 
-    // Function call handler with better intent recognition
+    // FIXED: Function call handler with proper message intent detection
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -2049,6 +2183,25 @@ TIMING RULES:
                     break;
 
                 case 'create_customer_message':
+                    // FIXED: Apply intent detection before creating message
+                    const recentCustomerMessages = conversationTranscript
+                        .filter(msg => msg.speaker === 'Customer')
+                        .slice(-3);
+                        
+                    const latestMessage = recentCustomerMessages[recentCustomerMessages.length - 1]?.text || '';
+                    
+                    // CRITICAL: Check if this is actually a customer service request
+                    if (!shouldCreateCustomerMessage(latestMessage, conversationTranscript)) {
+                        console.log('🚫 Message creation blocked - not a customer service request');
+                        result = {
+                            success: false,
+                            message: 'No customer service issue detected - this appears to be a normal call ending',
+                            blocked_reason: 'normal_call_ending',
+                            customer_message: latestMessage
+                        };
+                        break;
+                    }
+
                     // Better message extraction and handling
                     let custName = parsedArgs.customer_name || 'Customer';
                     let custMessageContent = parsedArgs.message_content || '';
@@ -2056,13 +2209,11 @@ TIMING RULES:
                     let custPriority = parsedArgs.priority || 'normal';
 
                     if (!custMessageContent || custMessageContent.trim().length === 0) {
-                        const recentCustomerMessages = conversationTranscript
-                            .filter(msg => msg.speaker === 'Customer')
-                            .slice(-3)
+                        const recentCustomerMessageText = recentCustomerMessages
                             .map(msg => msg.text)
                             .join(' ');
 
-                        custMessageContent = recentCustomerMessages || 'Customer requested to leave a message';
+                        custMessageContent = recentCustomerMessageText || 'Customer requested to leave a message';
                         console.log('Extracted message content from conversation:', custMessageContent);
 
                         if (custMessageContent.toLowerCase().includes('call me back') ||
@@ -2456,7 +2607,6 @@ TIMING RULES:
                 case 'media':
                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                         try {
-                            // Enhanced audio processing with error handling
                             const audioData = {
                                 type: 'input_audio_buffer.append',
                                 audio: data.media.payload
@@ -2502,7 +2652,7 @@ TIMING RULES:
 
         const callEndTime = new Date();
         const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
-        const callDuration = Math.round(baseDuration + 5.5); // FIXED: Convert to integer for database
+        const callDuration = Math.round(baseDuration + 5.5);
 
         if (callSid) {
             const initialCallData = global.pendingCallData?.[callSid] || {};
@@ -2534,10 +2684,11 @@ TIMING RULES:
                 call_sid: callSid,
                 base_duration: baseDuration,
                 final_duration: callDuration,
-                duration_type: 'integer', // FIXED: Now sending integer instead of float
+                duration_type: 'integer',
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
-                migration_status: 'ready'
+                migration_status: 'ready',
+                message_intent_fixed: true
             });
 
             try {
@@ -2555,7 +2706,7 @@ TIMING RULES:
                 delete global.pendingCallData[callSid];
             }
 
-            console.log('Call completed with intent-based function calling. Duration: ' + callDuration + ' seconds');
+            console.log('Call completed with FIXED message intent detection. Duration: ' + callDuration + ' seconds');
         }
 
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -2563,7 +2714,7 @@ TIMING RULES:
         }
     });
 
-    // Enhanced Twilio WebSocket error handling for errors 11750 & 31920
+    // Enhanced Twilio WebSocket error handling
     ws.on('error', async (error) => {
         console.error('❌ Twilio WebSocket error:', error);
         console.error('🚨 Error details:', {
@@ -2573,7 +2724,6 @@ TIMING RULES:
             callSid: callSid
         });
 
-        // Handle specific Twilio errors
         if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND') {
             console.error('🔴 Network connectivity issue - Error 11750 likely');
         }
@@ -2612,7 +2762,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
 
-    console.log('🚀 Restaurant AI System FIXED - Address Validation Issue Resolved');
+    console.log('🚀 Restaurant AI System - FIXED: Message Intent Detection');
     console.log('📞 Server running on port ' + PORT);
     console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
     console.log('🎯 WebSocket ready for Twilio Media Streams');
@@ -2623,13 +2773,14 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('✅ MIGRATION STATUS: READY');
     console.log('🎯 INTENT-BASED: Natural conversation flow with function calling');
     console.log('🔧 EDGE FUNCTIONS: All database operations preserved');
-    console.log('💬 MESSAGE SYSTEM: Customer messages for staff requests');
+    console.log('💬 MESSAGE SYSTEM: Fixed - only for actual customer service issues');
     console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
     console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
     console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('🏠 ADDRESS VALIDATION: Fixed - addresses properly passed to Edge Function');
+    console.log('🚫 MESSAGE INTENT: Fixed - will NOT create messages for "I\'ll call back later"');
     console.log('');
-    console.log('✨ Server ready for production traffic - address validation issue resolved!');
+    console.log('✨ Server ready for production traffic - message intent detection fixed!');
 });
 
 server.on('error', (error) => {
