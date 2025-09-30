@@ -1,227 +1,4 @@
-case 'conversation.item.input_audio_transcription.completed':
-                        console.log('Customer said:', response.transcript);
-                        conversationTranscript.push({
-                            timestamp: new Date().toISOString(),
-                            speaker: 'Customer',
-                            text: response.transcript
-                        });
-
-                        const customerMessage = response.transcript.trim();
-
-                        // Clear greeting timeout when customer speaks
-                        if (greetingTimeout) {
-                            clearTimeout(greetingTimeout);
-                            greetingTimeout = null;
-                            customerHasSpoken = true;
-                            console.log('✅ Customer engagement detected - clearing greeting timeout');
-                        }
-
-                        // Clear other timeouts
-                        if (anythingElseTimeout) {
-                            clearTimeout(anythingElseTimeout);
-                            anythingElseTimeout = null;
-                        }
-
-                        // Check if customer is indicating order completion
-                        const orderCompletionPhrases = /\b(that's it|that's all|nothing else|i'm done|that'll be all|now that's it|that will be all|we're good|i'm good|that's everything|no more|complete)\b/i;
-                        const orderCompleted = orderCompletionPhrases.test(customerMessage);
-
-                        // Check if we're in an ordering context (not just general conversation)
-                        const inOrderingContext = conversationTranscript.some(msg =>
-                            msg.text.toLowerCase().includes('what would you like to order') ||
-                            msg.text.toLowerCase().includes('anything else you\'d like to add') ||
-                            msg.text.toLowerCase().includes('just to confirm')
-                        );
-
-                        // Address management with retry system
-                        const addressPatterns = [
-                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}(-\d{4})?/i,
-                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+,\s*[A-Za-z]{2,}/i,
-                            /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+[A-Za-z]{3,}/i
-                        ];
-
-                        const hasValidAddress = addressPatterns.some(pattern => pattern.test(customerMessage));
-
-                        const isDeliveryOrder = conversationTranscript.some(msg => {
-                            if (msg.speaker !== 'Customer') return false;
-                            const text = msg.text.toLowerCase();
-                            return text.includes('delivery') ||
-                                   text.includes('deliver') ||
-                                   text.includes('delivered') ||
-                                   text.includes('for delivery') ||
-                                   text.includes('to deliver');
-                        }) || conversationTranscript.some(msg => {
-                            return msg.speaker === 'AI' &&
-                                   msg.text.toLowerCase().includes('delivery address');
-                        });
-
-                        // Check if AI has asked for address in conversation
-                        const aiAskedForAddress = conversationTranscript.some(msg =>
-                            msg.speaker === 'AI' && (
-                                msg.text.toLowerCase().includes('delivery address') ||
-                                msg.text.toLowerCase().includes('what\'s your address') ||
-                                msg.text.toLowerCase().includes('your address')
-                            )
-                        );
-
-                        // Enhanced logging for debugging with retry system
-                        const matchedPattern = addressPatterns.findIndex(pattern => pattern.test(customerMessage));
-                        console.log('🔍 Enhanced address state check (with retry):', {
-                            customerMessage: customerMessage,
-                            isDeliveryOrder: isDeliveryOrder,
-                            hasValidAddress: hasValidAddress,
-                            matchedPattern: matchedPattern >= 0 ? `Pattern ${matchedPattern + 1}` : 'None',
-                            addressValidated: addressValidated,
-                            addressRequested: addressRequested,
-                            addressProviderAttempts: addressProviderAttempts,
-                            addressValidationAttempts: addressValidationAttempts,
-                            maxAddressRetries: maxAddressRetries,
-                            aiAskedForAddress: aiAskedForAddress,
-                            canRetry: addressValidationAttempts <= maxAddressRetries
-                        });
-
-                        // Track when customer provides address
-                        if (isDeliveryOrder && hasValidAddress) {
-                            addressProviderAttempts++;
-                            console.log('📍 Customer provided address (attempt #' + addressProviderAttempts + '):', customerMessage);
-                        }
-
-                        // Track when AI asks for address to prevent future duplicates
-                        if (aiAskedForAddress && !addressRequested) {
-                            addressRequested = true;
-                            console.log('📝 Marked address as requested to prevent duplicates');
-                        }
-
-                        // Address validation with retry support
-                        if (isDeliveryOrder && hasValidAddress && !addressValidated && addressValidationAttempts <= maxAddressRetries) {
-                            addressValidationAttempts++;
-                            console.log('🏠 Address detected in delivery order - triggering validation (attempt #' + addressValidationAttempts + '):', customerMessage);
-
-                            // Cancel any active response to prevent premature rejection messages
-                            if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🛑 ATTEMPTING to cancel any active response to prevent premature rejection');
-                                try {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.cancel'
-                                    }));
-                                } catch (error) {
-                                    console.log('🛑 Response cancellation not needed (no active response)');
-                                }
-
-                                // Brief delay to ensure cancellation processes, then provide acknowledgment
-                                setTimeout(() => {
-                                    console.log('🚨 INJECTING CONTEXT: Customer provided address, acknowledge and validate');
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'conversation.item.create',
-                                        item: {
-                                            type: 'message',
-                                            role: 'user',
-                                            content: [{
-                                                type: 'input_text',
-                                                text: '[SYSTEM: Customer provided delivery address: "' + customerMessage + '". This is validation attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. First say "Let me check if you\'re within our delivery area" then immediately call validate_delivery_address function. DO NOT provide any other response until validation completes.]'
-                                            }]
-                                        }
-                                    }));
-                                }, 50);
-                            }
-
-                            // Implement retry mechanism to handle response collisions
-                            let validationAttempts = 0;
-                            const maxValidationAttempts = 3;
-
-                            const triggerValidation = (attempt = 1) => {
-                                setTimeout(() => {
-                                    if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationAttempts < maxValidationAttempts) {
-                                        console.log(`🔄 Attempting to trigger validation (API attempt ${attempt})`);
-                                        validationAttempts++;
-
-                                        // Store attempt info for collision handling
-                                        validationRetryInfo = {
-                                            address: customerMessage,
-                                            attempts: validationAttempts,
-                                            maxAttempts: maxValidationAttempts,
-                                            validationAttemptNumber: addressValidationAttempts
-                                        };
-
-                                        openaiWs.send(JSON.stringify({
-                                            type: 'response.create',
-                                            response: {
-                                                modalities: ['audio', 'text'],
-                                                instructions: 'Customer provided their delivery address: "' + customerMessage + '". This is validation attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. First say "Let me check if you\'re within our delivery area" then immediately call the validate_delivery_address function with address="' + customerMessage + '". DO NOT provide any other response until validation completes.'
-                                            }
-                                        }));
-                                    }
-                                }, attempt === 1 ? 100 : attempt * 500);
-                            };
-
-                            triggerValidation();
-                        }
-
-                        // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
-                        if (orderCompleted && inOrderingContext && !orderProcessed) {
-                            console.log('🍕 Customer indicated order completion - triggering ORDER_CONFIRMED format');
-                            setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: 'The customer has completed their order. You MUST now use the ORDER_CONFIRMED format exactly as specified in your instructions. Include all order details in the exact format required.'
-                                        }
-                                    }));
-                                }
-                            }, 500);
-                        }
-
-                        const recentAIMessages = conversationTranscript
-                            .filter(msg => msg.speaker === 'AI')
-                            .slice(-3)
-                            .map(msg => msg.text.toLowerCase());
-
-                        // Only trigger on specific "anything else I can help you with" questions
-                        const hasRecentAnythingElse = recentAIMessages.some(msg =>
-                            msg.includes('anything else i can help you with') ||
-                            msg.includes('anything else i can help') ||
-                            msg.includes('is there anything else') ||
-                            (msg.includes('anything else') && msg.includes('help you'))
-                        );
-
-                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done|that's everything|we're all set)\b/i;
-                        const startsWithNo = /^no[,\s]/i;
-
-                        if ((anythingElseResponses.test(customerMessage) || startsWithNo.test(customerMessage)) && hasRecentAnythingElse) {
-                            console.log('Customer responded "no" to recent anything else question - initiating hangup');
-                            setTimeout(async () => {
-                                if (callSid && ws.readyState === WebSocket.OPEN) {
-                                    // Check if this was a delivery order by looking at recent messages
-                                    const hasDelivery = conversationTranscript.some(msg =>
-                                        msg.text.toLowerCase().includes('delivery') &&
-                                        (msg.text.toLowerCase().includes('your address is within') ||
-                                         msg.text.toLowerCase().includes('delivery area'))
-                                    );
-
-                                    let finalMessage = 'Thank you for calling ' + restaurant.name + '. Have a wonderful day!';
-
-                                    if (hasDelivery) {
-                                        const estimatedTime = (restaurant?.preparation_time || 20) + (restaurant?.delivery_time || 15);
-                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your delivery order will arrive in about ' + estimatedTime + ' minutes. Have a wonderful day!';
-                                    } else if (conversationTranscript.some(msg => msg.text.toLowerCase().includes('pickup'))) {
-                                        const estimatedTime = restaurant?.preparation_time || 20;
-                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your pickup order will be ready in about ' + estimatedTime + ' minutes. Have a wonderful day!';
-                                    }
-
-                                    await hangup(callSid, {
-                                        method: 'graceful',
-                                        reason: 'customer_finished',
-                                        restaurant: restaurant,
-                                        message: finalMessage,
-                                        delay: 2000
-                                    });
-                                }
-                            }, 3000);
-                            return;
-                        }
-                        break;// Restaurant AI Ordering System - UPDATED: Ring Two Tech TwiML Message
+// Restaurant AI Ordering System - UPDATED: Natural Conversation Flow with Ring Two Tech Branding
 // Updated for OpenAI Migration with Address Validation Retry Support + Ring Two Tech Message
 const express = require('express');
 const WebSocket = require('ws');
@@ -266,15 +43,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // =============================================================================
-// CUSTOMER MESSAGE INTENT DETECTION - FIXED
+// CUSTOMER MESSAGE INTENT DETECTION - NATURAL LANGUAGE BASED
 // =============================================================================
 
 function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
     const message = customerMessage.toLowerCase().trim();
     
-    console.log('🔍 Analyzing message intent with natural language understanding:', message);
+    console.log('Analyzing message intent with natural language understanding:', message);
     
-    // ❌ ONLY BLOCK obvious normal call endings - let AI handle everything else
+    // Only block obvious normal call endings - let AI handle everything else
     const definiteCallEndings = [
         'i\'ll call back',
         'let me call back', 
@@ -287,15 +64,15 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
     
     // Only block if the message is CLEARLY a call ending
     for (const phrase of definiteCallEndings) {
-        if (message.includes(phrase) && message.length < 30) { // Short messages that are clearly endings
-            console.log('🚫 Definite call ending detected:', phrase, '- NOT creating customer message');
+        if (message.includes(phrase) && message.length < 30) {
+            console.log('Definite call ending detected:', phrase, '- NOT creating customer message');
             return false;
         }
     }
     
-    // ✅ LET AI DECIDE - Trust natural language understanding for all other cases
-    console.log('✅ Allowing AI to use natural language understanding to determine message intent');
-    return true; // Let the AI decide based on context and natural understanding
+    // Let AI decide based on context and natural understanding
+    console.log('Allowing AI to use natural language understanding to determine message intent');
+    return true;
 }
 
 // =============================================================================
@@ -376,7 +153,7 @@ async function hangup(callSid, options = {}) {
 }
 
 // =============================================================================
-// HTTP ENDPOINTS - UPDATED WITH RING TWO TECH MESSAGE
+// HTTP ENDPOINTS - UPDATED WITH RING TWO TECH MESSAGE ONLY
 // =============================================================================
 
 // UPDATED: Hangup TwiML endpoint with Ring Two Tech message ONLY
@@ -389,7 +166,7 @@ app.post('/hangup-twiml', (req, res) => {
         delete global.pendingHangupTwiML[callSid];
     }
 
-    // FIXED: Use ONLY the Ring Two Tech message as specified
+    // Use ONLY the Ring Two Tech message as specified
     const message = restaurantName ? 
         'Your call was processed by Ring two tech. Thank you for calling ' + restaurantName + '.' :
         'Your call was processed by Ring two tech. Thank you for calling.';
@@ -401,7 +178,7 @@ app.post('/hangup-twiml', (req, res) => {
     console.log('TwiML hangup message sent:', message);
 });
 
-// FIXED: Fast-responding Twilio webhook endpoint for incoming calls
+// Fast-responding Twilio webhook endpoint for incoming calls
 app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
 
@@ -420,7 +197,7 @@ app.post('/voice', (req, res) => {
     res.type('text/xml');
     res.send(twiml);
 
-    // FIXED: Do restaurant lookup and call data storage AFTER responding to Twilio
+    // Do restaurant lookup and call data storage AFTER responding to Twilio
     setImmediate(async () => {
         try {
             const callData = {
@@ -480,8 +257,8 @@ app.get('/health', (_req, res) => {
         twilio_configured: !!twilioClient,
         uptime: process.uptime(),
         migration_status: 'updated_for_modern_openai_apis',
-        architecture: 'twilio_websocket_with_intent_based_functions',
-        message_intent_fixed: true,
+        architecture: 'twilio_websocket_with_natural_conversation_flow',
+        message_intent_natural: true,
         address_retry_enabled: true,
         ring_two_tech_branding: true,
         last_health_check: new Date().toISOString()
@@ -496,13 +273,13 @@ app.get('/ping', (_req, res) => {
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Restaurant AI Ordering System - UPDATED: Ring Two Tech Branding',
+        message: 'Restaurant AI Ordering System - Natural Conversation Flow with Ring Two Tech Branding',
         status: 'running',
         port: process.env.PORT || 3000,
         websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
         migration_ready: true,
-        address_retry_enabled: true,
+        natural_conversation_flow: true,
         ring_two_tech_branding: true
     });
 });
@@ -776,14 +553,14 @@ async function validateDeliveryAddress(address, restaurant) {
         });
 
         if (!response.ok) {
-            console.error('❌ Edge function HTTP error:', {
+            console.error('Edge function HTTP error:', {
                 status: response.status,
                 statusText: response.statusText,
                 url: edgeFunctionUrl,
                 address: address.trim()
             });
             const errorText = await response.text();
-            console.error('❌ Edge function error response:', errorText);
+            console.error('Edge function error response:', errorText);
             
             return {
                 valid: false,
@@ -796,7 +573,7 @@ async function validateDeliveryAddress(address, restaurant) {
         }
 
         const result = await response.json();
-        console.log('✅ Edge function response received:', {
+        console.log('Edge function response received:', {
             success: result.success,
             valid: result.data?.valid,
             reason: result.data?.reason,
@@ -806,7 +583,7 @@ async function validateDeliveryAddress(address, restaurant) {
         });
 
         if (!result.success || result.error) {
-            console.error('❌ Edge function returned error:', result.error);
+            console.error('Edge function returned error:', result.error);
             return {
                 valid: false,
                 message: 'Unable to validate address. Please provide a complete address or choose pickup.',
@@ -829,7 +606,7 @@ async function validateDeliveryAddress(address, restaurant) {
         };
 
     } catch (error) {
-        console.error('❌ Error calling Edge function:', {
+        console.error('Error calling Edge function:', {
             error: error.message,
             stack: error.stack,
             url: edgeFunctionUrl || 'unknown',
@@ -1016,7 +793,7 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
 
         let preparationMinutes = restaurant?.preparation_time || 20;
         if (preparationMinutes > 120) {
-            console.log('⚠️ Unreasonable preparation_time detected:', preparationMinutes, 'minutes - using default 20');
+            console.log('Unreasonable preparation_time detected:', preparationMinutes, 'minutes - using default 20');
             preparationMinutes = 20;
         }
 
@@ -1024,7 +801,7 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         if (isDelivery && restaurant?.delivery_enabled) {
             deliveryAddedMinutes = restaurant?.delivery_time || 15;
             if (deliveryAddedMinutes > 60) {
-                console.log('⚠️ Unreasonable delivery_time detected:', deliveryAddedMinutes, 'minutes - using default 15');
+                console.log('Unreasonable delivery_time detected:', deliveryAddedMinutes, 'minutes - using default 15');
                 deliveryAddedMinutes = 15;
             }
         }
@@ -1032,7 +809,7 @@ function calculateOrderReadyTime(restaurant, isDelivery = false) {
         const totalMinutes = preparationMinutes + deliveryAddedMinutes;
         const readyTime = new Date(now.getTime() + totalMinutes * 60000);
 
-        console.log('🕐 Ready time calculation debug:', {
+        console.log('Ready time calculation debug:', {
             currentTime: now.toLocaleString('en-US', { timeZone: 'America/New_York' }),
             preparationMinutes: preparationMinutes,
             deliveryMinutes: deliveryAddedMinutes,
@@ -1117,7 +894,7 @@ function formatMenuForAI(menuItems, restaurant) {
 }
 
 // =============================================================================
-// WEBSOCKET CONNECTION WITH ADDRESS RETRY SYSTEM
+// WEBSOCKET CONNECTION WITH NATURAL CONVERSATION FLOW
 // =============================================================================
 
 wss.on('connection', (ws, _req) => {
@@ -1146,7 +923,7 @@ wss.on('connection', (ws, _req) => {
     let customerHasSpoken = false;
     let greetingTimeout = null;
 
-    // Initialize OpenAI with address retry system
+    // Initialize OpenAI with natural conversation flow
     async function initializeOpenAI(calledNumber, fromNumber, callId) {
         console.log('Loading restaurant data for:', calledNumber);
 
@@ -1179,7 +956,7 @@ wss.on('connection', (ws, _req) => {
         const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
         console.log('Connecting to OpenAI Realtime API with updated model...');
-        console.log('🔗 Attempting OpenAI connection with API key:', OPENAI_API_KEY ? 'Present' : 'Missing');
+        console.log('Attempting OpenAI connection with API key:', OPENAI_API_KEY ? 'Present' : 'Missing');
 
         try {
             openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17', {
@@ -1192,10 +969,10 @@ wss.on('connection', (ws, _req) => {
                 maxPayload: 100 * 1024 * 1024
             });
 
-            console.log('🔗 WebSocket created successfully');
+            console.log('WebSocket created successfully');
 
         } catch (createError) {
-            console.error('❌ Failed to create OpenAI WebSocket:', createError);
+            console.error('Failed to create OpenAI WebSocket:', createError);
             await hangup(callId, {
                 message: 'Technical difficulties. Please try again.',
                 reason: 'websocket_creation_failed'
@@ -1204,100 +981,18 @@ wss.on('connection', (ws, _req) => {
         }
 
         openaiWs.on('open', () => {
-            console.log('✅ Connected to OpenAI Realtime API');
-            console.log('🔗 WebSocket ready for audio streaming');
+            console.log('Connected to OpenAI Realtime API');
+            console.log('WebSocket ready for audio streaming');
 
-        // NEW: Function to detect if customer response is likely background noise
-    function isLikelyBackgroundNoise(customerMessage) {
-        const message = customerMessage.toLowerCase().trim();
-        
-        // Common TV/radio/background noise indicators
-        const backgroundNoiseIndicators = [
-            // Political/news content
-            'democrat', 'republican', 'president', 'election', 'congress', 'senate',
-            'trillion', 'billion', 'hostage', 'government', 'taxes', 'policy',
-            
-            // TV show/movie content
-            'commercial', 'break', 'stay tuned', 'coming up', 'tonight on',
-            'channel', 'program', 'episode', 'season', 'series',
-            
-            // Random fragments that don't make sense for ordering
-            'and now', 'but first', 'coming up next', 'stay with us',
-            'after this', 'we\'ll be right back',
-            
-            // Very short, disconnected phrases
-            'the', 'and', 'but', 'or', 'so', 'well', 'yeah', 'um', 'uh'
-        ];
-        
-        // Check for political/news content
-        for (const indicator of backgroundNoiseIndicators) {
-            if (message.includes(indicator)) {
-                console.log('🔇 Background noise detected (keyword):', indicator);
-                return true;
-            }
-        }
-        
-        // Check for very short, meaningless responses
-        if (message.length < 8 && !isValidOrderingKeyword(message)) {
-            console.log('🔇 Background noise detected (too short/meaningless):', message);
-            return true;
-        }
-        
-        // Check for disconnected word fragments
-        const words = message.split(' ').filter(w => w.length > 0);
-        if (words.length < 3 && !isValidOrderingKeyword(message)) {
-            console.log('🔇 Background noise detected (disconnected fragments):', message);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    // Helper function to identify valid ordering keywords
-    function isValidOrderingKeyword(message) {
-        const validKeywords = [
-            'delivery', 'pickup', 'order', 'pizza', 'food', 'menu',
-            'yes', 'no', 'hello', 'hi', 'help', 'want', 'need',
-            'large', 'small', 'medium', 'pepperoni', 'cheese'
-        ];
-        
-        return validKeywords.some(keyword => message.toLowerCase().includes(keyword));
-    }
-
-    // UPDATED: Enhanced engagement check that filters out background noise
-    function checkValidEngagement(customerMessage) {
-        const message = customerMessage.toLowerCase().trim();
-        
-        // First, check if this is likely background noise
-        if (isLikelyBackgroundNoise(message)) {
-            return false;
-        }
-        
-        // Valid ordering responses
-        const validResponses = [
-            'delivery', 'deliver', 'pickup', 'pick up', 'takeout', 'take out',
-            'order', 'ordering', 'food', 'pizza', 'menu', 'hungry',
-            'yes', 'yeah', 'yep', 'sure', 'okay', 'ok',
-            'hello', 'hi', 'hey', 'help', 'want', 'need', 'like',
-            'large', 'small', 'medium', 'pepperoni', 'cheese', 'pasta'
-        ];
-        
-        // Check if message contains any valid ordering keywords
-        for (const keyword of validResponses) {
-            if (message.includes(keyword)) {
-                return true;
-            }
-        }
-        
-        // If message is longer than 15 characters and doesn't contain background noise indicators,
-        // assume it might be a valid attempt at communication
-        if (message.length > 15 && !isLikelyBackgroundNoise(message)) {
-            return true;
-        }
-        
-        return false;
-    }
+            // Enhanced instructions with natural conversation flow
             const instructions = `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
+
+IMPORTANT: You have excellent natural language understanding. Trust your ability to distinguish between:
+- Customers genuinely trying to order food
+- Background noise, TV audio, or irrelevant conversation
+- People who have called the wrong number or aren't interested in ordering
+
+If someone is clearly not interested in ordering or you're only hearing background noise/TV audio, be polite but brief and end the call quickly.
 
 🚨 MANDATORY ADDRESS VALIDATION WITH RETRY SUPPORT:
 - When customer provides ANY address containing numbers and words, you MUST call validate_delivery_address function IMMEDIATELY
@@ -1566,7 +1261,7 @@ TIMING RULES:
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
 
-        // Message handling logic with UPDATED function call processing for retry system
+        // Message handling logic with natural conversation flow
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
@@ -1575,7 +1270,7 @@ TIMING RULES:
                     case 'response.audio.delta':
                         if (streamSid && ws.readyState === WebSocket.OPEN) {
                             try {
-                                console.log('📢 Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
+                                console.log('Sending audio delta to Twilio, length:', response.delta ? response.delta.length : 0);
                                 const audioMessage = {
                                     event: 'media',
                                     streamSid: streamSid,
@@ -1583,43 +1278,35 @@ TIMING RULES:
                                 };
                                 ws.send(JSON.stringify(audioMessage));
                             } catch (audioSendError) {
-                                console.error('❌ Error sending audio delta to Twilio:', audioSendError);
+                                console.error('Error sending audio delta to Twilio:', audioSendError);
                             }
                         } else {
-                            console.log('❌ Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
+                            console.log('Cannot send audio - streamSid:', streamSid, 'ws.readyState:', ws.readyState);
                         }
                         break;
 
                     case 'response.audio.done':
-                        console.log('✅ Audio response completed');
+                        console.log('Audio response completed');
                         break;
 
                     case 'response.created':
-                        console.log('🎯 OpenAI response created:', response.response?.id);
-                        console.log('🎯 Response modalities:', response.response?.modalities);
-                        console.log('🎯 Response status:', response.response?.status);
+                        console.log('OpenAI response created:', response.response?.id);
                         break;
 
                     case 'response.done':
-                        console.log('✅ OpenAI response completed:', response.response?.id);
-                        console.log('✅ Response status_details:', response.response?.status_details);
-                        console.log('✅ Response usage:', response.response?.usage);
+                        console.log('OpenAI response completed:', response.response?.id);
                         break;
 
                     case 'response.cancelled':
-                        console.log('🛑 OpenAI response cancelled:', response.response?.id);
-                        console.log('🔄 Response cancellation successful - ready for validation');
+                        console.log('OpenAI response cancelled:', response.response?.id);
                         break;
 
                     case 'response.output_item.added':
-                        console.log('📋 Output item added:', response.item?.type, 'content_type:', response.item?.content?.[0]?.type);
+                        console.log('Output item added:', response.item?.type);
                         break;
 
                     case 'response.output_item.done':
-                        console.log('📋 Output item completed:', response.item?.type);
-                        if (response.item?.type === 'message' && response.item?.content?.[0]?.type === 'audio') {
-                            console.log('🎵 Audio content generated, length:', response.item.content[0].audio?.length || 0);
-                        }
+                        console.log('Output item completed:', response.item?.type);
                         break;
 
                     case 'response.audio_transcript.done':
@@ -1715,6 +1402,15 @@ TIMING RULES:
 
                         const customerMessage = response.transcript.trim();
 
+                        // Clear greeting timeout when customer speaks
+                        if (greetingTimeout) {
+                            clearTimeout(greetingTimeout);
+                            greetingTimeout = null;
+                            customerHasSpoken = true;
+                            console.log('Customer engagement detected - clearing greeting timeout');
+                        }
+
+                        // Clear other timeouts
                         if (anythingElseTimeout) {
                             clearTimeout(anythingElseTimeout);
                             anythingElseTimeout = null;
@@ -1731,13 +1427,10 @@ TIMING RULES:
                             msg.text.toLowerCase().includes('just to confirm')
                         );
 
-                        // UPDATED: Enhanced address management with retry system
+                        // Address management with retry system
                         const addressPatterns = [
-                            // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]*\d{5}(-\d{4})?/i,
-                            // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD" or "123 Main Street, Baltimore, Maryland")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+,\s*[A-Za-z]{2,}/i,
-                            // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
                             /\d+\s+[\w\s,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s,]+[A-Za-z]{3,}/i
                         ];
 
@@ -1752,7 +1445,6 @@ TIMING RULES:
                                    text.includes('for delivery') ||
                                    text.includes('to deliver');
                         }) || conversationTranscript.some(msg => {
-                            // If AI asked for delivery address, treat as delivery order
                             return msg.speaker === 'AI' &&
                                    msg.text.toLowerCase().includes('delivery address');
                         });
@@ -1766,9 +1458,9 @@ TIMING RULES:
                             )
                         );
 
-                        // UPDATED: Enhanced logging for debugging with retry system
+                        // Enhanced logging for debugging with retry system
                         const matchedPattern = addressPatterns.findIndex(pattern => pattern.test(customerMessage));
-                        console.log('🔍 Enhanced address state check (with retry):', {
+                        console.log('Enhanced address state check (with retry):', {
                             customerMessage: customerMessage,
                             isDeliveryOrder: isDeliveryOrder,
                             hasValidAddress: hasValidAddress,
@@ -1785,34 +1477,34 @@ TIMING RULES:
                         // Track when customer provides address
                         if (isDeliveryOrder && hasValidAddress) {
                             addressProviderAttempts++;
-                            console.log('📍 Customer provided address (attempt #' + addressProviderAttempts + '):', customerMessage);
+                            console.log('Customer provided address (attempt #' + addressProviderAttempts + '):', customerMessage);
                         }
 
                         // Track when AI asks for address to prevent future duplicates
                         if (aiAskedForAddress && !addressRequested) {
                             addressRequested = true;
-                            console.log('📝 Marked address as requested to prevent duplicates');
+                            console.log('Marked address as requested to prevent duplicates');
                         }
 
-                        // UPDATED: Address validation with retry support
+                        // Address validation with retry support
                         if (isDeliveryOrder && hasValidAddress && !addressValidated && addressValidationAttempts <= maxAddressRetries) {
                             addressValidationAttempts++;
-                            console.log('🏠 Address detected in delivery order - triggering validation (attempt #' + addressValidationAttempts + '):', customerMessage);
+                            console.log('Address detected in delivery order - triggering validation (attempt #' + addressValidationAttempts + '):', customerMessage);
 
-                            // CANCEL ANY ACTIVE RESPONSE to prevent premature rejection messages
+                            // Cancel any active response to prevent premature rejection messages
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🛑 ATTEMPTING to cancel any active response to prevent premature rejection');
+                                console.log('ATTEMPTING to cancel any active response to prevent premature rejection');
                                 try {
                                     openaiWs.send(JSON.stringify({
                                         type: 'response.cancel'
                                     }));
                                 } catch (error) {
-                                    console.log('🛑 Response cancellation not needed (no active response)');
+                                    console.log('Response cancellation not needed (no active response)');
                                 }
 
                                 // Brief delay to ensure cancellation processes, then provide acknowledgment
                                 setTimeout(() => {
-                                    console.log('🚨 INJECTING CONTEXT: Customer provided address, acknowledge and validate');
+                                    console.log('INJECTING CONTEXT: Customer provided address, acknowledge and validate');
                                     openaiWs.send(JSON.stringify({
                                         type: 'conversation.item.create',
                                         item: {
@@ -1834,7 +1526,7 @@ TIMING RULES:
                             const triggerValidation = (attempt = 1) => {
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationAttempts < maxValidationAttempts) {
-                                        console.log(`🔄 Attempting to trigger validation (API attempt ${attempt})`);
+                                        console.log(`Attempting to trigger validation (API attempt ${attempt})`);
                                         validationAttempts++;
 
                                         // Store attempt info for collision handling
@@ -1861,7 +1553,7 @@ TIMING RULES:
 
                         // Trigger ORDER_CONFIRMED format if customer completed order and we haven't processed one yet
                         if (orderCompleted && inOrderingContext && !orderProcessed) {
-                            console.log('🍕 Customer indicated order completion - triggering ORDER_CONFIRMED format');
+                            console.log('Customer indicated order completion - triggering ORDER_CONFIRMED format');
                             setTimeout(() => {
                                 if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
                                     openaiWs.send(JSON.stringify({
@@ -1880,7 +1572,7 @@ TIMING RULES:
                             .slice(-3)
                             .map(msg => msg.text.toLowerCase());
 
-                        // FIXED: Only trigger on specific "anything else I can help you with" questions
+                        // Only trigger on specific "anything else I can help you with" questions
                         const hasRecentAnythingElse = recentAIMessages.some(msg =>
                             msg.includes('anything else i can help you with') ||
                             msg.includes('anything else i can help') ||
@@ -1953,10 +1645,10 @@ TIMING RULES:
                             console.log('Response collision detected - ignoring (these are expected)');
                             // Check if this was a validation retry attempt
                             if (validationRetryInfo && validationRetryInfo.attempts < validationRetryInfo.maxAttempts) {
-                                console.log(`🔄 Collision during validation attempt ${validationRetryInfo.attempts}, retrying in 1 second...`);
+                                console.log(`Collision during validation attempt ${validationRetryInfo.attempts}, retrying in 1 second...`);
                                 setTimeout(() => {
                                     if (openaiWs && openaiWs.readyState === WebSocket.OPEN && validationRetryInfo) {
-                                        console.log(`🔄 Retry validation attempt ${validationRetryInfo.attempts + 1}`);
+                                        console.log(`Retry validation attempt ${validationRetryInfo.attempts + 1}`);
                                         validationRetryInfo.attempts++;
                                         openaiWs.send(JSON.stringify({
                                             type: 'response.create',
@@ -1966,12 +1658,12 @@ TIMING RULES:
                                             }
                                         }));
                                     } else if (!validationRetryInfo) {
-                                        console.log('🔄 Validation retry cancelled - validation already completed');
+                                        console.log('Validation retry cancelled - validation already completed');
                                     }
                                 }, 1000);
                             }
                         } else if (response.error?.code === 'response_cancel_not_active') {
-                            console.log('🛑 Response cancellation not needed (no active response) - ignoring');
+                            console.log('Response cancellation not needed (no active response) - ignoring');
                         } else {
                             setTimeout(async () => {
                                 if (callSid) {
@@ -1986,7 +1678,7 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
-                        console.log('🔍 Restaurant available for greeting?', {
+                        console.log('Restaurant available for greeting?', {
                             hasRestaurant: !!restaurant,
                             restaurantName: restaurant?.name,
                             deliveryEnabled: restaurant?.delivery_enabled,
@@ -1995,16 +1687,16 @@ TIMING RULES:
 
                         // Add a conversation item first, then create response
                         setTimeout(() => {
-                            console.log('🎯 setTimeout callback executing...');
+                            console.log('setTimeout callback executing...');
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                                console.log('🎯 Initiating greeting sequence for restaurant:', restaurant?.name);
+                                console.log('Initiating greeting sequence for restaurant:', restaurant?.name);
 
                                 // Create appropriate greeting based on delivery availability
                                 const greetingText = restaurant?.delivery_enabled
                                     ? `Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?`
                                     : `Hello! Thank you for calling ${restaurant.name}. What would you like for pickup?`;
 
-                                console.log('🎯 Greeting text prepared:', greetingText);
+                                console.log('Greeting text prepared:', greetingText);
 
                                 // First add a conversation item to trigger the greeting
                                 openaiWs.send(JSON.stringify({
@@ -2021,7 +1713,7 @@ TIMING RULES:
                                     }
                                 }));
 
-                                console.log('🎯 Sent conversation item to trigger greeting');
+                                console.log('Sent conversation item to trigger greeting');
 
                                 // Then create the response with the specific greeting
                                 setTimeout(() => {
@@ -2033,7 +1725,7 @@ TIMING RULES:
                                                 instructions: `Say exactly: "${greetingText}"`
                                             }
                                         }));
-                                        console.log('🎯 Sent response.create with greeting instructions');
+                                        console.log('Sent response.create with greeting instructions');
                                         
                                         // SIMPLIFIED: Set single timeout for customer engagement
                                         greetingTimeout = setTimeout(async () => {
@@ -2048,11 +1740,11 @@ TIMING RULES:
                                         }, 15000); // 15 seconds total for any customer engagement
                                         
                                     } else {
-                                        console.error('❌ OpenAI websocket not available for response.create');
+                                        console.error('OpenAI websocket not available for response.create');
                                     }
                                 }, 100);
                             } else {
-                                console.error('❌ OpenAI websocket not available for greeting setup');
+                                console.error('OpenAI websocket not available for greeting setup');
                             }
                         }, 500);
                         break;
@@ -2072,8 +1764,8 @@ TIMING RULES:
         });
 
         openaiWs.on('error', async (error) => {
-            console.error('❌ OpenAI WebSocket error:', error);
-            console.error('🚨 Connection failure details:', {
+            console.error('OpenAI WebSocket error:', error);
+            console.error('Connection failure details:', {
                 message: error.message,
                 code: error.code,
                 type: error.type,
@@ -2084,7 +1776,7 @@ TIMING RULES:
             });
 
             if (callSid) {
-                console.log('🔄 Enhanced error recovery - OpenAI connection failed');
+                console.log('Enhanced error recovery - OpenAI connection failed');
                 await hangup(callSid, {
                     message: 'We are currently experiencing high call volume. Please try calling back in a few minutes. Thank you for your patience.',
                     reason: 'openai_websocket_error',
@@ -2098,7 +1790,7 @@ TIMING RULES:
         });
     }
 
-    // UPDATED: Function call handler with address retry support
+    // Function call handler with address retry support
     async function handleFunctionCall(functionCall) {
         try {
             const { name, call_id, arguments: args } = functionCall;
@@ -2186,13 +1878,13 @@ TIMING RULES:
                     break;
 
                 case 'validate_delivery_address':
-                    console.log('🔍 validate_delivery_address function called with args:', JSON.stringify(parsedArgs));
-                    console.log('🔍 Current state - addressValidated:', addressValidated, 'validatedDeliveryAddress:', validatedDeliveryAddress);
-                    console.log('🔍 Retry state - validationAttempts:', addressValidationAttempts, 'maxRetries:', maxAddressRetries);
+                    console.log('validate_delivery_address function called with args:', JSON.stringify(parsedArgs));
+                    console.log('Current state - addressValidated:', addressValidated, 'validatedDeliveryAddress:', validatedDeliveryAddress);
+                    console.log('Retry state - validationAttempts:', addressValidationAttempts, 'maxRetries:', maxAddressRetries);
 
                     // Check if address is already validated to prevent duplicates
                     if (addressValidated && validatedDeliveryAddress) {
-                        console.log('✅ Address already validated:', validatedDeliveryAddress);
+                        console.log('Address already validated:', validatedDeliveryAddress);
                         result = {
                             valid: true,
                             message: 'Address already validated successfully',
@@ -2205,7 +1897,7 @@ TIMING RULES:
 
                     let deliveryAddress = parsedArgs.address;
 
-                    // FIXED: If no address provided directly, extract from the most recent customer messages
+                    // If no address provided directly, extract from the most recent customer messages
                     if (!deliveryAddress || deliveryAddress.trim().length === 0) {
                         console.log('Address not provided in function args, checking latest customer message...');
                         const recentCustomerMessages = conversationTranscript
@@ -2216,7 +1908,7 @@ TIMING RULES:
                             const latestMessage = recentCustomerMessages[recentCustomerMessages.length - 1].text;
                             console.log('Checking latest message: "' + latestMessage + '"');
 
-                            // FIRST: Check if this is obviously a name instead of an address
+                            // Check if this is obviously a name instead of an address
                             const isName = /^[A-Za-z]+(\s+[A-Za-z]+)*\.?$/.test(latestMessage.trim());
                             const hasNumber = /\d/.test(latestMessage);
 
@@ -2234,13 +1926,9 @@ TIMING RULES:
 
                             // Look for complete address patterns - flexible matching for multiple formats
                             const addressPatterns = [
-                                // Format 1: Street + ZIP (e.g., "123 Main St, 12345" or "123 Main Street, Baltimore, MD 21234")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]*\d{5}(-\d{4})?/i,
-                                // Format 2: Street + City, State (e.g., "123 Main Street, Baltimore, MD" or "123 Main Street, Baltimore, Maryland")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+,\s*[A-Za-z]{2,}/i,
-                                // Format 3: Street + City (e.g., "123 Main Street, Baltimore")
                                 /\d+\s+[\w\s\.,]*(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)[\w\s\.,]+[A-Za-z]{3,}/i,
-                                // Format 4: Simple number + words + zip (backup pattern)
                                 /\d+\s+[\w\s\.,]+\d{5}(-\d{4})?/i
                             ];
 
@@ -2290,20 +1978,6 @@ TIMING RULES:
                     }
 
                     console.log('Validating extracted address:', deliveryAddress);
-                    console.log('Address validation details:', {
-                        hasStreetNumber: /^\d+/.test(deliveryAddress.trim()),
-                        hasStreetName: /\b(street|road|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)\b/i.test(deliveryAddress),
-                        hasFiveDigitZip: /\b\d{5}(-\d{4})?\b/.test(deliveryAddress),
-                        restaurant_delivery_enabled: restaurant.delivery_enabled
-                    });
-
-                    console.log('About to call validation edge function with:', {
-                        address: deliveryAddress.trim(),
-                        restaurant_id: restaurant.id,
-                        delivery_enabled: restaurant.delivery_enabled,
-                        validation_attempt: addressValidationAttempts,
-                        max_retries: maxAddressRetries
-                    });
 
                     const validationResult = await validateDeliveryAddress(deliveryAddress, restaurant);
 
@@ -2311,7 +1985,7 @@ TIMING RULES:
                         // SUCCESSFUL VALIDATION: Mark as validated and store address
                         addressValidated = true;
                         validatedDeliveryAddress = deliveryAddress;
-                        console.log('✅ Address validation successful - marked as validated:', deliveryAddress);
+                        console.log('Address validation successful - marked as validated:', deliveryAddress);
 
                         // Clear retry info since validation succeeded
                         validationRetryInfo = null;
@@ -2327,14 +2001,14 @@ TIMING RULES:
                         };
                     } else {
                         // FAILED VALIDATION: Check if retry is allowed
-                        console.log('❌ Address validation failed (attempt #' + addressValidationAttempts + ')');
+                        console.log('Address validation failed (attempt #' + addressValidationAttempts + ')');
 
                         // Clear retry info since validation completed
                         validationRetryInfo = null;
 
                         if (addressValidationAttempts <= maxAddressRetries) {
                             // RETRY ALLOWED
-                            console.log('🔄 Retry allowed - customer can provide address again');
+                            console.log('Retry allowed - customer can provide address again');
                             result = {
                                 ...validationResult,
                                 instruction: 'First address validation failed. Provide helpful guidance and ask customer to provide their delivery address again. This is attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. Be specific about what might be wrong (street spelling, zip code, etc.).',
@@ -2345,7 +2019,7 @@ TIMING RULES:
                             };
                         } else {
                             // NO MORE RETRIES - Force pickup
-                            console.log('🚫 Maximum retries exceeded - forcing pickup');
+                            console.log('Maximum retries exceeded - forcing pickup');
                             addressValidated = true; // Prevent further attempts
                             result = {
                                 ...validationResult,
@@ -2413,16 +2087,16 @@ TIMING RULES:
                     break;
 
                 case 'create_customer_message':
-                    // FIXED: Apply intent detection before creating message
+                    // Apply intent detection before creating message
                     const recentCustomerMessages = conversationTranscript
                         .filter(msg => msg.speaker === 'Customer')
                         .slice(-3);
                         
                     const latestMessage = recentCustomerMessages[recentCustomerMessages.length - 1]?.text || '';
                     
-                    // CRITICAL: Check if this is actually a customer service request
+                    // Check if this is actually a customer service request
                     if (!shouldCreateCustomerMessage(latestMessage, conversationTranscript)) {
-                        console.log('🚫 Message creation blocked - not a customer service request');
+                        console.log('Message creation blocked - not a customer service request');
                         result = {
                             success: false,
                             message: 'No customer service issue detected - this appears to be a normal call ending',
@@ -2710,15 +2384,6 @@ TIMING RULES:
                 return;
             }
 
-            // Debug timing calculation
-            console.log('🕐 About to calculate ready time with restaurant data:', {
-                restaurant_preparation_time: restaurant?.preparation_time,
-                restaurant_delivery_time: restaurant?.delivery_time,
-                restaurant_delivery_enabled: restaurant?.delivery_enabled,
-                orderType: orderType,
-                isDelivery: orderType === 'delivery'
-            });
-
             const timing = calculateOrderReadyTime(restaurant, orderType === 'delivery');
 
             // Create formatted order ticket
@@ -2843,10 +2508,10 @@ TIMING RULES:
                             };
                             openaiWs.send(JSON.stringify(audioData));
                         } catch (audioError) {
-                            console.error('❌ Error sending audio to OpenAI:', audioError);
+                            console.error('Error sending audio to OpenAI:', audioError);
                         }
                     } else {
-                        console.log('⚠️ OpenAI WebSocket not ready for audio, state:', openaiWs?.readyState);
+                        console.log('OpenAI WebSocket not ready for audio, state:', openaiWs?.readyState);
                     }
                     break;
 
@@ -2880,6 +2545,11 @@ TIMING RULES:
             anythingElseTimeout = null;
         }
 
+        if (greetingTimeout) {
+            clearTimeout(greetingTimeout);
+            greetingTimeout = null;
+        }
+
         const callEndTime = new Date();
         const baseDuration = Math.floor((callEndTime - callStartTime) / 1000);
         const callDuration = Math.round(baseDuration + 5.5);
@@ -2910,15 +2580,13 @@ TIMING RULES:
                 order_id: initialCallData.order_id || null
             };
 
-            console.log('Creating complete call log with migration-ready data:', {
+            console.log('Creating complete call log with natural conversation flow data:', {
                 call_sid: callSid,
-                base_duration: baseDuration,
                 final_duration: callDuration,
-                duration_type: 'integer',
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
-                migration_status: 'ready',
-                address_retry_enabled: true
+                natural_conversation_flow: true,
+                ring_two_tech_branding: true
             });
 
             try {
@@ -2936,7 +2604,7 @@ TIMING RULES:
                 delete global.pendingCallData[callSid];
             }
 
-            console.log('Call completed with ADDRESS RETRY SYSTEM. Duration: ' + callDuration + ' seconds');
+            console.log('Call completed with natural conversation flow. Duration: ' + callDuration + ' seconds');
         }
 
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -2944,24 +2612,9 @@ TIMING RULES:
         }
     });
 
-    // Enhanced Twilio WebSocket error handling
+    // WebSocket error handling
     ws.on('error', async (error) => {
-        console.error('❌ Twilio WebSocket error:', error);
-        console.error('🚨 Error details:', {
-            message: error.message,
-            code: error.code,
-            type: error.type,
-            callSid: callSid
-        });
-
-        if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND') {
-            console.error('🔴 Network connectivity issue - Error 11750 likely');
-        }
-
-        if (error.message && error.message.includes('TLS')) {
-            console.error('🔴 TLS/SSL handshake failed - Error 31920 likely');
-        }
-
+        console.error('Twilio WebSocket error:', error);
         setTimeout(async () => {
             if (callSid) {
                 await hangup(callSid, {
@@ -2973,7 +2626,7 @@ TIMING RULES:
     });
 
     ws.on('close', (code, reason) => {
-        console.log('🔌 Twilio WebSocket closed:', { code, reason: reason?.toString() });
+        console.log('Twilio WebSocket closed:', { code, reason: reason?.toString() });
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.close();
         }
@@ -2992,28 +2645,27 @@ server.listen(PORT, '0.0.0.0', (error) => {
         process.exit(1);
     }
 
-    console.log('🚀 Restaurant AI System - UPDATED: Ring Two Tech Branding');
-    console.log('📞 Server running on port ' + PORT);
-    console.log('⚡ FAST Twilio webhook response - calls will connect immediately');
-    console.log('🎯 WebSocket ready for Twilio Media Streams');
-    console.log('🤖 OpenAI configured: ' + !!OPENAI_API_KEY);
-    console.log('🗄️ Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
-    console.log('📱 Twilio configured: ' + !!twilioClient);
-    console.log('🏷️ Ring Two Tech branding: ENABLED');
+    console.log('Restaurant AI System - Natural Conversation Flow with Ring Two Tech Branding');
+    console.log('Server running on port ' + PORT);
+    console.log('FAST Twilio webhook response - calls will connect immediately');
+    console.log('WebSocket ready for Twilio Media Streams');
+    console.log('OpenAI configured: ' + !!OPENAI_API_KEY);
+    console.log('Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
+    console.log('Twilio configured: ' + !!twilioClient);
+    console.log('Ring Two Tech branding: ENABLED');
     console.log('');
-    console.log('✅ MIGRATION STATUS: READY');
-    console.log('🎯 INTENT-BASED: Natural conversation flow with function calling');
-    console.log('🔧 EDGE FUNCTIONS: All database operations preserved');
-    console.log('💬 MESSAGE SYSTEM: Fixed - only for actual customer service issues');
-    console.log('⏱️ CALL DURATION: Fixed - now sends integers to database');
-    console.log('🌐 REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
-    console.log('🔥 TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
-    console.log('🏠 ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
-    console.log('🔄 ADDRESS RETRY: Customer can provide address again if first validation fails');
-    console.log('🚫 MESSAGE INTENT: Fixed - will NOT create messages for "I\'ll call back later"');
-    console.log('🏷️ RING TWO TECH: All hangup messages include Ring Two Tech branding');
+    console.log('MIGRATION STATUS: READY');
+    console.log('NATURAL CONVERSATION FLOW: OpenAI handles all conversation logic');
+    console.log('EDGE FUNCTIONS: All database operations preserved');
+    console.log('MESSAGE SYSTEM: Intent-based - OpenAI decides when to create messages');
+    console.log('CALL DURATION: Fixed - sends integers to database');
+    console.log('REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
+    console.log('TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
+    console.log('ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
+    console.log('RING TWO TECH: All hangup messages include Ring Two Tech branding');
+    console.log('TIMEOUT LOGIC: 15 seconds for customer engagement, then hangup');
     console.log('');
-    console.log('✨ Server ready for production traffic - Ring Two Tech branding enabled!');
+    console.log('Server ready for production traffic - natural conversation flow enabled!');
 });
 
 server.on('error', (error) => {
