@@ -455,93 +455,113 @@ async function updateOrder(orderId, updateData) {
 
 async function geocodeAddress(address) {
     // Using OpenStreetMap's Nominatim API - free and no API key required
-    const encodedAddress = encodeURIComponent(address);
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodedAddress}&format=json&limit=5&countrycodes=us&addressdetails=1`;
+    console.log('🗺️ Starting OpenStreetMap geocoding for:', address);
     
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        const response = await fetch(url, { 
-            signal: controller.signal,
-            headers: {
-                'User-Agent': 'RestaurantAI/1.0 (contact@restaurant.com)' // Required by Nominatim
-            }
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            console.error('Nominatim API error:', response.status, response.statusText);
-            return { success: false, error: 'geocoding_service_error' };
-        }
-
-        const data = await response.json();
+    // Clean and normalize the address for better results
+    let normalizedAddress = address
+        .replace(/\s+/g, ' ')  // normalize whitespace
+        .replace(/,\s*,/g, ',') // remove double commas
+        .trim();
+    
+    // Try multiple variations of the address for better success
+    const addressVariations = [
+        normalizedAddress,
+        normalizedAddress.replace(/\bOld\s+Hartford\b/i, 'Old Harford'), // Common misspelling
+        normalizedAddress.replace(/\bHartford\b/i, 'Harford'), // Try without "Old"
+        normalizedAddress.replace(/,?\s*\d{5}(-\d{4})?\s*$/, ''), // Try without ZIP
+    ];
+    
+    for (let i = 0; i < addressVariations.length; i++) {
+        const addressToTry = addressVariations[i];
+        console.log(`🗺️ Attempting geocoding variation ${i + 1}:`, addressToTry);
         
-        if (data && data.length > 0) {
-            const result = data[0]; // Best match
-            
-            // Validate that this looks like a street address (not just a city/state)
-            const hasStreetNumber = result.display_name.match(/^\d+/);
-            const hasStreetName = result.display_name.toLowerCase().includes('street') ||
-                                result.display_name.toLowerCase().includes('road') ||
-                                result.display_name.toLowerCase().includes('avenue') ||
-                                result.display_name.toLowerCase().includes('lane') ||
-                                result.display_name.toLowerCase().includes('drive') ||
-                                result.display_name.toLowerCase().includes('way') ||
-                                result.display_name.toLowerCase().includes('court') ||
-                                result.display_name.toLowerCase().includes('place') ||
-                                result.display_name.toLowerCase().includes('boulevard');
+        const encodedAddress = encodeURIComponent(addressToTry);
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodedAddress}&format=json&limit=10&countrycodes=us&addressdetails=1&extratags=1`;
+        
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000); // Longer timeout
 
-            if (!hasStreetNumber || !hasStreetName) {
-                console.log('OSM result appears to be city/region level, not street address:', result.display_name);
-                
-                // Look for better matches in remaining results
-                for (let i = 1; i < data.length; i++) {
-                    const altResult = data[i];
-                    const altHasStreetNumber = altResult.display_name.match(/^\d+/);
-                    const altHasStreetName = altResult.display_name.toLowerCase().includes('street') ||
-                                          altResult.display_name.toLowerCase().includes('road') ||
-                                          altResult.display_name.toLowerCase().includes('avenue');
+            const response = await fetch(url, { 
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'RestaurantAI/1.0 (delivery-validation@restaurant.com)' // Required by Nominatim
+                }
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                console.error('🗺️ Nominatim API error:', response.status, response.statusText);
+                continue; // Try next variation
+            }
+
+            const data = await response.json();
+            console.log(`🗺️ Nominatim returned ${data.length} results for variation ${i + 1}`);
+            
+            if (data && data.length > 0) {
+                // Look for the best match - prefer results with house numbers
+                for (const result of data) {
+                    console.log('🗺️ Checking result:', {
+                        display_name: result.display_name,
+                        type: result.type,
+                        class: result.class,
+                        importance: result.importance
+                    });
                     
-                    if (altHasStreetNumber && altHasStreetName) {
-                        console.log('Found better street-level match:', altResult.display_name);
+                    // Prefer results that look like house addresses
+                    const hasHouseNumber = /^\d+/.test(result.display_name);
+                    const isBuilding = result.type === 'house' || result.type === 'building' || result.class === 'place';
+                    const hasStreetInName = /\b(road|street|avenue|lane|drive|way|court|place|boulevard)\b/i.test(result.display_name);
+                    
+                    if (hasHouseNumber && (isBuilding || hasStreetInName)) {
+                        console.log('✅ Found good street-level match:', result.display_name);
                         return {
                             success: true,
-                            latitude: parseFloat(altResult.lat),
-                            longitude: parseFloat(altResult.lon),
-                            formatted_address: altResult.display_name,
-                            place_id: altResult.place_id,
-                            osm_id: altResult.osm_id
+                            latitude: parseFloat(result.lat),
+                            longitude: parseFloat(result.lon),
+                            formatted_address: result.display_name,
+                            place_id: result.place_id,
+                            osm_id: result.osm_id,
+                            confidence: result.importance || 0.5,
+                            variation_used: i + 1
                         };
                     }
                 }
+                
+                // If no perfect match, use the first result
+                const result = data[0];
+                console.log('🗺️ Using first result as fallback:', result.display_name);
+                return {
+                    success: true,
+                    latitude: parseFloat(result.lat),
+                    longitude: parseFloat(result.lon),
+                    formatted_address: result.display_name,
+                    place_id: result.place_id,
+                    osm_id: result.osm_id,
+                    confidence: result.importance || 0.3,
+                    variation_used: i + 1,
+                    fallback_result: true
+                };
             }
             
-            return {
-                success: true,
-                latitude: parseFloat(result.lat),
-                longitude: parseFloat(result.lon),
-                formatted_address: result.display_name,
-                place_id: result.place_id,
-                osm_id: result.osm_id,
-                confidence: result.importance || 0.5
-            };
+            // Small delay between requests to be respectful to Nominatim
+            if (i < addressVariations.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+        } catch (error) {
+            console.error(`🗺️ Error with variation ${i + 1}:`, error.message);
+            continue; // Try next variation
         }
-        
-        // No results found
-        console.log('No geocoding results found for:', address);
-        return {
-            success: false,
-            error: 'no_results_found',
-            suggestions: [] // OSM doesn't provide suggestions in the same way
-        };
-    } catch (error) {
-        console.error('OpenStreetMap geocoding error:', error);
-        return { 
-            success: false, 
-            error: error.name === 'AbortError' ? 'timeout' : error.message 
-        };
     }
+    
+    // No results found with any variation
+    console.log('🗺️ No geocoding results found for any address variation');
+    return {
+        success: false,
+        error: 'no_results_found',
+        variations_tried: addressVariations.length
+    };
 }
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -635,8 +655,33 @@ async function validateDeliveryAddress(address, restaurant) {
 
         if (!geocodeResult.success) {
             // Fallback to Edge function validation if geocoding fails
-            console.log('OpenStreetMap geocoding failed, using Edge function fallback');
-            return await callEdgeFunctionValidation(cleanAddress, restaurant);
+            console.log('🔄 OpenStreetMap geocoding failed, calling Edge function fallback...');
+            console.log('🔄 Geocoding failure details:', {
+                error: geocodeResult.error,
+                variations_tried: geocodeResult.variations_tried,
+                address: cleanAddress
+            });
+            
+            try {
+                const edgeFunctionResult = await callEdgeFunctionValidation(cleanAddress, restaurant);
+                console.log('🔄 Edge function fallback result:', edgeFunctionResult);
+                return {
+                    ...edgeFunctionResult,
+                    fallback_used: 'edge_function',
+                    geocoding_failed: true,
+                    geocoding_error: geocodeResult.error
+                };
+            } catch (edgeFunctionError) {
+                console.error('🔄 Edge function fallback also failed:', edgeFunctionError);
+                return {
+                    valid: false,
+                    reason: 'validation_service_unavailable',
+                    message: 'I\'m having trouble validating that address right now. Could you please provide your address again, or would you prefer to place a pickup order?',
+                    address: cleanAddress,
+                    geocoding_error: geocodeResult.error,
+                    edge_function_error: edgeFunctionError.message
+                };
+            }
         }
 
         // Step 5: Distance calculation and delivery area check
@@ -714,47 +759,83 @@ async function validateDeliveryAddress(address, restaurant) {
 
 // Fallback to original Edge function validation
 async function callEdgeFunctionValidation(address, restaurant) {
-    const edgeFunctionUrl = SUPABASE_URL + '/functions/v1/validate-delivery';
+    console.log('🔧 Calling Edge function validation as fallback...');
     
-    const response = await fetch(edgeFunctionUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({
-            address: address.trim(),
-            restaurant_id: restaurant.id,
-            delivery_enabled: restaurant.delivery_enabled,
-            delivery_radius: restaurant.delivery_radius || 5,
-            delivery_hours: restaurant.delivery_hours,
-            delivery_time: restaurant.delivery_time || 15,
-            preparation_time: restaurant.preparation_time || 20,
-            restaurant_address: restaurant.address,
-            restaurant_latitude: restaurant.latitude,
-            restaurant_longitude: restaurant.longitude
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error(`Edge function failed with status ${response.status}`);
+    if (!address || !address.trim()) {
+        console.error('🔧 Edge function called with empty address');
+        throw new Error('Address is required for Edge function validation');
     }
-
-    const result = await response.json();
     
-    if (result.error) {
-        throw new Error(result.error);
-    }
-
-    return {
-        valid: result.valid || false,
-        message: result.message || 'Address validation completed',
-        address: address,
-        estimated_delivery_time: result.estimated_delivery_time,
-        delivery_radius: result.delivery_radius,
-        reason: result.reason,
-        edge_function_used: true
+    // Use the correct Edge function URL
+    const edgeFunctionUrl = 'https://ujgpqnarhcegrpyzbxej.supabase.co/functions/v1/validate-delivery';
+    console.log('🔧 Edge function URL:', edgeFunctionUrl);
+    
+    const requestBody = {
+        address: address.trim(),
+        restaurant_id: restaurant.id,
+        delivery_enabled: restaurant.delivery_enabled,
+        delivery_radius: restaurant.delivery_radius || 5,
+        delivery_hours: restaurant.delivery_hours,
+        delivery_time: restaurant.delivery_time || 15,
+        preparation_time: restaurant.preparation_time || 20,
+        restaurant_address: restaurant.address,
+        restaurant_latitude: restaurant.latitude,
+        restaurant_longitude: restaurant.longitude
     };
+    
+    console.log('🔧 Calling Edge function with body:', JSON.stringify(requestBody, null, 2));
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const response = await fetch(edgeFunctionUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        console.log('🔧 Edge function response status:', response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('🔧 Edge function HTTP error:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText
+            });
+            throw new Error(`Edge function failed with status ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('🔧 Edge function result:', result);
+        
+        if (result.error) {
+            console.error('🔧 Edge function returned error:', result.error);
+            throw new Error(result.error);
+        }
+
+        return {
+            valid: result.valid || false,
+            message: result.message || 'Address validation completed via Edge function',
+            address: address,
+            estimated_delivery_time: result.estimated_delivery_time,
+            delivery_radius: result.delivery_radius,
+            reason: result.reason,
+            edge_function_used: true,
+            fallback_method: 'supabase_edge_function'
+        };
+        
+    } catch (error) {
+        console.error('🔧 Edge function call failed:', error);
+        throw error;
+    }
 }
 
 async function createOrder(orderData) {
@@ -1442,12 +1523,24 @@ ORDER_END
                             return text.includes('delivery') || text.includes('deliver');
                         });
 
-                        // Enhanced address validation trigger
+                        // Enhanced address validation trigger with better argument passing
                         if (isDeliveryOrder && hasValidAddress && !addressValidated && addressProviderAttempts < 1) {
                             addressProviderAttempts++;
                             addressValidated = true; // Prevent race conditions
                             
                             console.log('🏠 Enhanced address validation triggered:', customerMessage);
+                            
+                            // Extract the address directly here for better reliability
+                            let extractedAddress = null;
+                            for (const pattern of addressPatterns) {
+                                const match = customerMessage.match(pattern);
+                                if (match) {
+                                    extractedAddress = match[0].trim().replace(/\.$/, '');
+                                    break;
+                                }
+                            }
+                            
+                            console.log('🏠 Extracted address for validation:', extractedAddress);
                             
                             // Cancel any active response to prevent conflicts
                             if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -1467,7 +1560,7 @@ ORDER_END
                                             role: 'user',
                                             content: [{
                                                 type: 'input_text',
-                                                text: '[SYSTEM: Customer provided delivery address: "' + customerMessage + '". Say "Let me check if you\'re within our delivery area" then immediately call validate_delivery_address function with enhanced Google geocoding.]'
+                                                text: `[SYSTEM: Customer provided delivery address: "${extractedAddress}". Say "Let me check if you're within our delivery area" then immediately call validate_delivery_address function with address="${extractedAddress}"]`
                                             }]
                                         }
                                     }));
@@ -2324,7 +2417,7 @@ ORDER_END
                 duration: callDuration,
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
-                enhanced_validation_used: !!GOOGLE_MAPS_API_KEY
+                openstreetmap_geocoding_used: true
             });
 
             try {
