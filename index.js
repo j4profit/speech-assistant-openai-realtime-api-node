@@ -261,6 +261,8 @@ app.get('/health', (_req, res) => {
         message_intent_natural: true,
         address_retry_enabled: true,
         ring_two_tech_branding: true,
+        vad_threshold: 0.8,
+        silence_duration_ms: 500,
         last_health_check: new Date().toISOString()
     };
 
@@ -280,7 +282,11 @@ app.get('/', (req, res) => {
         server_time: new Date().toISOString(),
         migration_ready: true,
         natural_conversation_flow: true,
-        ring_two_tech_branding: true
+        ring_two_tech_branding: true,
+        vad_settings: {
+            threshold: 0.8,
+            silence_duration_ms: 500
+        }
     });
 });
 
@@ -1060,9 +1066,9 @@ For delivery orders, follow this EXACT sequence:
 2. When customer provides ANY address that contains numbers and words, IMMEDIATELY call validate_delivery_address function
 3. 🚨 CRITICAL - If validation returns valid=true: say "Great! Your address is within our delivery area. What would you like to order?"
 4. 🚨 CRITICAL - If validation returns valid=false AND this is FIRST attempt: 
-   - Use the exact message from validation function 
-   - Add specific guidance based on the error: "Please double-check the street spelling or provide your complete address with zip code"
-   - Ask: "Could you please provide your delivery address again?"
+   - The validation result will include the street name spelling confirmation
+   - Use the EXACT instruction provided in the validation result which includes spelling back the street name
+   - This helps confirm pronunciation accuracy before retry
 5. 🚨 CRITICAL - If validation returns valid=false AND this is SECOND attempt:
    - Say: "I'm sorry, we cannot deliver to that area. Would you like to place a pickup order instead?"
    - Do NOT ask for address again
@@ -1678,6 +1684,7 @@ TIMING RULES:
 
                     case 'session.updated':
                         console.log('OpenAI session configured with updated instructions');
+                        console.log('VAD settings applied: threshold=0.8, silence_duration=500ms');
                         console.log('Restaurant available for greeting?', {
                             hasRestaurant: !!restaurant,
                             restaurantName: restaurant?.name,
@@ -2007,15 +2014,28 @@ TIMING RULES:
                         validationRetryInfo = null;
 
                         if (addressValidationAttempts <= maxAddressRetries) {
-                            // RETRY ALLOWED
+                            // RETRY ALLOWED - Extract and spell back the street name
                             console.log('Retry allowed - customer can provide address again');
+                            
+                            // Extract street name for spelling confirmation
+                            let streetNameSpelling = '';
+                            const streetMatch = deliveryAddress.match(/\d+\s+([\w\s]+?)\s+(road|street|avenue|lane|drive|way|court|place|boulevard|blvd|ave|rd|st|ct|pl|ln|dr)/i);
+                            if (streetMatch) {
+                                const streetName = streetMatch[1].trim();
+                                // Create letter-by-letter spelling
+                                streetNameSpelling = streetName.toUpperCase().split('').join('-');
+                                console.log('Extracted street name for spelling:', streetName, '-> spelling:', streetNameSpelling);
+                            }
+                            
                             result = {
                                 ...validationResult,
-                                instruction: 'First address validation failed. Provide helpful guidance and ask customer to provide their delivery address again. This is attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '. Be specific about what might be wrong (street spelling, zip code, etc.).',
+                                instruction: 'First address validation failed. Say: "' + (validationResult.message || 'I cannot validate that address') + '. I heard the street name as ' + (streetMatch ? streetMatch[1].trim() : 'unclear') + (streetNameSpelling ? ', spelled ' + streetNameSpelling : '') + '. Could you please provide your complete delivery address again, making sure to clearly state the street name?" This is attempt #' + addressValidationAttempts + ' of ' + (maxAddressRetries + 1) + '.',
                                 status: 'RETRY_ALLOWED',
                                 validation_attempt: addressValidationAttempts,
                                 retry_allowed: true,
-                                max_attempts: maxAddressRetries + 1
+                                max_attempts: maxAddressRetries + 1,
+                                street_name_heard: streetMatch ? streetMatch[1].trim() : null,
+                                street_name_spelling: streetNameSpelling
                             };
                         } else {
                             // NO MORE RETRIES - Force pickup
@@ -2653,6 +2673,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
     console.log('Twilio configured: ' + !!twilioClient);
     console.log('Ring Two Tech branding: ENABLED');
+    console.log('VAD Settings: threshold=0.8, silence_duration=500ms');
     console.log('');
     console.log('MIGRATION STATUS: READY');
     console.log('NATURAL CONVERSATION FLOW: OpenAI handles all conversation logic');
@@ -2664,6 +2685,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
     console.log('RING TWO TECH: All hangup messages include Ring Two Tech branding');
     console.log('TIMEOUT LOGIC: 15 seconds for customer engagement, then hangup');
+    console.log('VAD OPTIMIZED: More responsive with 0.8 threshold and 500ms silence');
     console.log('');
     console.log('Server ready for production traffic - natural conversation flow enabled!');
 });
