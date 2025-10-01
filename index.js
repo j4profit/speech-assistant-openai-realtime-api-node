@@ -1584,7 +1584,7 @@ TIMING RULES:
                                         }
                                     }));
                                 }
-                            }, 500);
+                            }, 800);
                         }
 
                         const recentAIMessages = conversationTranscript
