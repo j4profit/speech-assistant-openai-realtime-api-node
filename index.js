@@ -1,5 +1,6 @@
 // Restaurant AI Ordering System - UPDATED: Natural Conversation Flow with Ring Two Tech Branding
 // Updated for OpenAI Migration with Address Validation Retry Support + Ring Two Tech Message
+// UPDATED: Google Chirp3 HD Voice for TwiML hangup messages
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -152,11 +153,21 @@ async function hangup(callSid, options = {}) {
     }
 }
 
+// Helper function to escape XML characters
+function escapeXML(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
 // =============================================================================
-// HTTP ENDPOINTS - UPDATED WITH RING TWO TECH MESSAGE ONLY
+// HTTP ENDPOINTS - UPDATED WITH RING TWO TECH MESSAGE AND GOOGLE CHIRP3 HD VOICE
 // =============================================================================
 
-// UPDATED: Hangup TwiML endpoint with Ring Two Tech message ONLY
+// UPDATED: Hangup TwiML endpoint with Ring Two Tech message and Google Chirp3 HD voice
 app.post('/hangup-twiml', (req, res) => {
     const callSid = req.query.call_sid || req.body.CallSid;
     let restaurantName = '';
@@ -171,11 +182,12 @@ app.post('/hangup-twiml', (req, res) => {
         'Your call was processed by Ring two tech. Thank you for calling ' + restaurantName + '.' :
         'Your call was processed by Ring two tech. Thank you for calling.';
 
-    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Say voice="alice">' + message + '</Say>\n    <Hangup/>\n</Response>';
+    // UPDATED: Use Google Chirp3 HD voice as requested
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n    <Say voice="Google.en-US-Chirp3-HD-Aoede">' + escapeXML(message) + '</Say>\n    <Hangup/>\n</Response>';
     res.type('text/xml');
     res.send(twiml);
     
-    console.log('TwiML hangup message sent:', message);
+    console.log('TwiML hangup message sent with Google Chirp3 HD voice:', message);
 });
 
 // Fast-responding Twilio webhook endpoint for incoming calls
@@ -261,6 +273,7 @@ app.get('/health', (_req, res) => {
         message_intent_natural: true,
         address_retry_enabled: true,
         ring_two_tech_branding: true,
+        google_chirp3_hd_voice: true,
         vad_threshold: 0.8,
         silence_duration_ms: 500,
         last_health_check: new Date().toISOString()
@@ -283,6 +296,7 @@ app.get('/', (req, res) => {
         migration_ready: true,
         natural_conversation_flow: true,
         ring_two_tech_branding: true,
+        google_chirp3_hd_voice: true,
         vad_settings: {
             threshold: 0.8,
             silence_duration_ms: 500
@@ -2606,7 +2620,8 @@ TIMING RULES:
                 conversation_items: conversationTranscript.length,
                 restaurant_id: restaurant?.id,
                 natural_conversation_flow: true,
-                ring_two_tech_branding: true
+                ring_two_tech_branding: true,
+                google_chirp3_hd_voice: true
             });
 
             try {
@@ -2624,7 +2639,7 @@ TIMING RULES:
                 delete global.pendingCallData[callSid];
             }
 
-            console.log('Call completed with natural conversation flow. Duration: ' + callDuration + ' seconds');
+            console.log('Call completed with natural conversation flow and Google Chirp3 HD voice. Duration: ' + callDuration + ' seconds');
         }
 
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
@@ -2673,6 +2688,7 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('Supabase configured: ' + !!(SUPABASE_URL && SUPABASE_ANON_KEY));
     console.log('Twilio configured: ' + !!twilioClient);
     console.log('Ring Two Tech branding: ENABLED');
+    console.log('Google Chirp3 HD voice: ENABLED for TwiML hangup messages');
     console.log('VAD Settings: threshold=0.8, silence_duration=500ms');
     console.log('');
     console.log('MIGRATION STATUS: READY');
@@ -2683,11 +2699,11 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('REALTIME API: Using gpt-4o-realtime-preview with reliable speech');
     console.log('TWILIO TIMEOUT: FIXED - /voice endpoint responds instantly');
     console.log('ADDRESS VALIDATION: WITH RETRY SYSTEM - allows ONE retry on failure');
-    console.log('RING TWO TECH: All hangup messages include Ring Two Tech branding');
+    console.log('RING TWO TECH: All hangup messages include Ring Two Tech branding with Google Chirp3 HD voice');
     console.log('TIMEOUT LOGIC: 15 seconds for customer engagement, then hangup');
     console.log('VAD OPTIMIZED: More responsive with 0.8 threshold and 500ms silence');
     console.log('');
-    console.log('Server ready for production traffic - natural conversation flow enabled!');
+    console.log('Server ready for production traffic - natural conversation flow with Google Chirp3 HD voice enabled!');
 });
 
 server.on('error', (error) => {
