@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+        }
+
+        .auth-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .auth-form {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .auth-form h2 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .btn:hover {
+            background: #5a6fd8;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            margin-top: 0.5rem;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+
+        .btn-success {
+            background: #28a745;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-sm {
+            width: auto;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+
+        .dashboard {
+            display: none;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #2c3e50;
+            color: white;
+            position: fixed;
+            height: 100vh;
+            padding: 1rem 0;
+        }
+
+        .sidebar h3 {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 0 1rem;
+        }
+
+        .sidebar ul {
+            list-style: none;
+        }
+
+        .sidebar li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar a {
+            display: block;
+            color: white;
+            text-decoration: none;
+            padding: 0.75rem 1rem;
+            transition: background-color 0.3s;
+        }
+
+        .sidebar a:hover, .sidebar a.active {
+            background: #34495e;
+        }
+
+        .main-content {
+            margin-left: 250px;
+            padding: 2rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            background: white;
+            padding: 1rem 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card h3 {
+            color: #6c757d;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .content-section {
+            display: none;
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .content-section.active {
+            display: block;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .table th, .table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background: white;
+            margin: 10% auto;
+            padding: 2rem;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #6c757d;
+        }
+
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 0.75rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 0.75rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 1rem;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Authentication Section -->
+    <div id="authSection" class="auth-container">
+        <div class="auth-form">
+            <h2 id="authTitle">Restaurant Login</h2>
+            <div id="authError" class="error" style="display: none;"></div>
+            <div id="authSuccess" class="success" style="display: none;"></div>
+            
+            <form id="authForm">
+                <div class="form-group" id="nameGroup" style="display: none;">
+                    <label for="restaurantName">Restaurant Name</label>
+                    <input type="text" id="restaurantName" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                
+                <div class="form-group" id="phoneGroup" style="display: none;">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" placeholder="+1234567890">
+                </div>
+                
+                <div class="form-group" id="addressGroup" style="display: none;">
+                    <label for="address">Address</label>
+                    <textarea id="address" rows="3"></textarea>
+                </div>
+                
+                <button type="submit" class="btn" id="authSubmit">Login</button>
+                <button type="button" class="btn btn-secondary" id="authToggle">
+                    Don't have an account? Sign up
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboardSection" class="dashboard">
+        <div class="sidebar">
+            <h3>Restaurant Portal</h3>
+            <ul>
+                <li><a href="#" class="nav-link active" data-section="overview">Overview</a></li>
+                <li><a href="#" class="nav-link" data-section="orders">Orders</a></li>
+                <li><a href="#" class="nav-link" data-section="menu">Menu</a></li>
+                <li><a href="#" class="nav-link" data-section="messages">Messages</a></li>
+                <li><a href="#" class="nav-link" data-section="settings">Settings</a></li>
+                <li><a href="#" id="logoutBtn">Logout</a></li>
+            </ul>
+        </div>
+
+        <div class="main-content">
+            <div class="header">
+                <h1 id="restaurantNameHeader">Restaurant Dashboard</h1>
+                <div>
+                    <span id="userEmail"></span>
+                </div>
+            </div>
+
+            <!-- Overview Section -->
+            <div id="overview" class="content-section active">
+                <h2>Dashboard Overview</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Today's Orders</h3>
+                        <div class="value" id="todayOrders">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Pending Orders</h3>
+                        <div class="value" id="pendingOrders">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Today's Revenue</h3>
+                        <div class="value" id="todayRevenue">$-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Unread Messages</h3>
+                        <div class="value" id="unreadMessages">-</div>
+                    </div>
+                </div>
+
+                <div class="content-section">
+                    <h3>Recent Orders</h3>
+                    <div id="recentOrdersLoading" class="loading">Loading orders...</div>
+                    <div id="recentOrdersTable" style="display: none;">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Customer</th>
+                                    <th>Type</th>
+                                    <th>Total</th>
+                                    <th>Status</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentOrdersBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orders Section -->
+            <div id="orders" class="content-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2>Orders Management</h2>
+                    <div>
+                        <select id="orderStatusFilter" class="form-group" style="margin: 0; display: inline-block; width: auto;">
+                            <option value="">All Orders</option>
+                            <option value="pending">Pending</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="preparing">Preparing</option>
+                            <option value="ready">Ready</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                        <button class="btn btn-sm" onclick="loadOrders()">Refresh</button>
+                    </div>
+                </div>
+                <div id="ordersLoading" class="loading">Loading orders...</div>
+                <div id="ordersTable" style="display: none;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer</th>
+                                <th>Phone</th>
+                                <th>Type</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ordersBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Menu Section -->
+            <div id="menu" class="content-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2>Menu Management</h2>
+                    <button class="btn btn-success btn-sm" onclick="openMenuItemModal()">Add New Item</button>
+                </div>
+                <div id="menuLoading" class="loading">Loading menu...</div>
+                <div id="menuTable" style="display: none;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Category</th>
+                                <th>Description</th>
+                                <th>Price</th>
+                                <th>Available</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="menuBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Messages Section -->
+            <div id="messages" class="content-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2>Customer Messages</h2>
+                    <div>
+                        <select id="messageStatusFilter" class="form-group" style="margin: 0; display: inline-block; width: auto;">
+                            <option value="">All Messages</option>
+                            <option value="new">New</option>
+                            <option value="responded">Responded</option>
+                        </select>
+                        <button class="btn btn-sm" onclick="loadMessages()">Refresh</button>
+                    </div>
+                </div>
+                <div id="messagesLoading" class="loading">Loading messages...</div>
+                <div id="messagesTable" style="display: none;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Phone</th>
+                                <th>Type</th>
+                                <th>Message</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="messagesBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Settings Section -->
+            <div id="settings" class="content-section">
+                <h2>Restaurant Settings</h2>
+                <div id="settingsError" class="error" style="display: none;"></div>
+                <div id="settingsSuccess" class="success" style="display: none;"></div>
+                
+                <form id="settingsForm">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="settingsName">Restaurant Name</label>
+                            <input type="text" id="settingsName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="settingsPhone">Phone Number</label>
+                            <input type="tel" id="settingsPhone" required>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="settingsDescription">Description</label>
+                        <textarea id="settingsDescription" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="settingsAddress">Address</label>
+                        <textarea id="settingsAddress" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="settingsHours">Hours</label>
+                            <input type="text" id="settingsHours" placeholder="Mon-Sun: 9AM-9PM">
+                        </div>
+                        <div class="form-group">
+                            <label for="settingsTimezone">Timezone</label>
+                            <select id="settingsTimezone">
+                                <option value="America/New_York">Eastern Time</option>
+                                <option value="America/Chicago">Central Time</option>
+                                <option value="America/Denver">Mountain Time</option>
+                                <option value="America/Los_Angeles">Pacific Time</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="settingsDeliveryEnabled">
+                                <input type="checkbox" id="settingsDeliveryEnabled"> Enable Delivery
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="settingsDeliveryRadius">Delivery Radius (miles)</label>
+                            <input type="number" id="settingsDeliveryRadius" min="0" step="0.1">
+                        </div>
+                    </div>
+                    
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="settingsPreparationTime">Preparation Time (minutes)</label>
+                            <input type="number" id="settingsPreparationTime" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="settingsDeliveryTime">Delivery Time (minutes)</label>
+                            <input type="number" id="settingsDeliveryTime" min="1">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn">Update Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Menu Item Modal -->
+    <div id="menuItemModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeMenuItemModal()">&times;</span>
+            <h3 id="menuItemModalTitle">Add Menu Item</h3>
+            <div id="menuItemError" class="error" style="display: none;"></div>
+            <form id="menuItemForm">
+                <input type="hidden" id="menuItemId">
+                <div class="form-group">
+                    <label for="menuItemName">Name</label>
+                    <input type="text" id="menuItemName" required>
+                </div>
+                <div class="form-group">
+                    <label for="menuItemCategory">Category</label>
+                    <input type="text" id="menuItemCategory" required>
+                </div>
+                <div class="form-group">
+                    <label for="menuItemDescription">Description</label>
+                    <textarea id="menuItemDescription" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="menuItemPrice">Price</label>
+                    <input type="number" id="menuItemPrice" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="menuItemAvailable">
+                        <input type="checkbox" id="menuItemAvailable" checked> Available
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="menuItemOrder">Display Order</label>
+                    <input type="number" id="menuItemOrder" min="0" value="0">
+                </div>
+                <button type="submit" class="btn">Save Item</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Message Response Modal -->
+    <div id="messageResponseModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeMessageResponseModal()">&times;</span>
+            <h3>Respond to Customer Message</h3>
+            <div id="messageResponseError" class="error" style="display: none;"></div>
+            <div id="originalMessage" style="background: #f8f9fa; padding: 1rem; border-radius: 5px; margin-bottom: 1rem;"></div>
+            <form id="messageResponseForm">
+                <input type="hidden" id="responseMessageId">
+                <div class="form-group">
+                    <label for="staffResponse">Your Response</label>
+                    <textarea id="staffResponse" rows="4" required placeholder="Type your response to the customer..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="respondedBy">Your Name</label>
+                    <input type="text" id="respondedBy" required placeholder="Staff member name">
+                </div>
+                <button type="submit" class="btn">Send Response</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const SUPABASE_URL = 'https://ujgpqnarhcegrpyzbxej.supabase.co';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE';
+        const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+
+        // Initialize Supabase
+        const { createClient } = supabase;
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // Global variables
+        let currentUser = null;
+        let currentRestaurant = null;
+        let isSignupMode = false;
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuthState();
+            setupEventListeners();
+        });
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Auth form
+            document.getElementById('authForm').addEventListener('submit', handleAuth);
+            document.getElementById('authToggle').addEventListener('click', toggleAuthMode);
+            
+            // Navigation
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.addEventListener('click', handleNavigation);
+            });
+            
+            // Logout
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            
+            // Settings form
+            document.getElementById('settingsForm').addEventListener('submit', handleSettingsUpdate);
+            
+            // Menu item form
+            document.getElementById('menuItemForm').addEventListener('submit', handleMenuItemSave);
+            
+            // Message response form
+            document.getElementById('messageResponseForm').addEventListener('submit', handleMessageResponse);
+            
+            // Filters
+            document.getElementById('orderStatusFilter').addEventListener('change', loadOrders);
+            document.getElementById('messageStatusFilter').addEventListener('change', loadMessages);
+        }
+
+        // Check authentication state
+        async function checkAuthState() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            
+            if (session) {
+                currentUser = session.user;
+                await loadRestaurantData();
+                showDashboard();
+            } else {
+                showAuth();
+            }
+        }
+
+        // Show authentication section
+        function showAuth() {
+            document.getElementById('authSection').style.display = 'flex';
+            document.getElementById('dashboardSection').style.display = 'none';
+        }
+
+        // Show dashboard section
+        function showDashboard() {
+            document.getElementById('authSection').style.display = 'none';
+            document.getElementById('dashboardSection').style.display = 'block';
+            document.getElementById('userEmail').textContent = currentUser?.email || '';
+            
+            if (currentRestaurant) {
+                document.getElementById('restaurantNameHeader').textContent = currentRestaurant.name;
+                loadDashboardData();
+            }
+        }
+
+        // Toggle authentication mode
+        function toggleAuthMode() {
+            isSignupMode = !isSignupMode;
+            
+            if (isSignupMode) {
+                document.getElementById('authTitle').textContent = 'Restaurant Signup';
+                document.getElementById('authSubmit').textContent = 'Sign Up';
+                document.getElementById('authToggle').textContent = 'Already have an account? Login';
+                document.getElementById('nameGroup').style.display = 'block';
+                document.getElementById('phoneGroup').style.display = 'block';
+                document.getElementById('addressGroup').style.display = 'block';
+            } else {
+                document.getElementById('authTitle').textContent = 'Restaurant Login';
+                document.getElementById('authSubmit').textContent = 'Login';
+                document.getElementById('authToggle').textContent = "Don't have an account? Sign up";
+                document.getElementById('nameGroup').style.display = 'none';
+                document.getElementById('phoneGroup').style.display = 'none';
+                document.getElementById('addressGroup').style.display = 'none';
+            }
+            
+            // Clear form
+            document.getElementById('authForm').reset();
+            hideMessage('authError');
+            hideMessage('authSuccess');
+        }
+
+        // Handle authentication
+        async function handleAuth(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                if (isSignupMode) {
+                    // Sign up
+                    const { data, error } = await supabaseClient.auth.signUp({
+                        email,
+                        password
+                    });
+                    
+                    if (error) throw error;
+                    
+                    if (data.user) {
+                        // Create restaurant record
+                        const restaurantData = {
+                            name: document.getElementById('restaurantName').value,
+                            phone_number: document.getElementById('phone').value,
+                            address: document.getElementById('address').value,
+                            owner_user_id: data.user.id
+                        };
+                        
+                        const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/update-restaurant-profile`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(restaurantData)
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error('Failed to create restaurant profile');
+                        }
+                        
+                        showMessage('authSuccess', 'Account created successfully! Please check your email to verify your account.');
+                    }
+                } else {
+                    // Sign in
+                    const { data, error } = await supabaseClient.auth.signInWithPassword({
+                        email,
+                        password
+                    });
+                    
+                    if (error) throw error;
+                    
+                    currentUser = data.user;
+                    await loadRestaurantData();
+                    showDashboard();
+                }
+            } catch (error) {
+                showMessage('authError', error.message);
+            }
+        }
+
+        // Load restaurant data
+        async function loadRestaurantData() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('restaurants')
+                    .select('*')
+                    .eq('owner_user_id', currentUser.id)
+                    .single();
+                
+                if (error && error.code !== 'PGRST116') throw error;
+                
+                currentRestaurant = data;
+                
+                if (currentRestaurant) {
+                    populateSettings();
+                }
+            } catch (error) {
+                console.error('Error loading restaurant data:', error);
+            }
+        }
+
+        // Handle logout
+        async function handleLogout() {
+            await supabaseClient.auth.signOut();
+            currentUser = null;
+            currentRestaurant = null;
+            showAuth();
+        }
+
+        // Handle navigation
+        function handleNavigation(e) {
+            e.preventDefault();
+            
+            // Update active nav link
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            e.target.classList.add('active');
+            
+            // Show appropriate section
+            const section = e.target.dataset.section;
+            document.querySelectorAll('.content-section').forEach(sec => {
+                sec.classList.remove('active');
+            });
+            document.getElementById(section).classList.add('active');
+            
+            // Load section data
+            switch (section) {
+                case 'overview':
+                    loadDashboardData();
+                    break;
+                case 'orders':
+                    loadOrders();
+                    break;
+                case 'menu':
+                    loadMenu();
+                    break;
+                case 'messages':
+                    loadMessages();
+                    break;
+            }
+        }
+
+        // Load dashboard data
+        async function loadDashboardData() {
+            if (!currentRestaurant) return;
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-dashboard-stats`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        restaurant_id: currentRestaurant.id
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load dashboard stats');
+                
+                const stats = await response.json();
+                
+                document.getElementById('todayOrders').textContent = stats.todayOrders;
+                document.getElementById('pendingOrders').textContent = stats.pendingOrders;
+                document.getElementById('todayRevenue').textContent = `$${stats.todayRevenue.toFixed(2)}`;
+                document.getElementById('unreadMessages').textContent = stats.unreadMessages;
+                
+                // Load recent orders
+                await loadRecentOrders();
+                
+            } catch (error) {
+                console.error('Error loading dashboard data:', error);
+            }
+        }
+
+        // Load recent orders
+        async function loadRecentOrders() {
+            if (!currentRestaurant) return;
+            
+            document.getElementById('recentOrdersLoading').style.display = 'block';
+            document.getElementById('recentOrdersTable').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-orders-dashboard`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        restaurant_id: currentRestaurant.id,
+                        limit: 10
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load orders');
+                
+                const orders = await response.json();
+                
+                const tbody = document.getElementById('recentOrdersBody');
+                tbody.innerHTML = '';
+                
+                orders.forEach(order => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${order.id.substring(0, 8)}</td>
+                        <td>${order.customer_name || 'N/A'}</td>
+                        <td>${order.order_type}</td>
+                        <td>$${Number(order.total_amount).toFixed(2)}</td>
+                        <td><span class="badge badge-${getStatusColor(order.status)}">${order.status}</span></td>
+                        <td>${formatDate(order.created_at)}</td>
+                    `;
+                });
+                
+                document.getElementById('recentOrdersLoading').style.display = 'none';
+                document.getElementById('recentOrdersTable').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error loading recent orders:', error);
+                document.getElementById('recentOrdersLoading').innerHTML = 'Error loading orders';
+            }
+        }
+
+        // Load orders
+        async function loadOrders() {
+            if (!currentRestaurant) return;
+            
+            document.getElementById('ordersLoading').style.display = 'block';
+            document.getElementById('ordersTable').style.display = 'none';
+            
+            try {
+                const status = document.getElementById('orderStatusFilter').value;
+                
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-orders-dashboard`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        restaurant_id: currentRestaurant.id,
+                        limit: 100,
+                        status: status || null
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load orders');
+                
+                const orders = await response.json();
+                
+                const tbody = document.getElementById('ordersBody');
+                tbody.innerHTML = '';
+                
+                orders.forEach(order => {
+                    const itemsText = order.order_items?.map(item => 
+                        `${item.quantity}x ${item.menu_items?.name || 'Unknown Item'}`
+                    ).join(', ') || 'No items';
+                    
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${order.id.substring(0, 8)}</td>
+                        <td>${order.customer_name || 'N/A'}</td>
+                        <td>${order.customer_phone || 'N/A'}</td>
+                        <td>${order.order_type}</td>
+                        <td title="${itemsText}">${itemsText.length > 50 ? itemsText.substring(0, 50) + '...' : itemsText}</td>
+                        <td>$${Number(order.total_amount).toFixed(2)}</td>
+                        <td><span class="badge badge-${getStatusColor(order.status)}">${order.status}</span></td>
+                        <td>${formatDate(order.created_at)}</td>
+                        <td>
+                            ${order.status === 'pending' ? 
+                                `<button class="btn btn-sm btn-success" onclick="updateOrderStatus('${order.id}', 'confirmed')">Confirm</button>
+                                 <button class="btn btn-sm btn-danger" onclick="updateOrderStatus('${order.id}', 'cancelled')">Cancel</button>` : 
+                                order.status === 'confirmed' ? 
+                                `<button class="btn btn-sm" onclick="updateOrderStatus('${order.id}', 'preparing')">Preparing</button>` :
+                                order.status === 'preparing' ? 
+                                `<button class="btn btn-sm" onclick="updateOrderStatus('${order.id}', 'ready')">Ready</button>` :
+                                order.status === 'ready' ? 
+                                `<button class="btn btn-sm" onclick="updateOrderStatus('${order.id}', 'completed')">Complete</button>` :
+                                'No actions'
+                            }
+                        </td>
+                    `;
+                });
+                
+                document.getElementById('ordersLoading').style.display = 'none';
+                document.getElementById('ordersTable').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                document.getElementById('ordersLoading').innerHTML = 'Error loading orders';
+            }
+        }
+
+        // Update order status
+        async function updateOrderStatus(orderId, newStatus) {
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/update-order`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        order_id: orderId,
+                        restaurant_id: currentRestaurant.id,
+                        status: newStatus
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to update order status');
+                
+                // Reload orders to reflect changes
+                loadOrders();
+                loadDashboardData(); // Update stats
+                
+            } catch (error) {
+                console.error('Error updating order status:', error);
+                alert('Failed to update order status');
+            }
+        }
+
+        // Load menu
+        async function loadMenu() {
+            if (!currentRestaurant) return;
+            
+            document.getElementById('menuLoading').style.display = 'block';
+            document.getElementById('menuTable').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/manage-menu-items`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'get',
+                        restaurant_id: currentRestaurant.id
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load menu');
+                
+                const menuItems = await response.json();
+                
+                const tbody = document.getElementById('menuBody');
+                tbody.innerHTML = '';
+                
+                menuItems.forEach(item => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>${item.category}</td>
+                        <td>${item.description || 'N/A'}</td>
+                        <td>$${Number(item.price).toFixed(2)}</td>
+                        <td><span class="badge badge-${item.available ? 'success' : 'danger'}">${item.available ? 'Available' : 'Unavailable'}</span></td>
+                        <td>
+                            <button class="btn btn-sm" onclick="editMenuItem('${item.id}')">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteMenuItem('${item.id}')">Delete</button>
+                        </td>
+                    `;
+                });
+                
+                document.getElementById('menuLoading').style.display = 'none';
+                document.getElementById('menuTable').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error loading menu:', error);
+                document.getElementById('menuLoading').innerHTML = 'Error loading menu';
+            }
+        }
+
+        // Open menu item modal
+        function openMenuItemModal(itemId = null) {
+            document.getElementById('menuItemModal').style.display = 'block';
+            document.getElementById('menuItemForm').reset();
+            document.getElementById('menuItemId').value = itemId || '';
+            
+            if (itemId) {
+                document.getElementById('menuItemModalTitle').textContent = 'Edit Menu Item';
+                // Load item data for editing
+                loadMenuItemForEdit(itemId);
+            } else {
+                document.getElementById('menuItemModalTitle').textContent = 'Add Menu Item';
+            }
+        }
+
+        // Close menu item modal
+        function closeMenuItemModal() {
+            document.getElementById('menuItemModal').style.display = 'none';
+        }
+
+        // Edit menu item
+        function editMenuItem(itemId) {
+            openMenuItemModal(itemId);
+        }
+
+        // Load menu item for editing
+        async function loadMenuItemForEdit(itemId) {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('menu_items')
+                    .select('*')
+                    .eq('id', itemId)
+                    .single();
+                
+                if (error) throw error;
+                
+                document.getElementById('menuItemName').value = data.name;
+                document.getElementById('menuItemCategory').value = data.category;
+                document.getElementById('menuItemDescription').value = data.description || '';
+                document.getElementById('menuItemPrice').value = data.price;
+                document.getElementById('menuItemAvailable').checked = data.available;
+                document.getElementById('menuItemOrder').value = data.display_order || 0;
+                
+            } catch (error) {
+                console.error('Error loading menu item:', error);
+            }
+        }
+
+        // Handle menu item save
+        async function handleMenuItemSave(e) {
+            e.preventDefault();
+            
+            const itemId = document.getElementById('menuItemId').value;
+            const itemData = {
+                name: document.getElementById('menuItemName').value,
+                category: document.getElementById('menuItemCategory').value,
+                description: document.getElementById('menuItemDescription').value,
+                price: parseFloat(document.getElementById('menuItemPrice').value),
+                available: document.getElementById('menuItemAvailable').checked,
+                display_order: parseInt(document.getElementById('menuItemOrder').value) || 0
+            };
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/manage-menu-items`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: itemId ? 'update' : 'create',
+                        restaurant_id: currentRestaurant.id,
+                        id: itemId || undefined,
+                        ...itemData
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to save menu item');
+                
+                closeMenuItemModal();
+                loadMenu();
+                
+            } catch (error) {
+                console.error('Error saving menu item:', error);
+                showMessage('menuItemError', error.message);
+            }
+        }
+
+        // Delete menu item
+        async function deleteMenuItem(itemId) {
+            if (!confirm('Are you sure you want to delete this menu item?')) return;
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/manage-menu-items`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'delete',
+                        restaurant_id: currentRestaurant.id,
+                        id: itemId
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to delete menu item');
+                
+                loadMenu();
+                
+            } catch (error) {
+                console.error('Error deleting menu item:', error);
+                alert('Failed to delete menu item');
+            }
+        }
+
+        // Load messages
+        async function loadMessages() {
+            if (!currentRestaurant) return;
+            
+            document.getElementById('messagesLoading').style.display = 'block';
+            document.getElementById('messagesTable').style.display = 'none';
+            
+            try {
+                const status = document.getElementById('messageStatusFilter').value;
+                
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/get-customer-messages-dashboard`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        restaurant_id: currentRestaurant.id,
+                        limit: 100,
+                        status: status || null
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load messages');
+                
+                const messages = await response.json();
+                
+                const tbody = document.getElementById('messagesBody');
+                tbody.innerHTML = '';
+                
+                messages.forEach(message => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${message.customer_name || 'N/A'}</td>
+                        <td>${message.customer_phone}</td>
+                        <td>${message.message_type}</td>
+                        <td title="${message.message_content}">${message.message_content.length > 50 ? message.message_content.substring(0, 50) + '...' : message.message_content}</td>
+                        <td><span class="badge badge-${message.status === 'new' ? 'warning' : 'success'}">${message.status}</span></td>
+                        <td>${formatDate(message.created_at)}</td>
+                        <td>
+                            ${message.status === 'new' ? 
+                                `<button class="btn btn-sm" onclick="respondToMessage('${message.id}', '${message.customer_name || 'Customer'}', '${message.message_content.replace(/'/g, "\\'")}')">Respond</button>` : 
+                                'Responded'
+                            }
+                        </td>
+                    `;
+                });
+                
+                document.getElementById('messagesLoading').style.display = 'none';
+                document.getElementById('messagesTable').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                document.getElementById('messagesLoading').innerHTML = 'Error loading messages';
+            }
+        }
+
+        // Respond to message
+        function respondToMessage(messageId, customerName, messageContent) {
+            document.getElementById('messageResponseModal').style.display = 'block';
+            document.getElementById('responseMessageId').value = messageId;
+            document.getElementById('originalMessage').innerHTML = `
+                <strong>Message from ${customerName}:</strong><br>
+                ${messageContent}
+            `;
+            document.getElementById('staffResponse').value = '';
+            document.getElementById('respondedBy').value = '';
+        }
+
+        // Close message response modal
+        function closeMessageResponseModal() {
+            document.getElementById('messageResponseModal').style.display = 'none';
+        }
+
+        // Handle message response
+        async function handleMessageResponse(e) {
+            e.preventDefault();
+            
+            const messageId = document.getElementById('responseMessageId').value;
+            const response = document.getElementById('staffResponse').value;
+            const respondedBy = document.getElementById('respondedBy').value;
+            
+            try {
+                const apiResponse = await fetch(`${SUPABASE_FUNCTIONS_URL}/respond-to-message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message_id: messageId,
+                        restaurant_id: currentRestaurant.id,
+                        response,
+                        responded_by: respondedBy
+                    })
+                });
+                
+                if (!apiResponse.ok) throw new Error('Failed to send response');
+                
+                closeMessageResponseModal();
+                loadMessages();
+                loadDashboardData(); // Update unread count
+                
+            } catch (error) {
+                console.error('Error sending response:', error);
+                showMessage('messageResponseError', error.message);
+            }
+        }
+
+        // Populate settings form
+        function populateSettings() {
+            if (!currentRestaurant) return;
+            
+            document.getElementById('settingsName').value = currentRestaurant.name || '';
+            document.getElementById('settingsPhone').value = currentRestaurant.phone_number || '';
+            document.getElementById('settingsDescription').value = currentRestaurant.description || '';
+            document.getElementById('settingsAddress').value = currentRestaurant.address || '';
+            document.getElementById('settingsHours').value = currentRestaurant.hours || '';
+            document.getElementById('settingsTimezone').value = currentRestaurant.timezone || 'America/New_York';
+            document.getElementById('settingsDeliveryEnabled').checked = currentRestaurant.delivery_enabled || false;
+            document.getElementById('settingsDeliveryRadius').value = currentRestaurant.delivery_radius || 5;
+            document.getElementById('settingsPreparationTime').value = currentRestaurant.preparation_time || 20;
+            document.getElementById('settingsDeliveryTime').value = currentRestaurant.delivery_time || 15;
+        }
+
+        // Handle settings update
+        async function handleSettingsUpdate(e) {
+            e.preventDefault();
+            
+            const updateData = {
+                restaurant_id: currentRestaurant.id,
+                name: document.getElementById('settingsName').value,
+                phone_number: document.getElementById('settingsPhone').value,
+                description: document.getElementById('settingsDescription').value,
+                address: document.getElementById('settingsAddress').value,
+                hours: document.getElementById('settingsHours').value,
+                timezone: document.getElementById('settingsTimezone').value,
+                delivery_enabled: document.getElementById('settingsDeliveryEnabled').checked,
+                delivery_radius: parseFloat(document.getElementById('settingsDeliveryRadius').value),
+                preparation_time: parseInt(document.getElementById('settingsPreparationTime').value),
+                delivery_time: parseInt(document.getElementById('settingsDeliveryTime').value)
+            };
+            
+            try {
+                const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/update-restaurant-profile`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                if (!response.ok) throw new Error('Failed to update settings');
+                
+                const updatedRestaurant = await response.json();
+                currentRestaurant = updatedRestaurant;
+                
+                showMessage('settingsSuccess', 'Settings updated successfully!');
+                document.getElementById('restaurantNameHeader').textContent = currentRestaurant.name;
+                
+            } catch (error) {
+                console.error('Error updating settings:', error);
+                showMessage('settingsError', error.message);
+            }
+        }
+
+        // Utility functions
+        function getStatusColor(status) {
+            switch (status) {
+                case 'pending': return 'warning';
+                case 'confirmed': return 'info';
+                case 'preparing': return 'info';
+                case 'ready': return 'success';
+                case 'completed': return 'success';
+                case 'cancelled': return 'danger';
+                default: return 'info';
+            }
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+
+        function showMessage(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.style.display = 'block';
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 5000);
+        }
+
+        function hideMessage(elementId) {
+            document.getElementById(elementId).style.display = 'none';
+        }
+
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
