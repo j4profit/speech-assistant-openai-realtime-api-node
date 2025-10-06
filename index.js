@@ -1,7 +1,6 @@
 // Restaurant AI Ordering System - UPDATED: Natural Conversation Flow with Ring Two Tech Branding
 // Updated for OpenAI Migration with Address Validation Retry Support + Ring Two Tech Message
 // UPDATED: Google Chirp3 HD Voice for TwiML hangup messages
-// UPDATED: Dynamic WebSocket Protocol Detection for Multiple Servers
 const express = require('express');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
@@ -191,33 +190,15 @@ app.post('/hangup-twiml', (req, res) => {
     console.log('TwiML hangup message sent with Google Chirp3 HD voice:', message);
 });
 
-// UPDATED: Fast-responding Twilio webhook endpoint with dynamic WebSocket protocol detection
+// Fast-responding Twilio webhook endpoint for incoming calls
 app.post('/voice', (req, res) => {
     console.log('Incoming call webhook:', req.body);
-
-    // Detect protocol - check multiple indicators for HTTPS
-    const isSecure = req.secure || 
-                     req.headers['x-forwarded-proto'] === 'https' ||
-                     req.protocol === 'https';
-    
-    // Build WebSocket URL based on detected protocol
-    const wsProtocol = isSecure ? 'wss' : 'ws';
-    const host = req.get('host');
-    
-    console.log('Protocol detection:', {
-        isSecure: isSecure,
-        wsProtocol: wsProtocol,
-        host: host,
-        headers: req.headers['x-forwarded-proto'],
-        protocol: req.protocol,
-        secure: req.secure
-    });
 
     // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="${wsProtocol}://${host}/media-stream">
+        <Stream url="wss://${req.get('host')}/media-stream">
             <Parameter name="Called" value="${req.body.Called || req.body.To}" />
             <Parameter name="From" value="${req.body.From || req.body.Caller}" />
             <Parameter name="CallSid" value="${req.body.CallSid}" />
@@ -268,8 +249,7 @@ app.post('/voice', (req, res) => {
                 from: callData.from_number,
                 to: callData.to_number,
                 restaurant_id: callData.restaurant_id,
-                has_twilio_data: !!callData.twilio_data,
-                websocket_protocol: wsProtocol  // Log which protocol was used
+                has_twilio_data: !!callData.twilio_data
             });
 
         } catch (error) {
@@ -294,7 +274,6 @@ app.get('/health', (_req, res) => {
         address_retry_enabled: true,
         ring_two_tech_branding: true,
         google_chirp3_hd_voice: true,
-        dynamic_websocket_protocol: true,
         vad_threshold: 0.8,
         silence_duration_ms: 500,
         last_health_check: new Date().toISOString()
@@ -308,25 +287,16 @@ app.get('/ping', (_req, res) => {
 });
 
 app.get('/', (req, res) => {
-    // Detect protocol for display
-    const isSecure = req.secure || 
-                     req.headers['x-forwarded-proto'] === 'https' ||
-                     req.protocol === 'https';
-    const wsProtocol = isSecure ? 'wss' : 'ws';
-    
     res.status(200).json({
         message: 'Restaurant AI Ordering System - Natural Conversation Flow with Ring Two Tech Branding',
         status: 'running',
         port: process.env.PORT || 3000,
-        websocket_url: wsProtocol + '://' + req.get('host') + '/media-stream',
+        websocket_url: 'wss://' + req.get('host') + '/media-stream',
         server_time: new Date().toISOString(),
         migration_ready: true,
         natural_conversation_flow: true,
         ring_two_tech_branding: true,
         google_chirp3_hd_voice: true,
-        dynamic_protocol: true,
-        detected_protocol: isSecure ? 'HTTPS' : 'HTTP',
-        websocket_protocol: wsProtocol,
         vad_settings: {
             threshold: 0.8,
             silence_duration_ms: 500
@@ -2732,9 +2702,8 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('RING TWO TECH: All hangup messages include Ring Two Tech branding with Google Chirp3 HD voice');
     console.log('TIMEOUT LOGIC: 15 seconds for customer engagement, then hangup');
     console.log('VAD OPTIMIZED: More responsive with 0.8 threshold and 500ms silence');
-    console.log('DYNAMIC WEBSOCKET: Automatically detects HTTP/HTTPS and uses ws:// or wss://');
     console.log('');
-    console.log('Server ready for production traffic - works with both HTTP and HTTPS servers!');
+    console.log('Server ready for production traffic - natural conversation flow with Google Chirp3 HD voice enabled!');
 });
 
 server.on('error', (error) => {
