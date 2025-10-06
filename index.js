@@ -124,7 +124,7 @@ async function hangup(callSid, options = {}) {
 
             const hangupUrl = BASE_URL ?
                 BASE_URL + '/hangup-twiml?call_sid=' + callSid :
-                'https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com/hangup-twiml?call_sid=' + callSid;
+                'https://ring2tech.com.com/hangup-twiml?call_sid=' + callSid;
 
             await twilioClient.calls(callSid).update({
                 url: hangupUrl,
