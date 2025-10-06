@@ -122,9 +122,8 @@ async function hangup(callSid, options = {}) {
                 timestamp: new Date().toISOString()
             };
 
-            const hangupUrl = BASE_URL ?
-                BASE_URL + '/hangup-twiml?call_sid=' + callSid :
-                'https://ring2tech.com/hangup-twiml?call_sid=' + callSid;
+            const hangupUrl = 'https://ring2tech.com/hangup-twiml?call_sid=' + callSid;
+
 
             await twilioClient.calls(callSid).update({
                 url: hangupUrl,
