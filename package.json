@@ -1,7 +1,7 @@
 {
   "name": "restaurant-ai-ordering-system",
-  "version": "1.0.0",
-  "description": "AI-powered restaurant ordering system with Twilio and OpenAI",
+  "version": "2.0.0",
+  "description": "AI-powered restaurant ordering system with Twilio and OpenAI - Refactored",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

@@ -1,5 +1,11 @@
-// utils/encodeMuLaw.js
-export default function encodeMuLaw(pcm16Buffer) {
+// μ-law encoding for audio conversion (PCM16 to μ-law)
+
+/**
+ * Encodes PCM16 buffer to μ-law format
+ * @param {Buffer} pcm16Buffer - PCM16 audio buffer
+ * @returns {Buffer} μ-law encoded audio buffer
+ */
+function encodeMuLaw(pcm16Buffer) {
   // Convert PCM16 buffer -> Int16Array for sample processing
   const samples = new Int16Array(
     pcm16Buffer.buffer,
@@ -16,7 +22,11 @@ export default function encodeMuLaw(pcm16Buffer) {
   return ulawBuffer;
 }
 
-// μ-law encoding algorithm (standard ITU G.711 implementation)
+/**
+ * μ-law encoding algorithm (standard ITU G.711 implementation)
+ * @param {number} sample - Linear PCM sample
+ * @returns {number} μ-law encoded byte
+ */
 function linearToMuLawSample(sample) {
   const MU = 255;
   const MAX = 32768;
@@ -37,3 +47,5 @@ function linearToMuLawSample(sample) {
 
   return ulawByte & 0xFF;
 }
+
+module.exports = encodeMuLaw;

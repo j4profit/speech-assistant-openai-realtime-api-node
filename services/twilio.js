@@ -1,0 +1,173 @@
+// Twilio operations service - handles call management and TwiML generation
+const twilio = require('twilio');
+const config = require('../config');
+
+// Initialize Twilio client
+const twilioClient = config.twilio.enabled
+  ? twilio(config.twilio.accountSid, config.twilio.authToken)
+  : null;
+
+if (!twilioClient) {
+  console.warn('Twilio credentials not provided - hangup functionality will be limited');
+}
+
+// Store for pending hangup TwiML (temporary in-memory storage)
+const pendingHangupTwiML = new Map();
+
+/**
+ * Escape XML special characters
+ * @param {string} text - Text to escape
+ * @returns {string} XML-safe text
+ */
+function escapeXML(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Generate TwiML for hangup with Ring Two Tech branding
+ * @param {string} callSid - Call SID
+ * @param {string} restaurantName - Restaurant name (optional)
+ * @returns {string} TwiML XML
+ */
+function generateHangupTwiML(callSid, restaurantName = '') {
+  // Retrieve and remove pending hangup data
+  const hangupData = pendingHangupTwiML.get(callSid);
+  if (hangupData) {
+    pendingHangupTwiML.delete(callSid);
+    restaurantName = hangupData.restaurant?.name || restaurantName;
+  }
+
+  const message = restaurantName
+    ? `Your call was processed by Ring two tech. Thank you for calling ${restaurantName}.`
+    : 'Your call was processed by Ring two tech. Thank you for calling.';
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">${escapeXML(message)}</Say>
+    <Hangup/>
+</Response>`;
+}
+
+/**
+ * Generate TwiML for incoming call (WebSocket stream setup)
+ * @param {string} host - Request host
+ * @param {Object} callParams - Call parameters (Called, From, CallSid)
+ * @returns {string} TwiML XML
+ */
+function generateIncomingCallTwiML(host, callParams) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="wss://${host}/media-stream">
+            <Parameter name="Called" value="${callParams.Called || callParams.To}" />
+            <Parameter name="From" value="${callParams.From || callParams.Caller}" />
+            <Parameter name="CallSid" value="${callParams.CallSid}" />
+        </Stream>
+    </Connect>
+</Response>`;
+}
+
+/**
+ * Hang up a call (immediate or graceful)
+ * @param {string} callSid - Twilio call SID
+ * @param {Object} options - Hangup options
+ * @param {string} options.message - Custom goodbye message
+ * @param {string} options.method - 'immediate' or 'graceful' (default: 'graceful')
+ * @param {string} options.reason - Reason for hangup
+ * @param {Object} options.restaurant - Restaurant object
+ * @param {number} options.delay - Delay in ms before hangup
+ * @returns {Promise<Object>} Hangup result
+ */
+async function hangup(callSid, options = {}) {
+  if (!callSid || !twilioClient) {
+    console.error('hangup() called without callSid or Twilio not configured');
+    return { success: false, error: 'Missing callSid or Twilio not configured' };
+  }
+
+  const {
+    message = null,
+    method = 'graceful',
+    reason = 'system_initiated',
+    restaurant = null,
+    delay = 0
+  } = options;
+
+  console.log(`Hangup initiated: ${callSid} - Method: ${method}, Reason: ${reason}`);
+
+  try {
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    if (method === 'immediate') {
+      await twilioClient.calls(callSid).update({ status: 'completed' });
+      console.log(`Call terminated immediately: ${callSid}`);
+      return { success: true, method: 'immediate', reason, call_sid: callSid };
+    }
+
+    if (method === 'graceful') {
+      let finalMessage = message;
+      if (!finalMessage) {
+        finalMessage = restaurant
+          ? `Thank you for calling ${restaurant.name}. Have a great day!`
+          : 'Thank you for calling. Have a great day!';
+      }
+
+      // Store the TwiML data for the hangup endpoint
+      pendingHangupTwiML.set(callSid, {
+        message: finalMessage,
+        restaurant: restaurant,
+        timestamp: new Date().toISOString()
+      });
+
+      const hangupUrl = `${config.server.baseUrl}/hangup-twiml?call_sid=${callSid}`;
+
+      await twilioClient.calls(callSid).update({
+        url: hangupUrl,
+        method: 'POST'
+      });
+
+      console.log(`Call redirected to graceful hangup: ${callSid}`);
+      return {
+        success: true,
+        method: 'graceful',
+        reason,
+        message: finalMessage,
+        call_sid: callSid
+      };
+    }
+
+    return { success: false, error: `Invalid method: ${method}` };
+
+  } catch (error) {
+    console.error(`Hangup failed for call ${callSid}:`, error);
+    return {
+      success: false,
+      error: error.message,
+      call_sid: callSid
+    };
+  }
+}
+
+/**
+ * Check if Twilio is properly configured
+ * @returns {boolean} True if Twilio client is available
+ */
+function isTwilioConfigured() {
+  return !!twilioClient;
+}
+
+module.exports = {
+  twilioClient,
+  escapeXML,
+  generateHangupTwiML,
+  generateIncomingCallTwiML,
+  hangup,
+  isTwilioConfigured,
+  pendingHangupTwiML // Export for route access
+};

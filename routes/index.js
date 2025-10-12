@@ -1,0 +1,181 @@
+// HTTP Routes for the application
+const express = require('express');
+const config = require('../config');
+const { createClient } = require('@supabase/supabase-js');
+const twilioService = require('../services/twilio');
+const stateManager = require('../services/stateManager');
+const { getRestaurantByPhone } = require('../services/database');
+
+const router = express.Router();
+
+// Initialize Supabase client for direct queries
+const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
+/**
+ * Hangup TwiML endpoint with Ring Two Tech branding
+ */
+router.post('/hangup-twiml', (req, res) => {
+  const callSid = req.query.call_sid || req.body.CallSid;
+  const twiml = twilioService.generateHangupTwiML(callSid);
+
+  res.type('text/xml');
+  res.send(twiml);
+
+  console.log('TwiML hangup message sent with Google Chirp3 HD voice');
+});
+
+/**
+ * Incoming call webhook - responds with WebSocket stream TwiML
+ */
+router.post('/voice', (req, res) => {
+  console.log('Incoming call webhook:', req.body);
+
+  // CRITICAL: Respond to Twilio immediately (within 15 second timeout)
+  const twiml = twilioService.generateIncomingCallTwiML(req.get('host'), req.body);
+
+  res.type('text/xml');
+  res.send(twiml);
+
+  // Do restaurant lookup and call data storage AFTER responding to Twilio
+  setImmediate(async () => {
+    try {
+      const callData = {
+        call_sid: req.body.CallSid,
+        from_number: req.body.From || req.body.Caller,
+        to_number: req.body.Called || req.body.To,
+        call_status: req.body.CallStatus,
+        call_direction: req.body.Direction,
+        caller_country: req.body.CallerCountry,
+        caller_state: req.body.CallerState,
+        caller_city: req.body.CallerCity,
+        caller_zip: req.body.CallerZip,
+        to_country: req.body.ToCountry || req.body.CalledCountry,
+        to_state: req.body.ToState || req.body.CalledState,
+        to_city: req.body.ToCity || req.body.CalledCity,
+        to_zip: req.body.ToZip || req.body.CalledZip,
+        call_started_at: new Date().toISOString(),
+        twilio_data: req.body,
+        restaurant_id: null,
+        call_ended_at: null,
+        call_duration: null,
+        conversation_transcript: null,
+        order_id: null
+      };
+
+      // Look up restaurant to get restaurant_id for the call log (non-blocking)
+      const restaurant = await getRestaurantByPhone(callData.to_number);
+      if (restaurant) {
+        callData.restaurant_id = restaurant.id;
+      }
+
+      // Store call data for final logging at call completion
+      stateManager.storeCallData(req.body.CallSid, callData);
+
+    } catch (error) {
+      console.error('Error processing call data after TwiML response:', error);
+    }
+  });
+});
+
+/**
+ * Health check endpoint with detailed status
+ */
+router.get('/health', (_req, res) => {
+  const healthData = {
+    status: 'healthy',
+    port: config.server.port,
+    timestamp: new Date().toISOString(),
+    openai_configured: !!config.openai.apiKey,
+    supabase_configured: !!(config.supabase.url && config.supabase.anonKey),
+    twilio_configured: twilioService.isTwilioConfigured(),
+    uptime: process.uptime(),
+    migration_status: 'caller_id_fix_applied',
+    architecture: 'twilio_websocket_with_automatic_caller_id',
+    caller_id_usage: 'automatic_no_manual_entry_required',
+    ring_two_tech_branding: true,
+    google_chirp3_hd_voice: true,
+    vad_threshold: config.voice.vadThreshold,
+    silence_duration_ms: config.voice.silenceDurationMs,
+    last_health_check: new Date().toISOString(),
+    pending_calls: stateManager.getStats()
+  };
+
+  res.status(200).json(healthData);
+});
+
+/**
+ * Simple ping endpoint
+ */
+router.get('/ping', (_req, res) => {
+  res.status(200).send('pong');
+});
+
+/**
+ * Root endpoint with system info
+ */
+router.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Restaurant AI Ordering System - Refactored',
+    status: 'running',
+    port: config.server.port,
+    websocket_url: `wss://${req.get('host')}/media-stream`,
+    server_time: new Date().toISOString(),
+    caller_id_fix: 'APPLIED - AI will never ask for phone numbers',
+    automatic_order_lookup: true,
+    ring_two_tech_branding: true,
+    google_chirp3_hd_voice: true,
+    version: '2.0-refactored'
+  });
+});
+
+/**
+ * Get orders list (calls Edge Function)
+ */
+router.get('/orders', async (_req, res) => {
+  try {
+    const response = await fetch(`${config.supabase.url}/functions/v1/search-orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`
+      },
+      body: JSON.stringify({
+        limit: 50,
+        order_by: 'created_at',
+        order_direction: 'desc'
+      })
+    });
+
+    if (!response.ok) {
+      return res.status(500).json({ error: 'Failed to fetch orders' });
+    }
+
+    const result = await response.json();
+    res.json({ orders: result.data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get customer messages list
+ */
+router.get('/messages', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('customer_messages')
+      .select('*, restaurants(name, delivery_enabled, delivery_hours)')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ messages: data });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
