@@ -428,50 +428,99 @@ async function createCallLog(callData) {
 
 async function searchRecentOrders(phoneNumber, restaurantId) {
     try {
+        console.log('🔍 searchRecentOrders called with:', { phoneNumber, restaurantId });
+        
+        const requestBody = {
+            phone_number: phoneNumber,
+            restaurant_id: restaurantId,
+            days_back: 7
+        };
+        
+        console.log('🔍 Calling edge function with body:', JSON.stringify(requestBody));
+        
         const response = await fetch(SUPABASE_URL + '/functions/v1/search-orders', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
-            body: JSON.stringify({
-                phone_number: phoneNumber,
-                restaurant_id: restaurantId,
-                days_back: 7
-            })
+            body: JSON.stringify(requestBody)
         });
 
-        if (!response.ok) return [];
+        console.log('🔍 Edge function response status:', response.status);
+        console.log('🔍 Edge function response headers:', response.headers);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ Edge function failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorBody: errorText,
+                url: SUPABASE_URL + '/functions/v1/search-orders'
+            });
+            return [];
+        }
 
         const result = await response.json();
+        console.log('✅ Edge function success result:', JSON.stringify(result, null, 2));
         return result.orders || [];
 
     } catch (error) {
-        console.error('Error calling search-orders Edge Function:', error);
+        console.error('❌ searchRecentOrders error:', {
+            message: error.message,
+            stack: error.stack,
+            phoneNumber: phoneNumber,
+            restaurantId: restaurantId
+        });
         return [];
     }
 }
 
 async function cancelOrder(orderId, reason = 'Customer cancellation') {
     try {
+        console.log('🚨 cancelOrder function called with:', { orderId, reason });
+        
+        const requestBody = {
+            order_id: orderId,
+            reason: reason
+        };
+        
+        console.log('🚨 Calling cancel-order edge function with body:', JSON.stringify(requestBody));
+        
         const response = await fetch(SUPABASE_URL + '/functions/v1/cancel-order', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
             },
-            body: JSON.stringify({
-                order_id: orderId,
-                reason: reason
-            })
+            body: JSON.stringify(requestBody)
         });
 
-        if (!response.ok) return null;
+        console.log('🚨 Cancel-order edge function response status:', response.status);
+        console.log('🚨 Cancel-order edge function response headers:', response.headers);
 
-        return (await response.json()).data;
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ Cancel-order edge function failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorBody: errorText,
+                url: SUPABASE_URL + '/functions/v1/cancel-order'
+            });
+            return null;
+        }
+
+        const result = await response.json();
+        console.log('✅ Cancel-order edge function success result:', JSON.stringify(result, null, 2));
+        return result.data || result;
 
     } catch (error) {
-        console.error('Error calling cancel-order Edge Function:', error);
+        console.error('❌ cancelOrder error:', {
+            message: error.message,
+            stack: error.stack,
+            orderId: orderId,
+            reason: reason
+        });
         return null;
     }
 }
@@ -1847,20 +1896,21 @@ TIMING RULES:
 
             switch (name) {
                 case 'search_recent_orders':
-                    console.log('CRITICAL FIX: search_recent_orders using automatic caller ID');
+                    console.log('🔍 SEARCH_RECENT_ORDERS DEBUG START');
                     console.log('- customerPhone (caller ID):', customerPhone);
                     console.log('- restaurant.id:', restaurant?.id);
+                    console.log('- restaurant.name:', restaurant?.name);
                     console.log('- parsedArgs:', parsedArgs);
 
                     // CRITICAL FIX: Always use caller ID unless customer explicitly provided different number
                     let phoneNumber = customerPhone;
                     if (parsedArgs.phone_number && parsedArgs.phone_number !== customerPhone) {
-                        console.log('Customer provided different phone number:', parsedArgs.phone_number);
+                        console.log('- Customer provided different phone number:', parsedArgs.phone_number);
                         phoneNumber = parsedArgs.phone_number;
                     }
 
                     if (!phoneNumber) {
-                        console.error('CRITICAL ERROR: No caller ID available!');
+                        console.error('❌ CRITICAL ERROR: No caller ID available!');
                         result = {
                             orders: [],
                             count: 0,
@@ -1870,54 +1920,98 @@ TIMING RULES:
                         break;
                     }
 
-                    console.log('Searching orders with caller ID:', phoneNumber);
-                    const orders = await searchRecentOrders(phoneNumber, restaurant.id);
-                    recentOrders = orders;
-
-                    const pendingOrders = orders.filter(order => order.status === 'pending');
-                    const nonPendingOrders = orders.filter(order => order.status !== 'pending');
-
-                    if (orders.length === 0) {
+                    if (!restaurant?.id) {
+                        console.error('❌ CRITICAL ERROR: No restaurant ID available!');
                         result = {
                             orders: [],
                             count: 0,
-                            message: 'No recent orders found. Did you place the order using a different phone number?',
-                            phone_searched: phoneNumber
+                            message: 'Unable to search for orders - restaurant not identified.',
+                            error: 'No restaurant ID available'
                         };
-                    } else if (pendingOrders.length > 0) {
-                        const mappedOrders = pendingOrders.map(order => ({
-                            id: order.id,
-                            total: order.total_amount,
-                            order_type: order.order_type,
-                            delivery_address: order.delivery_address,
-                            status: order.status,
-                            created_at: order.created_at,
-                            customer_name: order.customer_name,
-                            order_details: order.order_details,
-                            items: order.order_items?.map(item => ({
-                                name: item.menu_items?.name || 'Item',
-                                quantity: item.quantity,
-                                price: item.price
-                            })) || []
-                        }));
+                        break;
+                    }
 
-                        result = {
-                            orders: mappedOrders,
-                            count: pendingOrders.length,
-                            message: 'Found ' + pendingOrders.length + ' pending order(s) that can be modified.',
-                            phone_searched: phoneNumber,
-                            has_pending: true
-                        };
-                    } else if (nonPendingOrders.length > 0) {
+                    console.log('🔎 Calling searchRecentOrders with phone:', phoneNumber, 'restaurant:', restaurant.id);
+                    
+                    try {
+                        const orders = await searchRecentOrders(phoneNumber, restaurant.id);
+                        
+                        console.log('📋 searchRecentOrders returned:', {
+                            total_orders: orders?.length || 0,
+                            orders: orders?.map(o => ({ id: o.id, status: o.status, customer: o.customer_name })) || []
+                        });
+                        
+                        recentOrders = orders;
+
+                        const pendingOrders = orders.filter(order => order.status === 'pending');
+                        const nonPendingOrders = orders.filter(order => order.status !== 'pending');
+
+                        console.log('📊 Order status breakdown:', {
+                            total: orders?.length || 0,
+                            pending: pendingOrders.length,
+                            non_pending: nonPendingOrders.length,
+                            pending_orders: pendingOrders.map(o => ({ id: o.id, status: o.status })),
+                            non_pending_orders: nonPendingOrders.map(o => ({ id: o.id, status: o.status }))
+                        });
+
+                        if (orders.length === 0) {
+                            console.log('❌ NO ORDERS FOUND - AI will not try to cancel');
+                            result = {
+                                orders: [],
+                                count: 0,
+                                message: 'No recent orders found. Did you place the order using a different phone number?',
+                                phone_searched: phoneNumber
+                            };
+                        } else if (pendingOrders.length > 0) {
+                            console.log('✅ PENDING ORDERS FOUND - AI should offer cancellation');
+                            const mappedOrders = pendingOrders.map(order => ({
+                                id: order.id,
+                                total: order.total_amount,
+                                order_type: order.order_type,
+                                delivery_address: order.delivery_address,
+                                status: order.status,
+                                created_at: order.created_at,
+                                customer_name: order.customer_name,
+                                order_details: order.order_details,
+                                items: order.order_items?.map(item => ({
+                                    name: item.menu_items?.name || 'Item',
+                                    quantity: item.quantity,
+                                    price: item.price
+                                })) || []
+                            }));
+
+                            result = {
+                                orders: mappedOrders,
+                                count: pendingOrders.length,
+                                message: 'Found ' + pendingOrders.length + ' pending order(s) that can be modified.',
+                                phone_searched: phoneNumber,
+                                has_pending: true
+                            };
+                        } else if (nonPendingOrders.length > 0) {
+                            console.log('⚠️ ORDERS FOUND BUT NOT PENDING - Cannot cancel');
+                            result = {
+                                orders: [],
+                                count: 0,
+                                message: 'I found your order, but it\'s already being prepared (status: ' + nonPendingOrders[0].status + '). I\'ve sent a message to the restaurant about your request.',
+                                phone_searched: phoneNumber,
+                                has_non_pending_only: true,
+                                restaurant_message_sent: true
+                            };
+                        }
+
+                    } catch (searchError) {
+                        console.error('❌ CRITICAL ERROR in searchRecentOrders:', searchError);
                         result = {
                             orders: [],
                             count: 0,
-                            message: 'I found your order, but it\'s already being prepared (status: ' + nonPendingOrders[0].status + '). I\'ve sent a message to the restaurant about your request.',
-                            phone_searched: phoneNumber,
-                            has_non_pending_only: true,
-                            restaurant_message_sent: true
+                            message: 'I\'m having trouble looking up your orders right now. Let me take a message for the restaurant instead.',
+                            error: 'searchRecentOrders failed',
+                            technical_error: searchError.message
                         };
                     }
+
+                    console.log('🔍 SEARCH_RECENT_ORDERS FINAL RESULT:', JSON.stringify(result, null, 2));
+                    console.log('🔍 SEARCH_RECENT_ORDERS DEBUG END');
                     break;
 
                 // ... [All other existing function cases remain the same] ...
@@ -2092,27 +2186,66 @@ TIMING RULES:
                     break;
 
                 case 'cancel_order':
+                    console.log('🚨 CANCEL_ORDER FUNCTION CALLED! 🚨');
+                    console.log('- parsedArgs:', parsedArgs);
+                    console.log('- recentOrders length:', recentOrders?.length || 0);
+                    console.log('- recentOrders:', recentOrders?.map(o => ({ id: o.id, status: o.status })) || []);
+
                     let cancelOrderId = parsedArgs.order_id;
                     if (!cancelOrderId && recentOrders?.length > 0) {
                         if (recentOrders[0].status === 'pending') {
                             cancelOrderId = recentOrders[0].id;
+                            console.log('✅ Using first pending order ID:', cancelOrderId);
+                        } else {
+                            console.log('❌ First order is not pending, status:', recentOrders[0].status);
                         }
                     }
 
                     if (!cancelOrderId) {
+                        console.log('❌ NO ORDER ID AVAILABLE FOR CANCELLATION');
+                        console.log('- parsedArgs.order_id:', parsedArgs.order_id);
+                        console.log('- recentOrders available:', recentOrders?.length || 0);
+                        console.log('- first order status:', recentOrders?.[0]?.status || 'none');
                         result = {
                             error: 'No pending order ID provided. Only pending orders can be cancelled.',
-                            success: false
+                            success: false,
+                            debug: {
+                                parsedArgs_order_id: parsedArgs.order_id,
+                                recentOrders_count: recentOrders?.length || 0,
+                                first_order_status: recentOrders?.[0]?.status || 'none'
+                            }
                         };
                         break;
                     }
 
-                    const cancelResult = await cancelOrder(cancelOrderId, parsedArgs.reason);
-                    result = {
-                        success: !!cancelResult,
-                        message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order',
-                        order_id: cancelOrderId
-                    };
+                    console.log('🔄 Calling cancelOrder function with ID:', cancelOrderId);
+                    console.log('🔄 Cancel reason:', parsedArgs.reason || 'Customer cancellation');
+                    
+                    try {
+                        const cancelResult = await cancelOrder(cancelOrderId, parsedArgs.reason);
+                        console.log('📝 cancelOrder result:', cancelResult);
+                        
+                        result = {
+                            success: !!cancelResult,
+                            message: cancelResult ? 'Order cancelled successfully' : 'Failed to cancel order',
+                            order_id: cancelOrderId,
+                            cancel_result: cancelResult
+                        };
+                        
+                        console.log('✅ CANCEL_ORDER COMPLETED - success:', !!cancelResult);
+                        
+                    } catch (cancelError) {
+                        console.error('❌ CANCEL_ORDER ERROR:', cancelError);
+                        result = {
+                            success: false,
+                            message: 'Error occurred while cancelling order',
+                            order_id: cancelOrderId,
+                            error: cancelError.message
+                        };
+                    }
+                    
+                    console.log('🚨 CANCEL_ORDER FUNCTION RESULT:', JSON.stringify(result, null, 2));
+                    console.log('🚨 CANCEL_ORDER FUNCTION END 🚨');
                     break;
 
                 case 'update_order':
