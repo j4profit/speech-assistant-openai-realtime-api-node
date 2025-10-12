@@ -977,7 +977,6 @@ wss.on('connection', (ws, _req) => {
     let maxAddressRetries = 1;
     let validationRetryInfo = null;
     let recentOrders = [];
-    let anythingElseTimeout = null;
     
     // SIMPLIFIED: Just track if we've had any customer speech at all
     let customerHasSpoken = false;
@@ -1197,10 +1196,8 @@ IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY addr
 **🚨 CRITICAL ORDER COMPLETION FLOW:**
 When customer completes their order (says "that's it", "that's all", "nothing else", etc.):
 1. **IMMEDIATELY** generate the ORDER_CONFIRMED format (REQUIRED - DO NOT SKIP)
-2. Then ask: "Anything else I can help you with?"
-3. Wait for customer response
-4. If customer says no/nothing/that's all - system will auto-hangup
-5. If customer has another request - help them
+2. Proceed directly to order processing without asking anything else
+3. System will handle confirmation and hangup automatically
 
 **📋 ORDER_CONFIRMED FORMAT (MANDATORY - EXACT FORMAT REQUIRED):**
 🚨 YOU MUST USE THIS EXACT FORMAT WHEN CUSTOMER COMPLETES ORDER:
@@ -1341,9 +1338,6 @@ TIMING RULES:
             openaiWs.send(JSON.stringify(sessionUpdate));
         });
 
-        // Rest of your existing OpenAI message handling logic...
-        // [All the existing message handling code from your original file]
-
         openaiWs.on('message', (data) => {
             try {
                 const response = JSON.parse(data);
@@ -1403,75 +1397,6 @@ TIMING RULES:
                         if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
                             processOrderFromTranscript(response.transcript);
                         }
-
-                        // Handle "anything else" flow
-                        const completionPhrases = [
-                            'order_confirmed:',
-                            'order_end',
-                            'your order is confirmed',
-                            'order has been confirmed',
-                            'your order has been cancelled',
-                            'order cancelled successfully',
-                            'order has been updated',
-                            'message has been sent',
-                            'i\'ve sent your message',
-                            'your message has been recorded'
-                        ];
-
-                        const isCompletionPhrase = completionPhrases.some(phrase =>
-                            response.transcript.toLowerCase().includes(phrase)
-                        );
-
-                        const alreadyAskedAnythingElse = conversationTranscript
-                            .filter(msg => msg.speaker === 'AI')
-                            .some(msg => msg.text.toLowerCase().includes('anything else'));
-
-                        const isOrderConfirmationResponse = response.transcript.includes('ORDER_CONFIRMED:') &&
-                                                          response.transcript.includes('Anything else I can help you with?');
-
-                        if (isOrderConfirmationResponse) {
-                            console.log('Order confirmation with "anything else" detected - setting up response timeout');
-                            anythingElseTimeout = setTimeout(async () => {
-                                if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
-                                    console.log('No response to "anything else" in order confirmation - hanging up');
-                                    clearTimeout(anythingElseTimeout);
-                                    anythingElseTimeout = null;
-                                    await hangup(callSid, {
-                                        method: 'graceful',
-                                        reason: 'no_response_to_anything_else',
-                                        restaurant: restaurant,
-                                        message: 'Thank you for calling ' + restaurant.name + '. Have a great day!'
-                                    });
-                                }
-                            }, 10000);
-                        } else if (isCompletionPhrase && !alreadyAskedAnythingElse) {
-                            setTimeout(() => {
-                                if (openaiWs && openaiWs.readyState === WebSocket.OPEN && callSid) {
-                                    console.log('Triggering "anything else" flow after completion');
-                                    openaiWs.send(JSON.stringify({
-                                        type: 'response.create',
-                                        response: {
-                                            modalities: ['audio', 'text'],
-                                            instructions: 'Say exactly: "Anything else I can help you with?"'
-                                        }
-                                    }));
-
-                                    anythingElseTimeout = setTimeout(async () => {
-                                        if (callSid && ws.readyState === WebSocket.OPEN && anythingElseTimeout) {
-                                            console.log('No response to "anything else" - hanging up');
-                                            clearTimeout(anythingElseTimeout);
-                                            anythingElseTimeout = null;
-                                            await hangup(callSid, {
-                                                method: 'graceful',
-                                                reason: 'no_response_to_anything_else',
-                                                restaurant: restaurant,
-                                                message: 'Thank you for calling ' + restaurant.name + '. Have a great day!'
-                                            });
-                                        }
-                                    }, 10000);
-                                }
-                            }, 2000);
-                        }
                         break;
 
                     case 'conversation.item.input_audio_transcription.completed':
@@ -1490,12 +1415,6 @@ TIMING RULES:
                             greetingTimeout = null;
                             customerHasSpoken = true;
                             console.log('Customer engagement detected - clearing greeting timeout');
-                        }
-
-                        // Clear other timeouts
-                        if (anythingElseTimeout) {
-                            clearTimeout(anythingElseTimeout);
-                            anythingElseTimeout = null;
                         }
 
                         // Check if customer is indicating order completion
@@ -1648,62 +1567,10 @@ TIMING RULES:
                                 }
                             }, 800);
                         }
-
-                        const recentAIMessages = conversationTranscript
-                            .filter(msg => msg.speaker === 'AI')
-                            .slice(-3)
-                            .map(msg => msg.text.toLowerCase());
-
-                        // Only trigger on specific "anything else I can help you with" questions
-                        const hasRecentAnythingElse = recentAIMessages.some(msg =>
-                            msg.includes('anything else i can help you with') ||
-                            msg.includes('anything else i can help') ||
-                            msg.includes('is there anything else') ||
-                            (msg.includes('anything else') && msg.includes('help you'))
-                        );
-
-                        const anythingElseResponses = /\b(no|nope|nothing|that's all|that's it|i'm good|i'm all good|i'm all set|no thank you|no thanks|all good|good|nah|we're good|i'm done|that's everything|we're all set)\b/i;
-                        const startsWithNo = /^no[,\s]/i;
-
-                        if ((anythingElseResponses.test(customerMessage) || startsWithNo.test(customerMessage)) && hasRecentAnythingElse) {
-                            console.log('Customer responded "no" to recent anything else question - initiating hangup');
-                            setTimeout(async () => {
-                                if (callSid && ws.readyState === WebSocket.OPEN) {
-                                    // Check if this was a delivery order by looking at recent messages
-                                    const hasDelivery = conversationTranscript.some(msg =>
-                                        msg.text.toLowerCase().includes('delivery') &&
-                                        (msg.text.toLowerCase().includes('your address is within') ||
-                                         msg.text.toLowerCase().includes('delivery area'))
-                                    );
-
-                                    let finalMessage = 'Thank you for calling ' + restaurant.name + '. Have a wonderful day!';
-
-                                    if (hasDelivery) {
-                                        const estimatedTime = (restaurant?.preparation_time || 20) + (restaurant?.delivery_time || 15);
-                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your delivery order will arrive in about ' + estimatedTime + ' minutes. Have a wonderful day!';
-                                    } else if (conversationTranscript.some(msg => msg.text.toLowerCase().includes('pickup'))) {
-                                        const estimatedTime = restaurant?.preparation_time || 20;
-                                        finalMessage = 'Thank you for calling ' + restaurant.name + '. Your pickup order will be ready in about ' + estimatedTime + ' minutes. Have a wonderful day!';
-                                    }
-
-                                    await hangup(callSid, {
-                                        method: 'graceful',
-                                        reason: 'customer_finished',
-                                        restaurant: restaurant,
-                                        message: finalMessage,
-                                        delay: 2000
-                                    });
-                                }
-                            }, 3000);
-                            return;
-                        }
                         break;
 
                     case 'input_audio_buffer.speech_started':
-                        if (anythingElseTimeout) {
-                            clearTimeout(anythingElseTimeout);
-                            anythingElseTimeout = null;
-                        }
+                        // Customer is speaking - no special handling needed since we removed "anything else" timeout
                         break;
 
                     // Handle function calls with modern approach
@@ -2013,8 +1880,6 @@ TIMING RULES:
                     console.log('🔍 SEARCH_RECENT_ORDERS FINAL RESULT:', JSON.stringify(result, null, 2));
                     console.log('🔍 SEARCH_RECENT_ORDERS DEBUG END');
                     break;
-
-                // ... [All other existing function cases remain the same] ...
 
                 case 'validate_delivery_address':
                     console.log('validate_delivery_address function called with args:', JSON.stringify(parsedArgs));
@@ -2459,8 +2324,6 @@ TIMING RULES:
         }
     }
 
-    // [All remaining functions: processOrderFromTranscript, WebSocket message handlers, etc. - same as original]
-
     // Handle WebSocket messages from Twilio
     ws.on('message', (message) => {
         try {
@@ -2527,11 +2390,6 @@ TIMING RULES:
     // WebSocket close handling
     ws.on('close', async () => {
         console.log('WebSocket connection closed');
-
-        if (anythingElseTimeout) {
-            clearTimeout(anythingElseTimeout);
-            anythingElseTimeout = null;
-        }
 
         if (greetingTimeout) {
             clearTimeout(greetingTimeout);
@@ -2620,7 +2478,7 @@ TIMING RULES:
         }
     });
 
-    // Order processing function (same as original)
+    // Order processing function - simplified without "anything else" flow
     async function processOrderFromTranscript(transcript) {
         try {
             if (orderProcessed) {
@@ -2846,13 +2704,15 @@ server.listen(PORT, '0.0.0.0', (error) => {
     console.log('✅ Automatic caller ID usage for order lookups');
     console.log('✅ AI instructions updated to prevent phone number requests');
     console.log('✅ Ring Two Tech branding with Google Chirp3 HD voice');
+    console.log('✅ "Anything else" feature removed for direct order processing');
     console.log('');
     console.log('FIXED ISSUES:');
     console.log('- AI asking for phone numbers ❌ → Using caller ID automatically ✅');
     console.log('- System hanging up when phone provided ❌ → Proper error handling ✅');
     console.log('- Manual phone entry required ❌ → Caller ID used automatically ✅');
+    console.log('- "Anything else" timeout delays ❌ → Direct order completion ✅');
     console.log('');
-    console.log('Server ready for production - customers can now modify orders without providing phone numbers!');
+    console.log('Server ready for production - streamlined order processing without "anything else" prompts!');
 });
 
 server.on('error', (error) => {
