@@ -1,0 +1,35 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Installing dependencies..."
+      - npm install
+
+  pre_build:
+    commands:
+      - echo "Running pre-build checks..."
+      - node -v
+      - npm -v
+      - echo "Checking file structure..."
+      - ls -la
+
+  build:
+    commands:
+      - echo "Build phase - no compilation needed for Node.js"
+      - echo "Application is ready for deployment"
+
+  post_build:
+    commands:
+      - echo "Post-build phase complete"
+      - echo "Creating artifact..."
+
+artifacts:
+  files:
+    - '**/*'
+  exclude-paths:
+    - node_modules/**/*
+    - .git/**/*
+    - .gitignore
