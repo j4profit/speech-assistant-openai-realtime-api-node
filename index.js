@@ -81,7 +81,8 @@ wss.on('connection', (ws, _req) => {
       id: restaurant.id,
       name: restaurant.name,
       phone: restaurant.phone_number,
-      delivery_enabled: restaurant.delivery_enabled
+      delivery_enabled: restaurant.delivery_enabled,
+      ai_voice: restaurant.ai_voice || 'coral (default)'
     });
 
     customerPhone = fromNumber;
@@ -130,7 +131,7 @@ wss.on('connection', (ws, _req) => {
         session: {
           modalities: ['text', 'audio'],
           instructions: instructions,
-          voice: 'coral',
+          voice: restaurant.ai_voice || 'coral',
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
           turn_detection: {
