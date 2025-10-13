@@ -13,6 +13,10 @@ function createOrderTicket(orderInfo) {
     deliveryAddress,
     items,
     specialInstructions,
+    subtotal,
+    deliveryFee,
+    taxRate,
+    taxAmount,
     totalAmount,
     readyTime,
     restaurantName
@@ -48,7 +52,23 @@ ORDER TYPE: ${orderType.toUpperCase()}`;
   ticket += `
 
 ORDER ITEMS:
-${formatOrderItems(items, totalAmount)}
+${formatOrderItems(items, null)}
+
+PRICING BREAKDOWN:
+• Subtotal: $${(subtotal || 0).toFixed(2)}`;
+
+  if (deliveryFee && deliveryFee > 0) {
+    ticket += `
+• Delivery Fee: $${deliveryFee.toFixed(2)}`;
+  }
+
+  if (taxAmount && taxAmount > 0) {
+    ticket += `
+• Tax (${((taxRate || 0) * 100).toFixed(2)}%): $${taxAmount.toFixed(2)}`;
+  }
+
+  ticket += `
+• TOTAL: $${(totalAmount || 0).toFixed(2)}
 
 TIMING:
 • Order should be ready: ${readyTime}`;
@@ -107,10 +127,6 @@ function formatOrderItems(items, totalAmount) {
       formattedItems += `• ${cleanItem}\n`;
     }
   });
-
-  if (totalAmount && totalAmount > 0) {
-    formattedItems += `\nTOTAL: $${totalAmount.toFixed(2)}`;
-  }
 
   return formattedItems || '• ' + items;
 }
@@ -225,12 +241,24 @@ function formatMenuForAI(menuItems, restaurant) {
       menuText += `${restaurant.hours}\n`;
     }
 
+    menuText += '\n\nPRICING INFORMATION:\n';
+    if (restaurant.tax_rate && restaurant.tax_rate > 0) {
+      menuText += `- Tax Rate: ${(restaurant.tax_rate * 100).toFixed(2)}% (applied to all orders)\n`;
+    } else {
+      menuText += `- No tax applied\n`;
+    }
+
     menuText += '\n\nDELIVERY INFORMATION:\n';
     menuText += `- Delivery Available: ${restaurant.delivery_enabled ? 'Yes' : 'No'}\n`;
     if (restaurant.delivery_enabled) {
       menuText += `- Delivery Hours: ${restaurant.delivery_hours || 'Same as restaurant hours'}\n`;
       menuText += `- Delivery Radius: ${restaurant.delivery_radius || 'Contact restaurant'} miles\n`;
       menuText += `- Estimated Delivery Time: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes\n`;
+      if (restaurant.delivery_fee && restaurant.delivery_fee > 0) {
+        menuText += `- Delivery Fee: $${restaurant.delivery_fee.toFixed(2)} (added to delivery orders)\n`;
+      } else {
+        menuText += `- No delivery fee\n`;
+      }
     } else {
       menuText += '- Pickup Only\n';
     }

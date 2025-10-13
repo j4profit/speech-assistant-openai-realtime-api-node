@@ -410,6 +410,22 @@ wss.on('connection', (ws, _req) => {
 
       const readyTimeInfo = calculateOrderReadyTime(restaurant, orderInfo.orderType === 'delivery');
 
+      // Calculate order totals with tax and delivery fee
+      const subtotal = orderInfo.totalAmount;
+      const isDelivery = orderInfo.orderType === 'delivery';
+      const deliveryFee = isDelivery && restaurant.delivery_fee ? restaurant.delivery_fee : 0;
+      const taxableAmount = subtotal + deliveryFee;
+      const taxAmount = restaurant.tax_rate ? taxableAmount * restaurant.tax_rate : 0;
+      const finalTotal = taxableAmount + taxAmount;
+
+      console.log('Order pricing breakdown:', {
+        subtotal,
+        deliveryFee,
+        taxRate: restaurant.tax_rate,
+        taxAmount,
+        finalTotal
+      });
+
       const orderData = {
         restaurant_id: restaurant.id,
         customer_name: orderInfo.customerName,
@@ -417,7 +433,7 @@ wss.on('connection', (ws, _req) => {
         order_type: orderInfo.orderType,
         delivery_address: orderInfo.deliveryAddress,
         order_details: orderInfo.items,
-        total_amount: orderInfo.totalAmount,
+        total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
         call_sid: callSid,
         ready_time: readyTimeInfo.readyTimeString,
@@ -432,6 +448,11 @@ wss.on('connection', (ws, _req) => {
 
         const ticket = createOrderTicket({
           ...orderInfo,
+          subtotal,
+          deliveryFee,
+          taxRate: restaurant.tax_rate,
+          taxAmount,
+          totalAmount: finalTotal,
           readyTime: readyTimeInfo.readyTimeString,
           restaurantName: restaurant.name
         });
