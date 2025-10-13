@@ -416,10 +416,12 @@ wss.on('connection', (ws, _req) => {
         customer_phone: customerPhone,
         order_type: orderInfo.orderType,
         delivery_address: orderInfo.deliveryAddress,
-        items: orderInfo.items,
+        order_details: orderInfo.items,
         total_amount: orderInfo.totalAmount,
         special_instructions: orderInfo.specialInstructions || '',
-        estimated_ready_time: readyTimeInfo.readyTime,
+        call_sid: callSid,
+        ready_time: readyTimeInfo.readyTimeString,
+        estimated_ready_at: readyTimeInfo.readyTime,
         status: 'pending'
       };
 
