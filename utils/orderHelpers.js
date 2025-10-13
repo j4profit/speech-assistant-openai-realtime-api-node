@@ -219,6 +219,12 @@ function formatMenuForAI(menuItems, restaurant) {
   });
 
   if (restaurant) {
+    // Add operating hours if available
+    if (restaurant.hours) {
+      menuText += '\n\nRESTAURANT HOURS:\n';
+      menuText += `${restaurant.hours}\n`;
+    }
+
     menuText += '\n\nDELIVERY INFORMATION:\n';
     menuText += `- Delivery Available: ${restaurant.delivery_enabled ? 'Yes' : 'No'}\n`;
     if (restaurant.delivery_enabled) {
