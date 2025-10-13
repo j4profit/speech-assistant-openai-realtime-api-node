@@ -56,11 +56,20 @@ wss.on('connection', (ws, _req) => {
   async function initializeOpenAI(calledNumber, fromNumber, callId) {
     console.log('Loading restaurant data for:', calledNumber);
 
-    const phoneToLookup = calledNumber || '+14108880091';
-    restaurant = await database.getRestaurantByPhone(phoneToLookup);
+    // First, check if restaurant data is already cached in stateManager
+    const cachedCallData = stateManager.getCallData(callId);
+    if (cachedCallData && cachedCallData.restaurant) {
+      restaurant = cachedCallData.restaurant;
+      console.log('Restaurant loaded from cache:', restaurant.name);
+    } else {
+      // Fallback to API lookup if not cached
+      const phoneToLookup = calledNumber || '+14108880091';
+      restaurant = await database.getRestaurantByPhone(phoneToLookup);
+      console.log('Restaurant loaded from API:', restaurant?.name);
+    }
 
     if (!restaurant) {
-      console.error('Restaurant not found for phone:', phoneToLookup);
+      console.error('Restaurant not found for phone:', calledNumber);
       await twilioService.hangup(callId, {
         message: 'Sorry, we are unable to process your call at this time. Please try again later.',
         reason: 'restaurant_not_found'

@@ -66,6 +66,7 @@ router.post('/voice', (req, res) => {
       const restaurant = await getRestaurantByPhone(callData.to_number);
       if (restaurant) {
         callData.restaurant_id = restaurant.id;
+        callData.restaurant = restaurant; // Store full restaurant object for WebSocket handler
       }
 
       // Store call data for final logging at call completion
