@@ -51,6 +51,73 @@ wss.on('connection', (ws, _req) => {
   let recentOrders = [];
   let customerHasSpoken = false;
   let greetingTimeout = null;
+  let callFinalized = false;
+  let hangupTimer = null;
+
+  // Unified hangup handler - single source of truth for all hangup scenarios
+  async function initiateHangup(reason, options = {}) {
+    if (callFinalized) {
+      console.log('Call already finalized, skipping hangup');
+      return;
+    }
+
+    console.log(`Initiating hangup - Reason: ${reason}`);
+
+    // Clear any pending timers
+    if (hangupTimer) {
+      clearTimeout(hangupTimer);
+      hangupTimer = null;
+    }
+    if (greetingTimeout) {
+      clearTimeout(greetingTimeout);
+      greetingTimeout = null;
+    }
+
+    // Close OpenAI WebSocket first to stop audio streaming
+    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+      console.log('Closing OpenAI WebSocket before hangup');
+      openaiWs.close();
+    }
+
+    // Don't attempt Twilio hangup if we don't have a callSid yet
+    if (!callSid) {
+      console.log('No callSid available, skipping Twilio hangup');
+      return;
+    }
+
+    try {
+      // Attempt graceful hangup with Ring Two Tech branding
+      const hangupResult = await twilioService.hangup(callSid, {
+        method: 'graceful',
+        reason: reason,
+        restaurant: restaurant,
+        ...options
+      });
+
+      if (!hangupResult.success) {
+        console.error('Graceful hangup failed:', hangupResult.error);
+        console.log('Attempting immediate hangup as fallback...');
+
+        // Fallback to immediate hangup
+        await twilioService.hangup(callSid, {
+          method: 'immediate',
+          reason: `${reason}_fallback`
+        });
+      }
+    } catch (error) {
+      console.error('Error during hangup:', error);
+
+      // Last resort: immediate hangup
+      try {
+        await twilioService.hangup(callSid, {
+          method: 'immediate',
+          reason: `${reason}_error`
+        });
+      } catch (fallbackError) {
+        console.error('Fallback hangup also failed:', fallbackError);
+      }
+    }
+  }
 
   // Initialize OpenAI connection
   async function initializeOpenAI(calledNumber, fromNumber, callId) {
@@ -70,10 +137,7 @@ wss.on('connection', (ws, _req) => {
 
     if (!restaurant) {
       console.error('Restaurant not found for phone:', calledNumber);
-      await twilioService.hangup(callId, {
-        message: 'Sorry, we are unable to process your call at this time. Please try again later.',
-        reason: 'restaurant_not_found'
-      });
+      await initiateHangup('restaurant_not_found');
       return;
     }
 
@@ -109,10 +173,7 @@ wss.on('connection', (ws, _req) => {
 
     } catch (createError) {
       console.error('Failed to create OpenAI WebSocket:', createError);
-      await twilioService.hangup(callId, {
-        message: 'Technical difficulties. Please try again.',
-        reason: 'websocket_creation_failed'
-      });
+      await initiateHangup('websocket_creation_failed');
       return;
     }
 
@@ -463,12 +524,9 @@ wss.on('connection', (ws, _req) => {
         // Update call data with order reference
         stateManager.updateCallData(callSid, { order_id: order.id });
 
-        setTimeout(async () => {
-          await twilioService.hangup(callSid, {
-            method: 'graceful',
-            reason: 'order_completed',
-            restaurant: restaurant
-          });
+        // Schedule hangup after 3 seconds to allow AI to finish speaking goodbye message
+        hangupTimer = setTimeout(async () => {
+          await initiateHangup('order_completed');
         }, 3000);
       }
     } catch (error) {
@@ -568,6 +626,28 @@ wss.on('connection', (ws, _req) => {
 
   // Finalize call and create call log
   async function finalizeCall() {
+    // Guard against multiple executions
+    if (callFinalized) {
+      console.log('Call already finalized, skipping duplicate finalization');
+      return;
+    }
+
+    callFinalized = true;
+    console.log('Finalizing call (first time)');
+
+    // Clear any pending hangup timer
+    if (hangupTimer) {
+      clearTimeout(hangupTimer);
+      hangupTimer = null;
+      console.log('Cleared pending hangup timer');
+    }
+
+    // Clear greeting timeout if still pending
+    if (greetingTimeout) {
+      clearTimeout(greetingTimeout);
+      greetingTimeout = null;
+    }
+
     const callEndTime = new Date();
     const callDuration = Math.round((callEndTime - callStartTime) / 1000);
 
@@ -587,7 +667,9 @@ wss.on('connection', (ws, _req) => {
       stateManager.removeCallData(callSid);
     }
 
+    // Close OpenAI WebSocket if still open
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+      console.log('Closing OpenAI WebSocket during finalization');
       openaiWs.close();
     }
   }

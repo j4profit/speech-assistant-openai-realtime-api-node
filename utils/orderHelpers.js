@@ -235,6 +235,13 @@ function formatMenuForAI(menuItems, restaurant) {
   });
 
   if (restaurant) {
+    // Add specials if available
+    if (restaurant.specials && restaurant.specials.trim()) {
+      menuText += '\n\n🌟 CURRENT SPECIALS:\n';
+      menuText += `${restaurant.specials}\n`;
+      menuText += '\nIMPORTANT: Mention these specials to customers when they ask what\'s available or if they\'re interested in deals!\n';
+    }
+
     // Add operating hours if available
     if (restaurant.hours) {
       menuText += '\n\nRESTAURANT HOURS:\n';
