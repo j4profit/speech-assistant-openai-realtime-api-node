@@ -15,13 +15,47 @@ const supabase = createClient(config.supabase.url, config.supabase.anonKey);
  * Hangup TwiML endpoint with Ring Two Tech branding
  */
 router.post('/hangup-twiml', (req, res) => {
-  const callSid = req.query.call_sid || req.body.CallSid;
-  const twiml = twilioService.generateHangupTwiML(callSid);
+  try {
+    const callSid = req.query.call_sid || req.body.CallSid;
 
-  res.type('text/xml');
-  res.send(twiml);
+    console.log('Hangup TwiML requested for call:', callSid);
+    console.log('Request query:', req.query);
+    console.log('Request body:', req.body);
 
-  console.log('TwiML hangup message sent with Google Chirp3 HD voice');
+    if (!callSid) {
+      console.error('❌ No callSid provided to hangup-twiml endpoint');
+      // Return basic hangup TwiML without restaurant name
+      const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">Your call was processed by Ring two tech. Thank you for calling.</Say>
+    <Hangup/>
+</Response>`;
+      res.type('text/xml');
+      res.send(fallbackTwiml);
+      return;
+    }
+
+    const twiml = twilioService.generateHangupTwiML(callSid);
+
+    console.log('✅ TwiML generated:', twiml);
+
+    res.type('text/xml');
+    res.send(twiml);
+
+    console.log('TwiML hangup message sent with Google Chirp3 HD voice');
+  } catch (error) {
+    console.error('❌ Error generating hangup TwiML:', error);
+
+    // Return fallback TwiML to prevent Twilio error message
+    const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">Your call was processed by Ring two tech. Thank you for calling.</Say>
+    <Hangup/>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(fallbackTwiml);
+  }
 });
 
 /**

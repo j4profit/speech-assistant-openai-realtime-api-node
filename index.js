@@ -78,12 +78,6 @@ wss.on('connection', (ws, _req) => {
       greetingTimeout = null;
     }
 
-    // Close OpenAI WebSocket first to stop audio streaming
-    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-      console.log('Closing OpenAI WebSocket before hangup');
-      openaiWs.close();
-    }
-
     // Don't attempt Twilio hangup if we don't have a callSid yet
     if (!callSid) {
       console.log('No callSid available, skipping Twilio hangup');
@@ -92,6 +86,8 @@ wss.on('connection', (ws, _req) => {
 
     try {
       // ALWAYS use graceful hangup with Ring Two Tech branding message
+      // Important: Redirect call to hangup TwiML BEFORE closing WebSocket
+      // This prevents Twilio errors when stream ends
       const hangupResult = await twilioService.hangup(callSid, {
         method: 'graceful',
         reason: reason,
@@ -102,14 +98,24 @@ wss.on('connection', (ws, _req) => {
       if (!hangupResult.success) {
         console.error('⚠️  Graceful hangup failed (Ring Two Tech message may not have played):', hangupResult.error);
         console.log('Note: Call will end naturally. Message playback depends on call state.');
-        // Do NOT fall back to immediate hangup - always try to play the message
       } else {
         console.log('✅ Graceful hangup successful - Ring Two Tech message will play');
+      }
+
+      // Close OpenAI WebSocket AFTER successful redirect
+      // This ensures Twilio has new TwiML instructions before stream ends
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        console.log('Closing OpenAI WebSocket after hangup redirect');
+        openaiWs.close();
       }
     } catch (error) {
       console.error('⚠️  Error during graceful hangup:', error);
       console.log('Note: Ring Two Tech message may not have played due to error');
-      // Do NOT use immediate hangup as fallback - message is more important than forcing termination
+
+      // Still try to close WebSocket on error
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.close();
+      }
     }
   }
 
