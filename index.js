@@ -378,13 +378,22 @@ wss.on('connection', (ws, _req) => {
           const transcript = response.transcript.toLowerCase();
           const goodbyePhrases = [
             'goodbye',
+            'good bye',
+            'bye',
             'have a great day',
             'have a good day',
             'have a nice day',
+            'have a wonderful day',
+            'take care',
             'thank you for calling',
             'thanks for calling',
             'feel free to call back',
-            'call back anytime'
+            'call back anytime',
+            'call us back',
+            'have a good one',
+            'talk to you later',
+            'see you',
+            'bye bye'
           ];
 
           const isGoodbye = goodbyePhrases.some(phrase => transcript.includes(phrase));
@@ -417,6 +426,38 @@ wss.on('connection', (ws, _req) => {
             clearTimeout(greetingTimeout);
             greetingTimeout = null;
             customerHasSpoken = true;
+          }
+
+          // Detect customer goodbye phrases and trigger system hangup after AI responds
+          const customerText = response.transcript.toLowerCase();
+          const customerGoodbyes = [
+            'goodbye',
+            'good bye',
+            'bye',
+            'i\'m all set',
+            'im all set',
+            'i am all set',
+            'that\'s all',
+            'thats all',
+            'that is all',
+            'thank you',
+            'thanks',
+            'have a good day',
+            'have a great day',
+            'that\'s it',
+            'thats it',
+            'that will be all',
+            'nothing else',
+            'no that\'s it'
+          ];
+
+          const customerSaidGoodbye = customerGoodbyes.some(phrase => customerText.includes(phrase));
+
+          // If customer said goodbye and we're not in an ordering flow, trigger hangup after AI responds
+          if (customerSaidGoodbye && !orderProcessed && customerHasSpoken) {
+            console.log('Customer goodbye detected - AI will respond and then hangup will trigger');
+            // Don't set hangupTimer here - let the AI respond first
+            // The AI's goodbye response will trigger the hangup (existing logic at lines 397-402)
           }
           break;
 
