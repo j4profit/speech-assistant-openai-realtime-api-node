@@ -69,6 +69,8 @@ function generateIncomingCallTwiML(host, callParams) {
             <Parameter name="CallSid" value="${callParams.CallSid}" />
         </Stream>
     </Connect>
+    <Say voice="${config.voice.model}">Your call was processed by Ring two tech. Thank you for calling.</Say>
+    <Hangup/>
 </Response>`;
 }
 
