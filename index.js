@@ -373,8 +373,32 @@ wss.on('connection', (ws, _req) => {
             text: response.transcript
           });
 
+          // Check for order confirmation
           if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
             await processOrderFromTranscript(response.transcript);
+          }
+
+          // Detect goodbye/call-ending phrases and trigger graceful hangup
+          const transcript = response.transcript.toLowerCase();
+          const goodbyePhrases = [
+            'goodbye',
+            'have a great day',
+            'have a good day',
+            'have a nice day',
+            'thank you for calling',
+            'thanks for calling',
+            'feel free to call back',
+            'call back anytime'
+          ];
+
+          const isGoodbye = goodbyePhrases.some(phrase => transcript.includes(phrase));
+
+          if (isGoodbye && !orderProcessed && !hangupTimer) {
+            console.log('Goodbye phrase detected - scheduling hangup');
+            // Give AI 2 seconds to finish speaking before hangup
+            hangupTimer = setTimeout(async () => {
+              await initiateHangup('conversation_ended');
+            }, 2000);
           }
           break;
 
