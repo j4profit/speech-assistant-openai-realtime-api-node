@@ -374,6 +374,7 @@ wss.on('connection', (ws, _req) => {
           }
 
           // Detect goodbye/call-ending phrases and trigger graceful hangup
+          // ONLY after customer has spoken (to avoid triggering on greeting)
           const transcript = response.transcript.toLowerCase();
           const goodbyePhrases = [
             'goodbye',
@@ -388,12 +389,19 @@ wss.on('connection', (ws, _req) => {
 
           const isGoodbye = goodbyePhrases.some(phrase => transcript.includes(phrase));
 
-          if (isGoodbye && !orderProcessed && !hangupTimer) {
-            console.log('Goodbye phrase detected - scheduling hangup');
+          // Only trigger hangup if:
+          // 1. It's a goodbye phrase, AND
+          // 2. Customer has spoken (not just the greeting), AND
+          // 3. No order was processed, AND
+          // 4. No hangup timer already set
+          if (isGoodbye && customerHasSpoken && !orderProcessed && !hangupTimer) {
+            console.log('Goodbye phrase detected after customer interaction - scheduling hangup');
             // Give AI 2 seconds to finish speaking before hangup
             hangupTimer = setTimeout(async () => {
               await initiateHangup('conversation_ended');
             }, 2000);
+          } else if (isGoodbye && !customerHasSpoken) {
+            console.log('Goodbye phrase detected in greeting - ignoring (customer hasn\'t spoken yet)');
           }
           break;
 
