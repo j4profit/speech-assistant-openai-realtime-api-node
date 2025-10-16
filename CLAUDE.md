@@ -227,6 +227,79 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 - Don't recite menu automatically
 - Only provide menu when customer asks ("What do you have?", "What's on the menu?")
 
+## Audio Processing
+
+The system includes optional audio processing to improve call quality and transcription accuracy.
+
+### Features
+
+**Noise Suppression** (Spectral Gating)
+- Simple DSP-based noise reduction
+- Attenuates samples below threshold (likely noise)
+- Reduces background noise: TV, traffic, conversations
+- Improves AI transcription accuracy
+
+**Echo Cancellation**
+- Prevents feedback loops on speakerphone
+- Uses adaptive filtering with reference signal
+- Reduces audio cutoff issues
+
+**Automatic Gain Control (AGC)**
+- Normalizes volume levels
+- Prevents too-quiet or too-loud audio
+- Target RMS level: 0.25
+
+### Configuration
+
+Set in `.env` file (all default to true):
+```bash
+AUDIO_PROCESSING_ENABLED=true
+AUDIO_NOISE_SUPPRESSION=true
+AUDIO_ECHO_CANCELLATION=true
+AUDIO_AUTO_GAIN_CONTROL=true
+```
+
+### Performance Impact
+
+- Added latency: ~50-100ms per call
+- CPU usage: +10-20% per concurrent call
+- Memory: +10-20MB per call
+
+### Disabling Audio Processing
+
+To quickly disable without code changes:
+```bash
+# In .env
+AUDIO_PROCESSING_ENABLED=false
+```
+
+Or disable individual features:
+```bash
+AUDIO_NOISE_SUPPRESSION=false
+AUDIO_ECHO_CANCELLATION=false
+AUDIO_AUTO_GAIN_CONTROL=false
+```
+
+### Architecture
+
+```
+Twilio µ-law Audio
+    ↓
+Decode to PCM16
+    ↓
+Noise Suppression (Spectral Gate)
+    ↓
+Echo Cancellation (Adaptive Filter)
+    ↓
+Auto Gain Control (AGC)
+    ↓
+Encode to µ-law
+    ↓
+OpenAI Realtime API
+```
+
+Implementation: `services/audioProcessor.js`
+
 ## Technical Constraints
 
 ### Twilio Webhook Timeout
@@ -242,7 +315,7 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 
 ### Call State Cleanup
 - `stateManager` automatically cleans up calls older than 60 minutes
-- Cleanup runs every 15 minutes (index.js:630-632)
+- Cleanup runs every 15 minutes (index.js:770-772)
 
 ## Troubleshooting
 
@@ -258,13 +331,25 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 
 ### Orders not being created
 - Verify AI is generating `ORDER_CONFIRMED:` format in transcript
-- Check `processOrderFromTranscript()` parsing logic (index.js:399-477)
+- Check `processOrderFromTranscript()` parsing logic (index.js:540-615)
 - Ensure `create-order` Edge Function is deployed and working
 
 ### Twilio call drops immediately
 - Check BASE_URL is publicly accessible
 - Verify Twilio webhook is configured correctly (POST to `/voice`)
 - Look for errors in `/voice` endpoint handler
+
+### Audio quality issues / garbled audio
+- Check if audio processing is causing issues: set `AUDIO_PROCESSING_ENABLED=false`
+- Try disabling individual features (noise suppression, echo cancellation, AGC)
+- Check CPU usage - high CPU can cause audio processing delays
+- Adjust noise gate threshold in audioProcessor.js if too aggressive
+
+### High CPU usage after audio processing added
+- Reduce concurrent call limits
+- Disable audio processing: `AUDIO_PROCESSING_ENABLED=false`
+- Disable only heavy features: `AUDIO_NOISE_SUPPRESSION=false`
+- Consider upgrading server resources
 
 ## Version History
 

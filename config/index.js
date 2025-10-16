@@ -56,6 +56,14 @@ const config = {
     maxAddressRetries: 1,
     defaultPreparationTime: 20,
     defaultDeliveryTime: 15
+  },
+
+  // Audio Processing Configuration
+  audioProcessing: {
+    enabled: process.env.AUDIO_PROCESSING_ENABLED !== 'false', // Default: true
+    noiseSuppression: process.env.AUDIO_NOISE_SUPPRESSION !== 'false', // Default: true
+    echoCancellation: process.env.AUDIO_ECHO_CANCELLATION !== 'false', // Default: true
+    autoGainControl: process.env.AUDIO_AUTO_GAIN_CONTROL !== 'false' // Default: true
   }
 };
 

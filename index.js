@@ -8,6 +8,7 @@ const routes = require('./routes');
 const twilioService = require('./services/twilio');
 const database = require('./services/database');
 const stateManager = require('./services/stateManager');
+const audioProcessor = require('./services/audioProcessor');
 const { shouldCreateCustomerMessage, generateAIInstructions } = require('./services/aiInstructions');
 const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime } = require('./utils/orderHelpers');
 
@@ -53,6 +54,7 @@ wss.on('connection', (ws, _req) => {
   let greetingTimeout = null;
   let callFinalized = false;
   let hangupTimer = null;
+  let referenceSignal = null; // For echo cancellation
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -309,6 +311,19 @@ wss.on('connection', (ws, _req) => {
       switch (response.type) {
         case 'response.audio.delta':
           if (streamSid && ws.readyState === WebSocket.OPEN) {
+            // Store reference signal for echo cancellation (AI output)
+            if (config.audioProcessing.enabled && config.audioProcessing.echoCancellation) {
+              try {
+                const audioBuffer = Buffer.from(response.delta, 'base64');
+                // Keep last 480 samples for echo reference
+                if (audioBuffer.length > 0) {
+                  referenceSignal = new Int16Array(audioBuffer.buffer.slice(0, Math.min(480, audioBuffer.length)));
+                }
+              } catch (err) {
+                // Ignore errors in reference signal capture
+              }
+            }
+
             ws.send(JSON.stringify({
               event: 'media',
               streamSid: streamSid,
@@ -606,9 +621,28 @@ wss.on('connection', (ws, _req) => {
 
         case 'media':
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            let audioPayload = msg.media.payload;
+
+            // Apply audio processing if enabled
+            if (config.audioProcessing.enabled) {
+              try {
+                const inputBuffer = Buffer.from(audioPayload, 'base64');
+                const processedBuffer = audioProcessor.processAudio(inputBuffer, {
+                  noiseSuppression: config.audioProcessing.noiseSuppression,
+                  echoCancellation: config.audioProcessing.echoCancellation,
+                  autoGainControl: config.audioProcessing.autoGainControl,
+                  referenceSignal: referenceSignal
+                });
+                audioPayload = processedBuffer.toString('base64');
+              } catch (error) {
+                console.error('Audio processing error:', error);
+                // Fall back to original audio on error
+              }
+            }
+
             const audioAppend = {
               type: 'input_audio_buffer.append',
-              audio: msg.media.payload
+              audio: audioPayload
             };
             openaiWs.send(JSON.stringify(audioAppend));
           }
@@ -685,6 +719,14 @@ wss.on('connection', (ws, _req) => {
   });
 });
 
+// Initialize audio processor
+(async () => {
+  if (config.audioProcessing.enabled) {
+    console.log('🔊 Initializing audio processor...');
+    await audioProcessor.initialize();
+  }
+})();
+
 // Start server
 const PORT = config.server.port;
 server.listen(PORT, () => {
@@ -696,12 +738,28 @@ server.listen(PORT, () => {
   console.log(`OpenAI configured: ${!!config.openai.apiKey}`);
   console.log(`Twilio configured: ${twilioService.isTwilioConfigured()}`);
   console.log(`Supabase configured: ${!!(config.supabase.url && config.supabase.anonKey)}`);
+  console.log(`Audio Processing: ${config.audioProcessing.enabled ? '✅ ENABLED' : '❌ DISABLED'}`);
+  if (config.audioProcessing.enabled) {
+    console.log(`  • Noise Suppression: ${config.audioProcessing.noiseSuppression ? 'ON' : 'OFF'}`);
+    console.log(`  • Echo Cancellation: ${config.audioProcessing.echoCancellation ? 'ON' : 'OFF'}`);
+    console.log(`  • Auto Gain Control: ${config.audioProcessing.autoGainControl ? 'ON' : 'OFF'}`);
+  }
   console.log(`${'='.repeat(60)}\n`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');
+  audioProcessor.cleanup();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  audioProcessor.cleanup();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
