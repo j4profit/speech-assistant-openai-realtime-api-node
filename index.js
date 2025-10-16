@@ -9,6 +9,7 @@ const twilioService = require('./services/twilio');
 const database = require('./services/database');
 const stateManager = require('./services/stateManager');
 const audioProcessor = require('./services/audioProcessor');
+const audioAnalyzer = require('./services/audioAnalyzer');
 const { shouldCreateCustomerMessage, generateAIInstructions } = require('./services/aiInstructions');
 const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime } = require('./utils/orderHelpers');
 
@@ -55,6 +56,8 @@ wss.on('connection', (ws, _req) => {
   let callFinalized = false;
   let hangupTimer = null;
   let referenceSignal = null; // For echo cancellation
+  let analyzer = audioAnalyzer.createAnalyzer(); // Dynamic VAD adjustment
+  let vadAdjusted = false; // Track if we've already adjusted VAD
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -219,6 +222,36 @@ wss.on('connection', (ws, _req) => {
     openaiWs.on('close', () => {
       console.log('OpenAI WebSocket closed');
     });
+  }
+
+  // Update VAD settings based on audio analysis
+  function updateVADSettings(analysisResults) {
+    if (!openaiWs || openaiWs.readyState !== WebSocket.OPEN) {
+      console.log('Cannot update VAD: OpenAI WebSocket not open');
+      return;
+    }
+
+    const { recommendedThreshold, recommendedSilenceDuration, environmentType } = analysisResults;
+
+    console.log(`🎚️  Adjusting VAD for ${environmentType} environment:`, {
+      threshold: `${config.voice.vadThreshold} → ${recommendedThreshold}`,
+      silenceDuration: `${config.voice.silenceDurationMs}ms → ${recommendedSilenceDuration}ms`
+    });
+
+    // Send session.update to adjust VAD settings mid-call
+    const vadUpdate = {
+      type: 'session.update',
+      session: {
+        turn_detection: {
+          type: 'server_vad',
+          threshold: recommendedThreshold,
+          prefix_padding_ms: 200,
+          silence_duration_ms: recommendedSilenceDuration
+        }
+      }
+    };
+
+    openaiWs.send(JSON.stringify(vadUpdate));
   }
 
   // Get AI function tools configuration
@@ -622,11 +655,23 @@ wss.on('connection', (ws, _req) => {
         case 'media':
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             let audioPayload = msg.media.payload;
+            const inputBuffer = Buffer.from(audioPayload, 'base64');
+
+            // Analyze audio for dynamic VAD adjustment (only during initial period)
+            if (!vadAdjusted) {
+              analyzer.analyzeChunk(inputBuffer);
+
+              // Check if analysis is complete and adjust VAD if needed
+              const analysisResults = analyzer.getResults();
+              if (analysisResults && !vadAdjusted) {
+                vadAdjusted = true;
+                updateVADSettings(analysisResults);
+              }
+            }
 
             // Apply audio processing if enabled
             if (config.audioProcessing.enabled) {
               try {
-                const inputBuffer = Buffer.from(audioPayload, 'base64');
                 const processedBuffer = audioProcessor.processAudio(inputBuffer, {
                   noiseSuppression: config.audioProcessing.noiseSuppression,
                   echoCancellation: config.audioProcessing.echoCancellation,

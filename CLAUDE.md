@@ -171,9 +171,37 @@ The system uses µ-law (G.711) audio format:
 ### Voice Activity Detection (VAD)
 
 OpenAI Realtime API uses server-side VAD:
-- `vadThreshold: 0.8` - Sensitivity for detecting speech
-- `silenceDurationMs: 500` - Silence duration before considering turn complete
+- `vadThreshold: 0.8` - Sensitivity for detecting speech (default)
+- `silenceDurationMs: 500` - Silence duration before considering turn complete (default)
 - Configured in `config/index.js` and applied in session setup
+
+#### Dynamic VAD Adjustment (v2.2)
+
+The system now automatically adjusts VAD settings based on the audio environment:
+
+**How it works:**
+1. During the first ~2 seconds of a call, `services/audioAnalyzer.js` analyzes incoming audio
+2. Calculates: RMS level, signal-to-noise ratio (SNR), noise floor, signal peaks
+3. Classifies environment: `very_noisy`, `moderately_noisy`, `normal`, `quiet`, or `very_quiet`
+4. Sends `session.update` to OpenAI with optimal VAD settings for that environment
+5. VAD settings adjust mid-call (happens once per call)
+
+**Environment-specific adjustments:**
+- **Very noisy** (restaurant, street): `threshold: 0.5`, `silence: 400ms` (more sensitive)
+- **Moderately noisy** (office, TV): `threshold: 0.6`, `silence: 450ms`
+- **Normal**: `threshold: 0.7`, `silence: 500ms`
+- **Quiet** (home): `threshold: 0.8`, `silence: 500ms`
+- **Very quiet** (silent room): `threshold: 0.9`, `silence: 600ms` (less sensitive)
+
+**Benefits:**
+- Noisy environments: Lower threshold catches speech better
+- Quiet environments: Higher threshold prevents false triggers
+- No manual tuning required - adapts automatically per call
+
+**Implementation:**
+- Audio analysis: `services/audioAnalyzer.js`
+- VAD update logic: `index.js` lines 59-60, 630-640, 227-255
+- Console logs show environment detection and adjustments
 
 ## Common Development Tasks
 
@@ -355,4 +383,5 @@ Implementation: `services/audioProcessor.js`
 
 - **v1.0.0**: Original monolithic implementation (2,742 lines in single file)
 - **v2.0.0**: Refactored modular architecture
-- **v2.1**: Added restaurant-specific AI voices, hours, taxes, and delivery fees
+- **v2.1**: Added restaurant-specific AI voices, hours, taxes, delivery fees, and hangup unification
+- **v2.2**: Added dynamic VAD adjustment based on real-time audio environment analysis
