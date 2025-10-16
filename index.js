@@ -91,7 +91,7 @@ wss.on('connection', (ws, _req) => {
     }
 
     try {
-      // Attempt graceful hangup with Ring Two Tech branding
+      // ALWAYS use graceful hangup with Ring Two Tech branding message
       const hangupResult = await twilioService.hangup(callSid, {
         method: 'graceful',
         reason: reason,
@@ -100,27 +100,16 @@ wss.on('connection', (ws, _req) => {
       });
 
       if (!hangupResult.success) {
-        console.error('Graceful hangup failed:', hangupResult.error);
-        console.log('Attempting immediate hangup as fallback...');
-
-        // Fallback to immediate hangup
-        await twilioService.hangup(callSid, {
-          method: 'immediate',
-          reason: `${reason}_fallback`
-        });
+        console.error('⚠️  Graceful hangup failed (Ring Two Tech message may not have played):', hangupResult.error);
+        console.log('Note: Call will end naturally. Message playback depends on call state.');
+        // Do NOT fall back to immediate hangup - always try to play the message
+      } else {
+        console.log('✅ Graceful hangup successful - Ring Two Tech message will play');
       }
     } catch (error) {
-      console.error('Error during hangup:', error);
-
-      // Last resort: immediate hangup
-      try {
-        await twilioService.hangup(callSid, {
-          method: 'immediate',
-          reason: `${reason}_error`
-        });
-      } catch (fallbackError) {
-        console.error('Fallback hangup also failed:', fallbackError);
-      }
+      console.error('⚠️  Error during graceful hangup:', error);
+      console.log('Note: Ring Two Tech message may not have played due to error');
+      // Do NOT use immediate hangup as fallback - message is more important than forcing termination
     }
   }
 
