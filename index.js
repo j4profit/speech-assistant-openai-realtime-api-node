@@ -195,9 +195,6 @@ wss.on('connection', (ws, _req) => {
           voice: restaurant.ai_voice || 'coral',
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
-          input_audio_transcription: {
-            model: 'whisper-1'
-          },
           turn_detection: {
             type: 'server_vad',
             threshold: config.voice.vadThreshold,
@@ -371,13 +368,19 @@ wss.on('connection', (ws, _req) => {
             text: response.transcript
           });
 
+          // Mark customer as having spoken after first AI response
+          // (AI only responds when customer speaks)
+          if (!customerHasSpoken) {
+            customerHasSpoken = true;
+          }
+
           // Check for order confirmation
           if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
             await processOrderFromTranscript(response.transcript);
           }
 
-          // Detect goodbye/call-ending phrases and trigger graceful hangup
-          // ONLY after customer has spoken (to avoid triggering on greeting)
+          // Detect AI goodbye phrases and trigger graceful hangup
+          // Only after customer has interacted (not just the initial greeting)
           const transcript = response.transcript.toLowerCase();
           const goodbyePhrases = [
             'goodbye',
@@ -403,64 +406,18 @@ wss.on('connection', (ws, _req) => {
 
           // Only trigger hangup if:
           // 1. It's a goodbye phrase, AND
-          // 2. Customer has spoken (not just the greeting), AND
+          // 2. Customer has spoken (detected by multiple AI responses), AND
           // 3. No order was processed, AND
           // 4. No hangup timer already set
-          if (isGoodbye && customerHasSpoken && !orderProcessed && !hangupTimer) {
-            console.log('Goodbye phrase detected after customer interaction - scheduling hangup');
+          const aiResponseCount = conversationTranscript.filter(t => t.speaker === 'AI').length;
+          if (isGoodbye && aiResponseCount > 1 && !orderProcessed && !hangupTimer) {
+            console.log('AI goodbye detected after customer interaction - scheduling hangup');
             // Give AI 2 seconds to finish speaking before hangup
             hangupTimer = setTimeout(async () => {
               await initiateHangup('conversation_ended');
             }, 2000);
-          } else if (isGoodbye && !customerHasSpoken) {
-            console.log('Goodbye phrase detected in greeting - ignoring (customer hasn\'t spoken yet)');
-          }
-          break;
-
-        case 'conversation.item.input_audio_transcription.completed':
-          console.log('Customer said:', response.transcript);
-          conversationTranscript.push({
-            timestamp: new Date().toISOString(),
-            speaker: 'Customer',
-            text: response.transcript
-          });
-
-          if (greetingTimeout) {
-            clearTimeout(greetingTimeout);
-            greetingTimeout = null;
-            customerHasSpoken = true;
-          }
-
-          // Detect customer goodbye phrases and trigger system hangup after AI responds
-          const customerText = response.transcript.toLowerCase();
-          const customerGoodbyes = [
-            'goodbye',
-            'good bye',
-            'bye',
-            'i\'m all set',
-            'im all set',
-            'i am all set',
-            'that\'s all',
-            'thats all',
-            'that is all',
-            'thank you',
-            'thanks',
-            'have a good day',
-            'have a great day',
-            'that\'s it',
-            'thats it',
-            'that will be all',
-            'nothing else',
-            'no that\'s it'
-          ];
-
-          const customerSaidGoodbye = customerGoodbyes.some(phrase => customerText.includes(phrase));
-
-          // If customer said goodbye and we're not in an ordering flow, trigger hangup after AI responds
-          if (customerSaidGoodbye && !orderProcessed && customerHasSpoken) {
-            console.log('Customer goodbye detected - AI will respond and then hangup will trigger');
-            // Don't set hangupTimer here - let the AI respond first
-            // The AI's goodbye response will trigger the hangup (existing logic at lines 397-402)
+          } else if (isGoodbye && aiResponseCount === 1) {
+            console.log('AI goodbye detected in greeting - ignoring');
           }
           break;
 
