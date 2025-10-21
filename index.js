@@ -270,16 +270,30 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "validate_delivery_address",
-        description: "Validate delivery address for feasibility",
+        description: "Validate delivery address for feasibility. Include customer_name if known.",
         parameters: {
           type: "object",
           properties: {
             address: {
               type: "string",
               description: "Complete delivery address provided by customer"
+            },
+            customer_name: {
+              type: "string",
+              description: "Customer's name (used for saving address for future orders)"
             }
           },
           required: ["address"]
+        }
+      },
+      {
+        type: "function",
+        name: "check_customer_address",
+        description: "Check if customer has a saved delivery address on file. Call this BEFORE asking for delivery address.",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
         }
       },
       {
@@ -458,9 +472,33 @@ wss.on('connection', (ws, _req) => {
         result = { orders: recentOrders, count: recentOrders.length };
         break;
 
+      case 'check_customer_address':
+        const savedAddress = await database.getCustomerAddress(restaurant.id, customerPhone);
+        if (savedAddress && savedAddress.is_valid) {
+          result = {
+            has_saved_address: true,
+            customer_name: savedAddress.customer_name,
+            delivery_address: savedAddress.delivery_address,
+            delivery_instructions: savedAddress.delivery_instructions,
+            distance: savedAddress.distance_from_restaurant,
+            times_used: savedAddress.times_used
+          };
+        } else {
+          result = {
+            has_saved_address: false,
+            message: 'No saved delivery address found'
+          };
+        }
+        break;
+
       case 'validate_delivery_address':
         addressValidationAttempts++;
-        const validationResult = await database.validateDeliveryAddress(parsedArgs.address, restaurant);
+        const validationResult = await database.validateDeliveryAddress(
+          parsedArgs.address,
+          restaurant,
+          customerPhone,  // Pass customerPhone for caching
+          parsedArgs.customer_name || null  // Pass customer name if provided
+        );
 
         if (validationResult.valid) {
           addressValidated = true;
@@ -570,6 +608,7 @@ wss.on('connection', (ws, _req) => {
         customer_phone: customerPhone,
         order_type: orderInfo.orderType,
         delivery_address: orderInfo.deliveryAddress,
+        delivery_instructions: orderInfo.deliveryInstructions,
         order_details: orderInfo.items,
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
@@ -619,6 +658,7 @@ wss.on('connection', (ws, _req) => {
         customerPhone: customerPhone,
         orderType: 'pickup',
         deliveryAddress: 'N/A',
+        deliveryInstructions: null,
         items: '',
         totalAmount: 0,
         specialInstructions: ''
@@ -632,6 +672,9 @@ wss.on('connection', (ws, _req) => {
         } else if (line.includes('Delivery Address:')) {
           const addr = line.split(':')[1]?.trim();
           orderInfo.deliveryAddress = addr && addr !== 'N/A' ? addr : 'N/A';
+        } else if (line.includes('Delivery Instructions:')) {
+          const instructions = line.split(':')[1]?.trim();
+          orderInfo.deliveryInstructions = instructions && instructions !== 'N/A' ? instructions : null;
         } else if (line.includes('Items:')) {
           orderInfo.items = line.split(':')[1]?.trim() || '';
         } else if (line.includes('Total:')) {

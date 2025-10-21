@@ -82,11 +82,15 @@ All database operations go through **Supabase Edge Functions** (services/databas
 - `searchRecentOrders()` - Find customer's recent orders by phone
 - `cancelOrder()` - Cancel pending orders
 - `updateOrder()` - Modify pending orders
-- `validateDeliveryAddress()` - Check if address is within delivery radius
+- `validateDeliveryAddress()` - Check if address is within delivery radius (with caching support)
 - `createOrder()` - Create new order entry
 - `createCustomerMessage()` - Save customer messages/complaints
+- `getCustomerAddress()` - Retrieve cached delivery address ⭐ NEW (v2.3)
+- `saveCustomerAddress()` - Save validated delivery address for future orders ⭐ NEW (v2.3)
 
 **Important**: The system makes HTTP POST requests to Supabase Edge Functions at `${SUPABASE_URL}/functions/v1/{function-name}`.
+
+**Edge Function Source Code**: All 10 edge functions are saved in `supabase/functions/` directory for reference and deployment. See `supabase/functions/README.md` for deployment instructions.
 
 ### AI Instructions System
 
@@ -133,6 +137,63 @@ Recent commits added:
 - **Custom tax rates** - `restaurant.tax_rate` (decimal, e.g., 0.06 for 6%)
 - **Delivery fees** - `restaurant.delivery_fee` (dollar amount)
 - **Custom AI instructions** - `restaurant.additional_ai_instructions` (appended to prompt)
+
+### Delivery Address Caching (V2.3)
+
+**Purpose**: Speed up repeat delivery orders by caching validated addresses
+
+**New Table**: `customer_delivery_addresses`
+- Stores validated delivery addresses per customer per restaurant
+- Includes delivery instructions ("Front door", "Ring bell", etc.)
+- Tracks usage statistics (`times_used`, `last_used_at`)
+- Multi-tenant secure: UNIQUE constraint on `(restaurant_id, customer_phone)`
+
+**Flow for First-Time Delivery Customer:**
+1. Customer says "I want delivery"
+2. AI calls `check_customer_address` → No address found
+3. AI asks "What's your delivery address?"
+4. Customer provides address
+5. AI calls `validate_delivery_address` with customer_phone
+6. Edge function validates AND saves result to cache
+7. AI asks "Any delivery instructions? Like front door, side entrance, etc?"
+8. Customer provides instructions
+9. AI takes order
+
+**Flow for Returning Delivery Customer:**
+1. Customer says "I want delivery"
+2. AI calls `check_customer_address` → Address found!
+3. AI says "I have your address on file: 123 Main St. Is that correct?"
+4. Customer confirms: "Yes"
+5. AI asks "Same instructions - leave at front door?"
+6. Customer confirms
+7. **10-30 seconds saved!** - No address validation needed
+8. AI takes order
+
+**Key Files:**
+- `supabase/functions/get-customer-address/` - Check for saved address
+- `supabase/functions/save-customer-address/` - Save validated address
+- `supabase/functions/validate-delivery-address/` - Updated to check cache first
+- `services/database.js` - Added `getCustomerAddress()` and `saveCustomerAddress()`
+- `services/aiInstructions.js` - Updated delivery flow to check cache first
+- `index.js` - Added `check_customer_address` AI function tool
+
+**ORDER_CONFIRMED Format Updated:**
+```
+ORDER_CONFIRMED:
+Customer Name: John Doe
+Order Type: delivery
+Delivery Address: 123 Main St, Baltimore, MD 21201
+Delivery Instructions: Leave at front door
+Items: 2x Cheeseburger, 1x Fries
+Total: $25.50
+```
+
+**Order Ticket Now Includes:**
+```
+ORDER TYPE: DELIVERY
+• Delivery Address: 123 Main St, Baltimore, MD 21201
+• Delivery Instructions: Leave at front door
+```
 
 ## Key Implementation Details
 
@@ -385,3 +446,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.0.0**: Refactored modular architecture
 - **v2.1**: Added restaurant-specific AI voices, hours, taxes, delivery fees, and hangup unification
 - **v2.2**: Added dynamic VAD adjustment based on real-time audio environment analysis
+- **v2.3**: Added delivery address caching system with delivery instructions tracking

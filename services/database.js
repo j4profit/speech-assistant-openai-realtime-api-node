@@ -238,9 +238,11 @@ async function updateOrder(orderId, updateData) {
  * Validate a delivery address
  * @param {string} address - Delivery address to validate
  * @param {Object} restaurant - Restaurant object
+ * @param {string} customerPhone - Customer's phone number (optional, for caching)
+ * @param {string} customerName - Customer's name (optional, for caching)
  * @returns {Promise<Object>} Validation result with valid flag and message
  */
-async function validateDeliveryAddress(address, restaurant) {
+async function validateDeliveryAddress(address, restaurant, customerPhone = null, customerName = null) {
   try {
     if (!address || address.trim().length < 8) {
       return {
@@ -290,16 +292,24 @@ async function validateDeliveryAddress(address, restaurant) {
     const edgeFunctionUrl = `${config.supabase.url}/functions/v1/validate-delivery-address`;
     console.log('Calling Edge function:', edgeFunctionUrl);
 
+    const requestBody = {
+      address: address.trim(),
+      restaurant_id: restaurant.id
+    };
+
+    // Include customer_phone for caching if available
+    if (customerPhone) {
+      requestBody.customer_phone = customerPhone;
+      console.log('Including customer_phone for address caching');
+    }
+
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${config.supabase.anonKey}`
       },
-      body: JSON.stringify({
-        address: address.trim(),
-        restaurant_id: restaurant.id
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
@@ -344,6 +354,25 @@ async function validateDeliveryAddress(address, restaurant) {
       };
     }
 
+    // Save address to cache if customer info is available and address was not already cached
+    if (customerPhone && customerName && !result.data.cached) {
+      console.log('💾 Saving validated address to cache');
+
+      await saveCustomerAddress({
+        restaurant_id: restaurant.id,
+        customer_phone: customerPhone,
+        customer_name: customerName,
+        delivery_address: address.trim(),
+        formatted_address: result.data.formatted_address || address.trim(),
+        is_valid: result.data.valid || false,
+        latitude: result.data.latitude || null,
+        longitude: result.data.longitude || null,
+        distance_from_restaurant: result.data.distance || null,
+        validation_reason: result.data.reason || null,
+        delivery_instructions: null // Will be set later when customer provides
+      });
+    }
+
     return {
       valid: result.data.valid || false,
       message: result.data.message || 'Address validation completed',
@@ -351,6 +380,8 @@ async function validateDeliveryAddress(address, restaurant) {
       estimated_delivery_time: result.data.estimated_delivery_time,
       delivery_radius: result.data.delivery_radius,
       reason: result.data.reason,
+      distance: result.data.distance,
+      cached: result.data.cached || false,
       edge_function_called: true,
       edge_function_url: edgeFunctionUrl
     };
@@ -438,6 +469,92 @@ async function createCustomerMessage(messageData) {
   }
 }
 
+/**
+ * Get customer's saved delivery address
+ * @param {string} restaurantId - Restaurant ID
+ * @param {string} customerPhone - Customer's phone number
+ * @returns {Promise<Object|null>} Customer address or null if not found
+ */
+async function getCustomerAddress(restaurantId, customerPhone) {
+  try {
+    console.log('🔍 Getting customer address:', { restaurantId, customerPhone });
+
+    const response = await fetch(`${config.supabase.url}/functions/v1/get-customer-address`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`
+      },
+      body: JSON.stringify({
+        restaurant_id: restaurantId,
+        customer_phone: customerPhone
+      })
+    });
+
+    if (!response.ok) {
+      console.error('get-customer-address failed:', response.status);
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (!result.success) {
+      console.error('get-customer-address error:', result.error);
+      return null;
+    }
+
+    console.log('✅ Customer address result:', result.data ? 'Found' : 'Not found');
+    return result.data; // Will be null if no address found
+
+  } catch (error) {
+    console.error('❌ getCustomerAddress error:', error);
+    return null;
+  }
+}
+
+/**
+ * Save customer's validated delivery address
+ * @param {Object} addressData - Address data to save
+ * @returns {Promise<Object|null>} Saved address or null on error
+ */
+async function saveCustomerAddress(addressData) {
+  try {
+    console.log('💾 Saving customer address:', {
+      restaurant_id: addressData.restaurant_id,
+      customer_phone: addressData.customer_phone,
+      is_valid: addressData.is_valid
+    });
+
+    const response = await fetch(`${config.supabase.url}/functions/v1/save-customer-address`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`
+      },
+      body: JSON.stringify(addressData)
+    });
+
+    if (!response.ok) {
+      console.error('save-customer-address failed:', response.status);
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (!result.success) {
+      console.error('save-customer-address error:', result.error);
+      return null;
+    }
+
+    console.log('✅ Customer address saved:', result.address_id);
+    return result.data;
+
+  } catch (error) {
+    console.error('❌ saveCustomerAddress error:', error);
+    return null;
+  }
+}
+
 module.exports = {
   getRestaurantByPhone,
   createCallLog,
@@ -446,5 +563,7 @@ module.exports = {
   updateOrder,
   validateDeliveryAddress,
   createOrder,
-  createCustomerMessage
+  createCustomerMessage,
+  getCustomerAddress,
+  saveCustomerAddress
 };

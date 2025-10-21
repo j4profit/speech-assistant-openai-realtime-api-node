@@ -11,6 +11,7 @@ function createOrderTicket(orderInfo) {
     customerPhone,
     orderType,
     deliveryAddress,
+    deliveryInstructions,
     items,
     specialInstructions,
     subtotal,
@@ -47,6 +48,11 @@ ORDER TYPE: ${orderType.toUpperCase()}`;
   if (orderType === 'delivery' && deliveryAddress) {
     ticket += `
 • Delivery Address: ${deliveryAddress}`;
+
+    if (deliveryInstructions && deliveryInstructions.trim()) {
+      ticket += `
+• Delivery Instructions: ${deliveryInstructions}`;
+    }
   }
 
   ticket += `
