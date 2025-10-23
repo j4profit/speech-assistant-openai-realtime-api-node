@@ -50,48 +50,6 @@ async function getRestaurantByPhone(phoneNumber) {
   }
 }
 
-/**
- * Create a call log entry
- * @param {Object} callData - Call information to log
- * @returns {Promise<Object|null>} Created call log or null on error
- */
-async function createCallLog(callData) {
-  try {
-    console.log('Calling create-call-log Edge Function with data:', JSON.stringify(callData, null, 2));
-
-    const response = await fetch(`${config.supabase.url}/functions/v1/create-call-log`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.supabase.anonKey}`
-      },
-      body: JSON.stringify(callData)
-    });
-
-    console.log('Edge Function response status:', response.status);
-
-    const responseText = await response.text();
-    console.log('Edge Function raw response:', responseText);
-
-    if (!response.ok) {
-      console.error('Edge Function error response:', responseText);
-      return null;
-    }
-
-    const result = JSON.parse(responseText);
-    if (result.error) {
-      console.error('Edge Function returned error:', result.error);
-      return null;
-    }
-
-    console.log('Call log created:', result.data?.id);
-    return result.data;
-
-  } catch (error) {
-    console.error('Error calling create-call-log Edge Function:', error);
-    return null;
-  }
-}
 
 /**
  * Search for recent orders by phone number
@@ -355,10 +313,11 @@ async function validateDeliveryAddress(address, restaurant, customerPhone = null
     }
 
     // Save address to cache if customer info is available and address was not already cached
+    let savedAddressId = null;
     if (customerPhone && customerName && !result.data.cached) {
       console.log('💾 Saving validated address to cache');
 
-      await saveCustomerAddress({
+      const savedAddressData = await saveCustomerAddress({
         restaurant_id: restaurant.id,
         customer_phone: customerPhone,
         customer_name: customerName,
@@ -371,12 +330,18 @@ async function validateDeliveryAddress(address, restaurant, customerPhone = null
         validation_reason: result.data.reason || null,
         delivery_instructions: null // Will be set later when customer provides
       });
+
+      if (savedAddressData && savedAddressData.id) {
+        savedAddressId = savedAddressData.id;
+        console.log(`✅ Address saved with ID: ${savedAddressId}`);
+      }
     }
 
     return {
       valid: result.data.valid || false,
       message: result.data.message || 'Address validation completed',
       address: address,
+      address_id: savedAddressId, // Include the address ID for newly saved addresses
       estimated_delivery_time: result.data.estimated_delivery_time,
       delivery_radius: result.data.delivery_radius,
       reason: result.data.reason,
@@ -555,9 +520,52 @@ async function saveCustomerAddress(addressData) {
   }
 }
 
+/**
+ * Update delivery instructions for a cached address
+ * @param {string} addressId - UUID of the address record
+ * @param {string} deliveryInstructions - Delivery instructions to set
+ * @returns {Promise<Object|null>} Updated address data or null if failed
+ */
+async function updateDeliveryInstructions(addressId, deliveryInstructions) {
+  try {
+    console.log('📝 Updating delivery instructions for address:', addressId);
+
+    const response = await fetch(`${config.supabase.url}/rest/v1/customer_delivery_addresses?id=eq.${addressId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`,
+        'apikey': config.supabase.anonKey,
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({
+        delivery_instructions: deliveryInstructions,
+        updated_at: new Date().toISOString()
+      })
+    });
+
+    if (!response.ok) {
+      console.error('Update delivery instructions failed:', response.status);
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (result && result.length > 0) {
+      console.log('✅ Delivery instructions updated');
+      return result[0];
+    }
+
+    return null;
+
+  } catch (error) {
+    console.error('❌ updateDeliveryInstructions error:', error);
+    return null;
+  }
+}
+
 module.exports = {
   getRestaurantByPhone,
-  createCallLog,
   searchRecentOrders,
   cancelOrder,
   updateOrder,
@@ -565,5 +573,6 @@ module.exports = {
   createOrder,
   createCustomerMessage,
   getCustomerAddress,
-  saveCustomerAddress
+  saveCustomerAddress,
+  updateDeliveryInstructions
 };

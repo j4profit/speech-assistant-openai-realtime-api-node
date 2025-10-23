@@ -45,6 +45,7 @@ wss.on('connection', (ws, _req) => {
   let orderProcessed = false;
   let addressValidated = false;
   let validatedDeliveryAddress = null;
+  let deliveryAddressId = null; // UUID of cached address record from customer_delivery_addresses table
   let addressRequested = false;
   let addressProviderAttempts = 0;
   let addressValidationAttempts = 0;
@@ -475,14 +476,22 @@ wss.on('connection', (ws, _req) => {
       case 'check_customer_address':
         const savedAddress = await database.getCustomerAddress(restaurant.id, customerPhone);
         if (savedAddress && savedAddress.is_valid) {
+          // Store the address ID for later use in order creation
+          deliveryAddressId = savedAddress.id;
+          validatedDeliveryAddress = savedAddress.delivery_address;
+          addressValidated = true;
+
           result = {
             has_saved_address: true,
+            address_id: savedAddress.id,
             customer_name: savedAddress.customer_name,
             delivery_address: savedAddress.delivery_address,
             delivery_instructions: savedAddress.delivery_instructions,
             distance: savedAddress.distance_from_restaurant,
             times_used: savedAddress.times_used
           };
+
+          console.log(`✅ Using cached address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
         } else {
           result = {
             has_saved_address: false,
@@ -503,6 +512,13 @@ wss.on('connection', (ws, _req) => {
         if (validationResult.valid) {
           addressValidated = true;
           validatedDeliveryAddress = parsedArgs.address;
+
+          // Store the address ID if this address was saved to cache
+          if (validationResult.address_id) {
+            deliveryAddressId = validationResult.address_id;
+            console.log(`✅ New address validated and saved (ID: ${deliveryAddressId})`);
+          }
+
           result = {
             ...validationResult,
             status: 'APPROVED',
@@ -609,6 +625,7 @@ wss.on('connection', (ws, _req) => {
         order_type: orderInfo.orderType,
         delivery_address: orderInfo.deliveryAddress,
         delivery_instructions: orderInfo.deliveryInstructions,
+        delivery_address_id: isDelivery ? deliveryAddressId : null, // Link to cached address if delivery
         order_details: orderInfo.items,
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
@@ -617,6 +634,13 @@ wss.on('connection', (ws, _req) => {
         estimated_ready_at: readyTimeInfo.readyTime,
         status: 'pending'
       };
+
+      console.log('Creating order with delivery_address_id:', deliveryAddressId);
+
+      // If delivery order with address ID, update delivery instructions in cached address
+      if (isDelivery && deliveryAddressId && orderInfo.deliveryInstructions) {
+        await database.updateDeliveryInstructions(deliveryAddressId, orderInfo.deliveryInstructions);
+      }
 
       const order = await database.createOrder(orderData);
 
@@ -807,15 +831,8 @@ wss.on('connection', (ws, _req) => {
       transcript_length: conversationTranscript.length
     });
 
-    const callData = stateManager.getCallData(callSid);
-    if (callData) {
-      callData.call_ended_at = callEndTime.toISOString();
-      callData.call_duration = callDuration;
-      callData.conversation_transcript = JSON.stringify(conversationTranscript);
-
-      await database.createCallLog(callData);
-      stateManager.removeCallData(callSid);
-    }
+    // Clean up call state (call logging handled by Twilio backend)
+    stateManager.removeCallData(callSid);
 
     // Close OpenAI WebSocket if still open
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {

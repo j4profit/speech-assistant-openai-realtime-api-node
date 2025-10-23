@@ -78,7 +78,6 @@ The `stateManager` service (services/stateManager.js) manages call state using a
 
 All database operations go through **Supabase Edge Functions** (services/database.js):
 - `getRestaurantByPhone()` - Lookup restaurant by phone number
-- `createCallLog()` - Log completed calls with transcripts
 - `searchRecentOrders()` - Find customer's recent orders by phone
 - `cancelOrder()` - Cancel pending orders
 - `updateOrder()` - Modify pending orders
@@ -88,9 +87,11 @@ All database operations go through **Supabase Edge Functions** (services/databas
 - `getCustomerAddress()` - Retrieve cached delivery address ⭐ NEW (v2.3)
 - `saveCustomerAddress()` - Save validated delivery address for future orders ⭐ NEW (v2.3)
 
+**Note**: Call logging is handled by Twilio's backend, not by the voice AI system.
+
 **Important**: The system makes HTTP POST requests to Supabase Edge Functions at `${SUPABASE_URL}/functions/v1/{function-name}`.
 
-**Edge Function Source Code**: All 10 edge functions are saved in `supabase/functions/` directory for reference and deployment. See `supabase/functions/README.md` for deployment instructions.
+**Edge Function Source Code**: All edge functions are saved in `supabase/functions/` directory for reference and deployment. See `supabase/functions/README.md` for deployment instructions.
 
 ### AI Instructions System
 
@@ -147,6 +148,7 @@ Recent commits added:
 - Includes delivery instructions ("Front door", "Ring bell", etc.)
 - Tracks usage statistics (`times_used`, `last_used_at`)
 - Multi-tenant secure: UNIQUE constraint on `(restaurant_id, customer_phone)`
+- **Foreign Key Link**: `orders.delivery_address_id` references this table
 
 **Flow for First-Time Delivery Customer:**
 1. Customer says "I want delivery"
@@ -154,28 +156,40 @@ Recent commits added:
 3. AI asks "What's your delivery address?"
 4. Customer provides address
 5. AI calls `validate_delivery_address` with customer_phone
-6. Edge function validates AND saves result to cache
-7. AI asks "Any delivery instructions? Like front door, side entrance, etc?"
-8. Customer provides instructions
-9. AI takes order
+6. Edge function validates AND saves result to cache, returns `address_id`
+7. System stores `address_id` in call state
+8. AI asks "Any delivery instructions? Like front door, side entrance, etc?"
+9. Customer provides instructions
+10. System updates cached address with delivery instructions
+11. AI takes order
+12. Order created with `delivery_address_id` linking to cached record
 
 **Flow for Returning Delivery Customer:**
 1. Customer says "I want delivery"
-2. AI calls `check_customer_address` → Address found!
-3. AI says "I have your address on file: 123 Main St. Is that correct?"
-4. Customer confirms: "Yes"
-5. AI asks "Same instructions - leave at front door?"
-6. Customer confirms
-7. **10-30 seconds saved!** - No address validation needed
-8. AI takes order
+2. AI calls `check_customer_address` → Address found with `address_id`!
+3. System stores `address_id` in call state
+4. AI says "I have your address on file: 123 Main St. Is that correct?"
+5. Customer confirms: "Yes"
+6. AI asks "Same instructions - leave at front door?"
+7. Customer confirms
+8. **10-30 seconds saved!** - No address validation needed
+9. AI takes order
+10. Order created with `delivery_address_id` linking to cached record
+
+**Key Features:**
+- ✅ **No re-validation**: Cached addresses skip geocoding entirely
+- ✅ **Delivery instructions persistence**: Instructions saved to cached address
+- ✅ **Order tracking**: `orders.delivery_address_id` links to validation record
+- ✅ **Usage analytics**: `times_used` and `last_used_at` updated automatically
 
 **Key Files:**
 - `supabase/functions/get-customer-address/` - Check for saved address
 - `supabase/functions/save-customer-address/` - Save validated address
 - `supabase/functions/validate-delivery-address/` - Updated to check cache first
-- `services/database.js` - Added `getCustomerAddress()` and `saveCustomerAddress()`
+- `supabase/functions/create-order/` - Updated to accept `delivery_address_id`
+- `services/database.js` - Added `getCustomerAddress()`, `saveCustomerAddress()`, `updateDeliveryInstructions()`
 - `services/aiInstructions.js` - Updated delivery flow to check cache first
-- `index.js` - Added `check_customer_address` AI function tool
+- `index.js` - Added `check_customer_address` AI function tool, tracks `deliveryAddressId` in call state
 
 **ORDER_CONFIRMED Format Updated:**
 ```
