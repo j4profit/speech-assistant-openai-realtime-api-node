@@ -194,7 +194,7 @@ wss.on('connection', (ws, _req) => {
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
           turn_detection: {
-            type: 'semantic'
+            type: 'semantic_vad'
           },
           temperature: 0.6,
           max_response_output_tokens: 400,
@@ -205,7 +205,7 @@ wss.on('connection', (ws, _req) => {
       console.log('📤 Sending session.update to OpenAI:', JSON.stringify({
         model: config.openai.model,
         voice: restaurant.ai_voice || 'coral',
-        turn_detection: { type: 'semantic' },
+        turn_detection: { type: 'semantic_vad' },
         audio_formats: { input: 'g711_ulaw', output: 'g711_ulaw' }
       }, null, 2));
 

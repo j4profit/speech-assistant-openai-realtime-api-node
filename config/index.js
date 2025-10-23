@@ -47,7 +47,7 @@ const config = {
   // Voice Configuration
   voice: {
     model: 'Google.en-US-Chirp3-HD-Aoede',
-    vadType: 'semantic' // Use semantic VAD for better conversation understanding
+    vadType: 'semantic_vad' // Use semantic VAD for better conversation understanding
   },
 
   // Order Configuration
