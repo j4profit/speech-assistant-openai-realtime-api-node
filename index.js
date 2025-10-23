@@ -342,6 +342,26 @@ wss.on('connection', (ws, _req) => {
           },
           required: ["customer_name", "message_content", "priority", "subject"]
         }
+      },
+      {
+        type: "function",
+        name: "transfer_call",
+        description: "Transfer call to restaurant staff when call forwarding is enabled and the detected reason matches. Use this when you detect one of the forwarding reasons.",
+        parameters: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              enum: ["complaint", "manager_request", "complex_order", "technical_issue", "billing_question", "custom_request", "refund_request", "delivery_issue"],
+              description: "The reason for transferring the call"
+            },
+            customer_message: {
+              type: "string",
+              description: "Brief summary of what the customer needs (for context)"
+            }
+          },
+          required: ["reason", "customer_message"]
+        }
       }
     ];
   }
@@ -570,6 +590,70 @@ wss.on('connection', (ws, _req) => {
           result = { success: !!messageResult, message_id: messageResult?.id };
         } else {
           result = { success: false, reason: 'Message intent not suitable for storage' };
+        }
+        break;
+
+      case 'transfer_call':
+        console.log('🔀 Transfer call request:', parsedArgs);
+
+        // Check if call forwarding is enabled
+        if (!restaurant.call_forwarding_enabled) {
+          console.log('❌ Call forwarding not enabled for this restaurant');
+          result = {
+            success: false,
+            should_create_message: true,
+            reason: 'Call forwarding not enabled for this restaurant'
+          };
+          break;
+        }
+
+        // Check if the reason is in the forwarding reasons array
+        const forwardingReasons = restaurant.call_forwarding_reasons || [];
+        const shouldForward = forwardingReasons.includes(parsedArgs.reason);
+
+        if (!shouldForward) {
+          console.log(`❌ Reason "${parsedArgs.reason}" not in forwarding reasons: ${forwardingReasons.join(', ')}`);
+          result = {
+            success: false,
+            should_create_message: true,
+            reason: `Reason "${parsedArgs.reason}" not configured for forwarding - creating message instead`
+          };
+          break;
+        }
+
+        // Check if forwarding number is configured
+        if (!restaurant.call_forwarding_number) {
+          console.error('❌ Call forwarding enabled but no number configured');
+          result = {
+            success: false,
+            should_create_message: true,
+            reason: 'No forwarding number configured'
+          };
+          break;
+        }
+
+        // Perform the transfer
+        console.log(`✅ Transferring call to ${restaurant.call_forwarding_number} - Reason: ${parsedArgs.reason}`);
+        const transferResult = await twilioService.transferCall(
+          callSid,
+          restaurant.call_forwarding_number,
+          `Let me transfer you to our staff. ${parsedArgs.customer_message || ''}`
+        );
+
+        if (transferResult.success) {
+          console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
+          result = {
+            success: true,
+            transferred_to: restaurant.call_forwarding_number,
+            reason: parsedArgs.reason
+          };
+        } else {
+          console.error('❌ Transfer failed:', transferResult.error);
+          result = {
+            success: false,
+            should_create_message: true,
+            reason: `Transfer failed: ${transferResult.error}`
+          };
         }
         break;
     }

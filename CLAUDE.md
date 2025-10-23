@@ -209,6 +209,76 @@ ORDER TYPE: DELIVERY
 • Delivery Instructions: Leave at front door
 ```
 
+### Call Forwarding System (V2.4)
+
+**Purpose**: Transfer calls to restaurant staff for issues requiring human intervention. Restaurants control which issue types trigger transfers vs messages.
+
+**New Restaurant Fields:**
+- `call_forwarding_enabled` (BOOLEAN) - Master on/off switch for call forwarding
+- `call_forwarding_number` (VARCHAR) - Phone number to transfer to (E.164 format: +14105551234)
+- `call_forwarding_reasons` (TEXT[]) - Array of issue types that trigger call transfer
+
+**SQL to Add Fields:**
+```sql
+ALTER TABLE public.restaurants
+ADD COLUMN call_forwarding_enabled BOOLEAN DEFAULT false,
+ADD COLUMN call_forwarding_number VARCHAR,
+ADD COLUMN call_forwarding_reasons TEXT[];
+```
+
+**How It Works:**
+
+```
+1. Customer has issue (e.g., "I want to speak to the manager")
+2. AI detects issue type: "manager_request"
+3. AI calls transfer_call(reason="manager_request", ...)
+4. System checks:
+   - Is call_forwarding_enabled = true?
+   - Is "manager_request" in call_forwarding_reasons array?
+5. If YES to both → Transfer call to call_forwarding_number
+6. If NO to either → Return should_create_message=true
+                    → AI creates customer_message instead
+```
+
+**Example Restaurant Configuration:**
+
+```sql
+-- Forward only complaints and manager requests
+-- Everything else becomes a message
+UPDATE public.restaurants
+SET
+  call_forwarding_enabled = true,
+  call_forwarding_number = '+14105551234',
+  call_forwarding_reasons = ARRAY['complaint', 'manager_request']
+WHERE id = 'restaurant-uuid';
+```
+
+**Available Issue Types** (restaurants choose which ones to forward):
+- `complaint` - Customer unhappy with food/service
+- `manager_request` - Asks for manager/owner
+- `complex_order` - Catering, large parties
+- `technical_issue` - Problems with previous orders
+- `billing_question` - Questions about charges/refunds
+- `custom_request` - Special dietary needs
+- `refund_request` - Requesting refund
+- `delivery_issue` - Late/wrong/missing delivery
+
+**Benefits:**
+- ✅ Granular control per restaurant (choose which issues transfer vs message)
+- ✅ No code changes needed (update DB fields anytime)
+- ✅ Graceful fallback (always creates message if transfer unavailable)
+- ✅ Simple AI logic (AI just detects issue type, DB controls behavior)
+
+**Key Files:**
+- `services/twilio.js` - `transferCall()` uses Twilio `<Dial>` verb
+- `index.js` - `transfer_call` handler checks DB config and transfers or returns should_create_message
+- `services/aiInstructions.js` - AI learns to detect issue types and call transfer_call function
+
+**Implementation Notes:**
+- If staff doesn't answer, Twilio plays: "The transfer could not be completed"
+- Phone number must be E.164 format (+14105551234)
+- All transfer attempts logged with reason and outcome
+
 ## Key Implementation Details
 
 ### Twilio Call Hangup
@@ -461,3 +531,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.1**: Added restaurant-specific AI voices, hours, taxes, delivery fees, and hangup unification
 - **v2.2**: Added dynamic VAD adjustment based on real-time audio environment analysis
 - **v2.3**: Added delivery address caching system with delivery instructions tracking
+- **v2.4**: Added intelligent call forwarding system with hybrid forwarding/messaging flow

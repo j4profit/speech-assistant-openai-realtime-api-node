@@ -157,6 +157,58 @@ async function hangup(callSid, options = {}) {
 }
 
 /**
+ * Transfer a call to a phone number
+ * @param {string} callSid - Twilio call SID
+ * @param {string} transferNumber - Phone number to transfer to (E.164 format)
+ * @param {string} message - Message to say before transfer
+ * @returns {Promise<Object>} Transfer result
+ */
+async function transferCall(callSid, transferNumber, message = 'Transferring you to our staff now.') {
+  if (!callSid || !twilioClient) {
+    console.error('transferCall() called without callSid or Twilio not configured');
+    return { success: false, error: 'Missing callSid or Twilio not configured' };
+  }
+
+  if (!transferNumber) {
+    console.error('transferCall() called without transferNumber');
+    return { success: false, error: 'Missing transfer number' };
+  }
+
+  console.log(`Transferring call ${callSid} to ${transferNumber}`);
+
+  try {
+    // Generate TwiML that says message and then dials the transfer number
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">${escapeXML(message)}</Say>
+    <Dial callerId="${config.twilio.phoneNumber || ''}">${escapeXML(transferNumber)}</Dial>
+    <Say voice="${config.voice.model}">The transfer could not be completed. Please try again later.</Say>
+    <Hangup/>
+</Response>`;
+
+    // Update the call to redirect to the transfer TwiML
+    await twilioClient.calls(callSid).update({
+      twiml: twiml
+    });
+
+    console.log(`Call ${callSid} transferred to ${transferNumber}`);
+    return {
+      success: true,
+      transferred_to: transferNumber,
+      call_sid: callSid
+    };
+
+  } catch (error) {
+    console.error(`Transfer failed for call ${callSid}:`, error);
+    return {
+      success: false,
+      error: error.message,
+      call_sid: callSid
+    };
+  }
+}
+
+/**
  * Check if Twilio is properly configured
  * @returns {boolean} True if Twilio client is available
  */
@@ -170,6 +222,7 @@ module.exports = {
   generateHangupTwiML,
   generateIncomingCallTwiML,
   hangup,
+  transferCall,
   isTwilioConfigured,
   pendingHangupTwiML // Export for route access
 };
