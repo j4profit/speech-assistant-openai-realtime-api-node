@@ -56,6 +56,8 @@ wss.on('connection', (ws, _req) => {
   let callFinalized = false;
   let hangupTimer = null;
   let referenceSignal = null; // For echo cancellation
+  let currentModel = config.openai.model; // Track which model is being used
+  let modelFallbackAttempted = false; // Prevent infinite fallback loops
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -154,10 +156,10 @@ wss.on('connection', (ws, _req) => {
 
     const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
-    console.log('Connecting to OpenAI Realtime API...');
+    console.log(`Connecting to OpenAI Realtime API with model: ${currentModel}...`);
 
     try {
-      openaiWs = new WebSocket(`${config.openai.websocketUrl}?model=${config.openai.model}`, {
+      openaiWs = new WebSocket(`${config.openai.websocketUrl}?model=${currentModel}`, {
         headers: {
           'Authorization': `Bearer ${config.openai.apiKey}`,
           'OpenAI-Beta': 'realtime=v1'
@@ -167,7 +169,7 @@ wss.on('connection', (ws, _req) => {
         maxPayload: 100 * 1024 * 1024
       });
 
-      console.log('WebSocket created successfully');
+      console.log(`WebSocket created successfully with model: ${currentModel}`);
 
     } catch (createError) {
       console.error('Failed to create OpenAI WebSocket:', createError);
@@ -203,7 +205,7 @@ wss.on('connection', (ws, _req) => {
       };
 
       console.log('📤 Sending session.update to OpenAI:', JSON.stringify({
-        model: config.openai.model,
+        model: currentModel,
         voice: restaurant.ai_voice || 'coral',
         turn_detection: { type: 'semantic_vad' },
         audio_formats: { input: 'g711_ulaw', output: 'g711_ulaw' }
@@ -213,8 +215,25 @@ wss.on('connection', (ws, _req) => {
     });
 
     openaiWs.on('message', handleOpenAIMessage);
-    openaiWs.on('error', (error) => {
+    openaiWs.on('error', async (error) => {
       console.error('OpenAI WebSocket error:', error);
+
+      // Check if this is a model error and we haven't tried fallback yet
+      if (!modelFallbackAttempted && config.openai.fallbackModel &&
+          (error.message?.includes('model') || error.code === 'invalid_model')) {
+        console.log(`⚠️  Primary model '${currentModel}' failed, attempting fallback to '${config.openai.fallbackModel}'`);
+        modelFallbackAttempted = true;
+        currentModel = config.openai.fallbackModel;
+
+        // Close current WebSocket and retry with fallback model
+        if (openaiWs) {
+          openaiWs.removeAllListeners();
+          openaiWs.close();
+        }
+
+        // Retry connection with fallback model
+        await initializeOpenAI(restaurant.phone_number, customerPhone, callSid);
+      }
     });
     openaiWs.on('close', () => {
       console.log('OpenAI WebSocket closed');
@@ -443,6 +462,24 @@ wss.on('connection', (ws, _req) => {
 
         case 'error':
           console.error('OpenAI error:', response.error);
+
+          // Check if this is a model-related error and fallback is available
+          if (!modelFallbackAttempted && config.openai.fallbackModel &&
+              response.error?.message?.includes('model')) {
+            console.log(`⚠️  Model error detected: ${response.error.message}`);
+            console.log(`🔄 Switching from '${currentModel}' to fallback model '${config.openai.fallbackModel}'`);
+            modelFallbackAttempted = true;
+            currentModel = config.openai.fallbackModel;
+
+            // Close current WebSocket and retry with fallback model
+            if (openaiWs) {
+              openaiWs.removeAllListeners();
+              openaiWs.close();
+            }
+
+            // Retry connection with fallback model
+            await initializeOpenAI(restaurant.phone_number, customerPhone, callSid);
+          }
           break;
       }
     } catch (error) {
