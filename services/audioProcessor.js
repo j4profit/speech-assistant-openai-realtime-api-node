@@ -31,14 +31,26 @@ async function initialize() {
 function decodeMuLaw(mulawBuffer) {
   const pcm16 = new Int16Array(mulawBuffer.length);
 
+  // Standard µ-law decode table (ITU-T G.711)
+  const MULAW_BIAS = 0x84; // 132
+  const MULAW_MAX = 0x1FFF; // 8159
+
   for (let i = 0; i < mulawBuffer.length; i++) {
-    const mulaw = mulawBuffer[i];
+    const mulaw = ~mulawBuffer[i]; // Invert bits (part of µ-law spec)
     const sign = mulaw & 0x80;
     const exponent = (mulaw >> 4) & 0x07;
     const mantissa = mulaw & 0x0F;
 
-    let sample = ((mantissa << 3) + 132) << exponent;
+    // Standard µ-law expansion formula
+    let sample = ((mantissa << 3) + MULAW_BIAS) << exponent;
+    sample = sample - MULAW_BIAS;
+
+    // Apply sign and ensure proper range
     sample = sign ? -sample : sample;
+
+    // Clamp to 16-bit range
+    if (sample > 32767) sample = 32767;
+    if (sample < -32768) sample = -32768;
 
     pcm16[i] = sample;
   }
@@ -95,12 +107,18 @@ function applyEchoCancellation(pcm16, referenceSignal) {
 
   // Simple adaptive filter approach
   const output = new Int16Array(pcm16.length);
-  const alpha = 0.3; // Echo suppression factor
+  const alpha = 0.15; // Echo suppression factor (reduced from 0.3 to be gentler)
 
   for (let i = 0; i < pcm16.length; i++) {
     const refIndex = i % referenceSignal.length;
     const echoEstimate = referenceSignal[refIndex] * alpha;
-    output[i] = Math.round(pcm16[i] - echoEstimate);
+    let sample = pcm16[i] - echoEstimate;
+
+    // Clamp to prevent overflow/distortion
+    if (sample > 32767) sample = 32767;
+    if (sample < -32768) sample = -32768;
+
+    output[i] = Math.round(sample);
   }
 
   return output;
@@ -117,14 +135,14 @@ function applyNoiseSuppression(pcm16) {
   }
 
   // Simple noise gate - suppress samples below threshold
-  const threshold = 1000; // Adjust based on testing
+  const threshold = 500; // Reduced from 1000 to be less aggressive
   const output = new Int16Array(pcm16.length);
 
   for (let i = 0; i < pcm16.length; i++) {
     const sample = Math.abs(pcm16[i]);
     if (sample < threshold) {
-      // Attenuate quiet samples (likely noise)
-      output[i] = Math.round(pcm16[i] * 0.3);
+      // Gentle attenuation of quiet samples (likely noise)
+      output[i] = Math.round(pcm16[i] * 0.6); // Increased from 0.3 to preserve more signal
     } else {
       output[i] = pcm16[i];
     }

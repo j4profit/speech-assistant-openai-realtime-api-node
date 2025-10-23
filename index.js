@@ -202,6 +202,13 @@ wss.on('connection', (ws, _req) => {
         }
       };
 
+      console.log('📤 Sending session.update to OpenAI:', JSON.stringify({
+        model: config.openai.model,
+        voice: restaurant.ai_voice || 'coral',
+        turn_detection: { type: 'semantic' },
+        audio_formats: { input: 'g711_ulaw', output: 'g711_ulaw' }
+      }, null, 2));
+
       openaiWs.send(JSON.stringify(sessionUpdate));
     });
 
@@ -335,6 +342,18 @@ wss.on('connection', (ws, _req) => {
   async function handleOpenAIMessage(data) {
     try {
       const response = JSON.parse(data);
+
+      // Log session-related messages for debugging
+      if (response.type === 'session.created' || response.type === 'session.updated') {
+        console.log('📥 OpenAI session response:', response.type);
+        if (response.session) {
+          console.log('   Turn detection:', response.session.turn_detection);
+          console.log('   Audio formats:', {
+            input: response.session.input_audio_format,
+            output: response.session.output_audio_format
+          });
+        }
+      }
 
       switch (response.type) {
         case 'response.audio.delta':
