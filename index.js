@@ -40,7 +40,7 @@ wss.on('connection', (ws, _req) => {
   let customerPhone = null;
   let restaurant = null;
   let callStartTime = new Date();
-  let conversationTranscript = [];
+  let aiResponseCount = 0;
   let orderProcessed = false;
   let addressValidated = false;
   let validatedDeliveryAddress = null;
@@ -362,11 +362,7 @@ wss.on('connection', (ws, _req) => {
 
         case 'response.audio_transcript.done':
           console.log('AI said:', response.transcript);
-          conversationTranscript.push({
-            timestamp: new Date().toISOString(),
-            speaker: 'AI',
-            text: response.transcript
-          });
+          aiResponseCount++;
 
           // Mark customer as having spoken after first AI response
           // (AI only responds when customer speaks)
@@ -409,7 +405,6 @@ wss.on('connection', (ws, _req) => {
           // 2. Customer has spoken (detected by multiple AI responses), AND
           // 3. No order was processed, AND
           // 4. No hangup timer already set
-          const aiResponseCount = conversationTranscript.filter(t => t.speaker === 'AI').length;
           if (isGoodbye && aiResponseCount > 1 && !orderProcessed && !hangupTimer) {
             console.log('AI goodbye detected after customer interaction - scheduling hangup');
             // Give AI 2 seconds to finish speaking before hangup
@@ -543,7 +538,7 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'create_customer_message':
-        if (shouldCreateCustomerMessage(parsedArgs.message_content, conversationTranscript)) {
+        if (shouldCreateCustomerMessage(parsedArgs.message_content)) {
           const messageResult = await database.createCustomerMessage({
             restaurant_id: restaurant.id,
             customer_name: parsedArgs.customer_name,
@@ -865,7 +860,7 @@ wss.on('connection', (ws, _req) => {
     console.log('Finalizing call:', {
       callSid,
       duration: callDuration,
-      transcript_length: conversationTranscript.length
+      ai_responses: aiResponseCount
     });
 
     // Clean up call state (call logging handled by Twilio backend)

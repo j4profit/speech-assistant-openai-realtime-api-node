@@ -4,10 +4,9 @@
  * Determine if a customer message should create a customer_message record
  * Uses natural language understanding to avoid false positives
  * @param {string} customerMessage - The customer's message
- * @param {Array} conversationHistory - History of conversation (unused currently)
  * @returns {boolean} Whether to create a customer message
  */
-function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
+function shouldCreateCustomerMessage(customerMessage) {
   const message = customerMessage.toLowerCase().trim();
 
   console.log('Analyzing message intent with natural language understanding:', message);
