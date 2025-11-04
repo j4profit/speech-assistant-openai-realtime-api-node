@@ -379,6 +379,55 @@ BASE_URL=https://your-ngrok-url.ngrok.io
 
 Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 
+## Order Validation System (v2.6.1)
+
+To prevent fake/invalid orders from being created, the system includes comprehensive order validation:
+
+### Validation Rules
+
+**All orders must pass these checks before being created:**
+1. **Total amount > $0** - Rejects $0 or negative orders
+2. **Items not empty** - Must have food items specified
+3. **Items must be specific** - Rejects vague items like just "Burgers" without quantities
+4. **Must include quantities** - Items should have format like "2x Cheeseburger"
+5. **Customer name required** - Cannot be "Unknown" or empty
+
+### AI Confirmation Flow
+
+**When customers try to leave WITHOUT ordering:**
+- AI asks: "So you don't want to order anything today?"
+- Waits for customer confirmation
+- Only ends call after confirming no order needed
+
+**This prevents false order creation when customers:**
+- Say "I'm all set" (meaning goodbye, not order complete)
+- Say "Thanks, bye" after asking questions
+- Change their mind about ordering
+
+### Implementation
+
+**Validation Function:** `validateOrder()` in index.js:713-756
+- Runs before order creation
+- Returns `{valid: false, reason: '...'}` for invalid orders
+- Logs rejection reason to console
+
+**AI Instructions:** Updated in services/aiInstructions.js:222-265
+- Clear rules for when to use ORDER_CONFIRMED
+- Examples of valid vs invalid order scenarios
+- Confirmation flow for non-ordering customers
+
+### Example Validation Rejection
+
+```
+❌ INVALID ORDER REJECTED: Items too vague or incomplete: "Burgers"
+Order details: {
+  customerName: "Eric",
+  items: "Burgers",
+  totalAmount: 0
+}
+⚠️ AI attempted to create invalid order - ignoring ORDER_CONFIRMED
+```
+
 ## Important Behavioral Rules
 
 ### Caller ID Usage
@@ -533,3 +582,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.4**: Added intelligent call forwarding system with hybrid forwarding/messaging flow
 - **v2.5**: Switched to Semantic VAD for better conversation understanding and turn detection
 - **v2.6**: Added automatic conversation transcript logging to call_logs table (zero additional OpenAI cost)
+- **v2.6.1**: Fixed critical bug preventing fake orders from being created when customers say goodbye without ordering

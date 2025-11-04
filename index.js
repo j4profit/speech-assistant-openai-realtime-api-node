@@ -710,9 +710,53 @@ wss.on('connection', (ws, _req) => {
     }
   }
 
+  // Validate order to prevent fake/invalid orders
+  function validateOrder(orderInfo) {
+    // Check 1: Total must be greater than $0
+    if (orderInfo.totalAmount <= 0) {
+      return {
+        valid: false,
+        reason: 'Order total is $0 or negative'
+      };
+    }
+
+    // Check 2: Items field must not be empty
+    if (!orderInfo.items || orderInfo.items.trim().length === 0) {
+      return {
+        valid: false,
+        reason: 'No items specified'
+      };
+    }
+
+    // Check 3: Items must contain quantities or appear to be real orders
+    // Reject vague items like just "Burgers" without quantity/specifics
+    const items = orderInfo.items.toLowerCase();
+    const hasQuantity = /\d+x|\d+ x|\d+\s+x|quantity|count/i.test(orderInfo.items);
+    const hasPrice = /\$\d+/.test(orderInfo.items);
+    const isVague = items === 'burgers' || items === 'pizza' || items === 'food' ||
+                    items.length < 5 || items.split(' ').length <= 2;
+
+    if (isVague && !hasQuantity && !hasPrice) {
+      return {
+        valid: false,
+        reason: `Items too vague or incomplete: "${orderInfo.items}"`
+      };
+    }
+
+    // Check 4: Customer name must not be empty
+    if (!orderInfo.customerName || orderInfo.customerName === 'Unknown') {
+      return {
+        valid: false,
+        reason: 'Customer name missing'
+      };
+    }
+
+    // Order appears valid
+    return { valid: true };
+  }
+
   // Process order from transcript
   async function processOrderFromTranscript(transcript) {
-    orderProcessed = true;
     console.log('Processing order from transcript...');
 
     try {
@@ -722,6 +766,18 @@ wss.on('connection', (ws, _req) => {
         console.error('Failed to parse order confirmation');
         return;
       }
+
+      // VALIDATION: Reject invalid/fake orders
+      const isValidOrder = validateOrder(orderInfo);
+      if (!isValidOrder.valid) {
+        console.error('❌ INVALID ORDER REJECTED:', isValidOrder.reason);
+        console.error('Order details:', orderInfo);
+        console.log('⚠️  AI attempted to create invalid order - ignoring ORDER_CONFIRMED');
+        return; // Don't set orderProcessed - allow call to continue normally
+      }
+
+      // Only mark as processed if order is valid
+      orderProcessed = true;
 
       const readyTimeInfo = calculateOrderReadyTime(restaurant, orderInfo.orderType === 'delivery');
 
