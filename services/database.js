@@ -564,6 +564,47 @@ async function updateDeliveryInstructions(addressId, deliveryInstructions) {
   }
 }
 
+/**
+ * Create a call log entry
+ * @param {Object} callData - Call log data
+ * @returns {Promise<Object|null>} Created call log or null on error
+ */
+async function createCallLog(callData) {
+  try {
+    console.log('📞 Creating call log for call:', callData.call_sid);
+
+    const response = await fetch(`${config.supabase.url}/functions/v1/create-call-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`
+      },
+      body: JSON.stringify(callData)
+    });
+
+    if (!response.ok) {
+      console.error('create-call-log failed:', response.status);
+      const errorText = await response.text();
+      console.error('create-call-log error response:', errorText);
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (!result.success) {
+      console.error('create-call-log error:', result.error);
+      return null;
+    }
+
+    console.log('✅ Call log created:', result.call_log?.id);
+    return result.call_log;
+
+  } catch (error) {
+    console.error('❌ createCallLog error:', error);
+    return null;
+  }
+}
+
 module.exports = {
   getRestaurantByPhone,
   searchRecentOrders,
@@ -574,5 +615,6 @@ module.exports = {
   createCustomerMessage,
   getCustomerAddress,
   saveCustomerAddress,
-  updateDeliveryInstructions
+  updateDeliveryInstructions,
+  createCallLog
 };

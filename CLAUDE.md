@@ -86,8 +86,15 @@ All database operations go through **Supabase Edge Functions** (services/databas
 - `createCustomerMessage()` - Save customer messages/complaints
 - `getCustomerAddress()` - Retrieve cached delivery address ⭐ NEW (v2.3)
 - `saveCustomerAddress()` - Save validated delivery address for future orders ⭐ NEW (v2.3)
+- `createCallLog()` - Save call logs with conversation transcripts ⭐ NEW (v2.6)
 
-**Note**: Call logging is handled by Twilio's backend, not by the voice AI system.
+**Call Logging with Conversation Transcripts**: The system automatically logs all calls to the `call_logs` table with full conversation transcripts. The transcript includes:
+- Customer speech (transcribed via OpenAI Whisper)
+- AI responses (text transcripts)
+- Timestamps for each message
+- Call metadata (duration, caller location, restaurant, order reference)
+
+This feature has **zero additional OpenAI cost** as transcripts are automatically provided by the Realtime API.
 
 **Important**: The system makes HTTP POST requests to Supabase Edge Functions at `${SUPABASE_URL}/functions/v1/{function-name}`.
 
@@ -525,3 +532,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.3**: Added delivery address caching system with delivery instructions tracking
 - **v2.4**: Added intelligent call forwarding system with hybrid forwarding/messaging flow
 - **v2.5**: Switched to Semantic VAD for better conversation understanding and turn detection
+- **v2.6**: Added automatic conversation transcript logging to call_logs table (zero additional OpenAI cost)
