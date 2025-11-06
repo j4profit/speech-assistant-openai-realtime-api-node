@@ -457,6 +457,21 @@ wss.on('connection', (ws, _req) => {
       }
 
       switch (response.type) {
+        case 'session.updated':
+          // Session is ready - send greeting immediately
+          console.log('✅ OpenAI session ready - sending greeting');
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(JSON.stringify({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
+              }
+            }));
+            openaiWs.send(JSON.stringify({ type: 'response.create' }));
+          }
+          break;
         case 'response.audio.delta':
           if (streamSid && ws.readyState === WebSocket.OPEN) {
             // Store reference signal for echo cancellation (AI output)
@@ -1075,21 +1090,21 @@ wss.on('connection', (ws, _req) => {
 
           await initializeOpenAI(calledNumber, fromNumber, callSid);
 
-          // Set greeting timeout
+          // Set greeting timeout as backup (in case session.updated doesn't trigger greeting)
           greetingTimeout = setTimeout(() => {
             if (!customerHasSpoken && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-              console.log('No customer response detected - initiating greeting');
+              console.log('⚠️  Backup greeting triggered (session.updated greeting did not fire)');
               openaiWs.send(JSON.stringify({
                 type: 'conversation.item.create',
                 item: {
                   type: 'message',
                   role: 'user',
-                  content: [{ type: 'input_text', text: 'Start the call greeting' }]
+                  content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
                 }
               }));
               openaiWs.send(JSON.stringify({ type: 'response.create' }));
             }
-          }, 1000);
+          }, 3000); // 3 seconds - enough time for session.updated to arrive
           break;
 
         case 'media':
