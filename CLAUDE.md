@@ -113,9 +113,12 @@ The `aiInstructions.js` service generates dynamic prompts for OpenAI Realtime AP
 
 **AI Function Tools**:
 - `search_recent_orders` - Automatically uses caller ID (no params needed)
+- `check_customer_address` - Check if customer has saved delivery address (v2.3+)
 - `validate_delivery_address` - Validates delivery feasibility
 - `cancel_order` - Cancels pending orders
 - `update_order` - Modifies pending orders
+- `process_payment_method` - Records payment choice (cash/credit card) for delivery orders (v2.7+)
+- `transfer_call` - Transfers call to staff for configured reasons (v2.4+)
 - `create_customer_message` - Saves messages for staff
 
 ### Order Confirmation Format
@@ -126,6 +129,8 @@ ORDER_CONFIRMED:
 Customer Name: John Doe
 Order Type: delivery
 Delivery Address: 123 Main St, Baltimore, MD 21201
+Delivery Instructions: Leave at front door
+Payment Method: credit card
 Items: 2x Cheeseburger, 1x Fries
 Total: $25.50
 ```
@@ -269,6 +274,7 @@ WHERE id = 'restaurant-uuid';
 - `custom_request` - Special dietary needs
 - `refund_request` - Requesting refund
 - `delivery_issue` - Late/wrong/missing delivery
+- `credit_card_payment` - Customer wants to pay with credit card (v2.7+)
 
 **Benefits:**
 - ✅ Granular control per restaurant (choose which issues transfer vs message)
@@ -285,6 +291,105 @@ WHERE id = 'restaurant-uuid';
 - If staff doesn't answer, Twilio plays: "The transfer could not be completed"
 - Phone number must be E.164 format (+14105551234)
 - All transfer attempts logged with reason and outcome
+
+### Payment Method Collection & Credit Card Processing (V2.7)
+
+**Purpose**: Collect payment method for delivery orders and transfer credit card payments to staff for PCI-compliant processing.
+
+**New Fields:**
+- **restaurants table:**
+  - `call_forwarding_reasons` now includes `'credit_card_payment'` option
+- **orders table:**
+  - `payment_method` (VARCHAR) - Stores 'cash', 'credit card', or null
+
+**How It Works:**
+
+**Delivery Order Flow:**
+```
+1. Customer chooses delivery
+2. AI validates address and takes order details
+3. 🆕 AI asks: "How would you like to pay? Cash or credit card?"
+4. Customer responds with payment choice
+5. AI calls process_payment_method function
+6. System records payment_method in order
+7. AI generates ORDER_CONFIRMED with payment method
+8. If credit card + forwarding enabled → Transfer call to staff
+9. If cash or forwarding disabled → Normal hangup
+```
+
+**Credit Card Call Flow:**
+```
+1. Customer says "Credit card"
+2. AI calls process_payment_method(payment_method="credit card")
+3. System checks:
+   - call_forwarding_enabled = true?
+   - 'credit_card_payment' in call_forwarding_reasons?
+   - call_forwarding_number configured?
+4. If YES → Order created with status='credit_card'
+5. Call transferred: "Your order has been placed. Transferring you now to process your credit card payment."
+6. Staff takes payment over phone using PCI-compliant terminal
+```
+
+**Cash Payment Flow:**
+```
+1. Customer says "Cash"
+2. AI calls process_payment_method(payment_method="cash")
+3. Order created with status='pending' and payment_method='cash'
+4. Normal call completion (no transfer)
+```
+
+**Example Configuration:**
+
+```sql
+-- Enable credit card call forwarding
+UPDATE public.restaurants
+SET
+  call_forwarding_enabled = true,
+  call_forwarding_number = '+14105551234',
+  call_forwarding_reasons = ARRAY['credit_card_payment', 'complaint', 'manager_request']
+WHERE id = 'restaurant-uuid';
+```
+
+**PCI Compliance:**
+- ✅ AI **NEVER** asks for credit card numbers, CVV, or expiration dates
+- ✅ Only payment method choice is recorded ('cash' or 'credit card')
+- ✅ Actual card processing happens via staff on PCI-compliant terminal
+- ✅ No sensitive payment data stored in database
+
+**Order Status:**
+- Credit card orders: `status = 'credit_card'` (awaiting payment)
+- Cash orders: `status = 'pending'` (normal flow)
+
+**Benefits:**
+- ✅ PCI-compliant workflow (no card data in system)
+- ✅ Per-restaurant configuration (some restaurants may not accept credit cards)
+- ✅ Graceful fallback (if forwarding disabled, order still created)
+- ✅ Clear order status tracking
+- ✅ Staff knows payment method before calling customer
+
+**Key Files:**
+- `services/aiInstructions.js` - AI asks for payment method on delivery orders
+- `index.js` - `process_payment_method` function and credit card transfer logic
+- `utils/orderHelpers.js` - Order ticket includes payment method
+- `services/database.js` - `createOrder()` accepts payment_method field
+
+**ORDER_CONFIRMED Format:**
+```
+ORDER_CONFIRMED:
+Customer Name: John Doe
+Order Type: delivery
+Delivery Address: 123 Main St, Baltimore, MD 21201
+Delivery Instructions: Leave at front door
+Payment Method: credit card
+Items: 2x Cheeseburger, 1x Fries
+Total: $25.50
+```
+
+**Implementation Notes:**
+- Payment method only collected for **delivery orders** (not pickup)
+- If transfer fails, order still created with credit_card status
+- Restaurant dashboard can filter orders by payment_method
+- Staff can see payment method in order details before calling back
 
 ## Key Implementation Details
 
@@ -583,3 +688,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.5**: Switched to Semantic VAD for better conversation understanding and turn detection
 - **v2.6**: Added automatic conversation transcript logging to call_logs table (zero additional OpenAI cost)
 - **v2.6.1**: Fixed critical bug preventing fake orders from being created when customers say goodbye without ordering
+- **v2.7**: Added payment method collection for delivery orders with credit card call forwarding and PCI-compliant workflow

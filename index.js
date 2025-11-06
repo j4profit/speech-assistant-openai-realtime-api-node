@@ -45,6 +45,8 @@ wss.on('connection', (ws, _req) => {
   let addressValidated = false;
   let validatedDeliveryAddress = null;
   let deliveryAddressId = null; // UUID of cached address record from customer_delivery_addresses table
+  let deliveryInstructions = null; // Track delivery instructions separately
+  let paymentMethod = null; // Track payment method: 'cash', 'credit card', or null
   let addressRequested = false;
   let addressProviderAttempts = 0;
   let addressValidationAttempts = 0;
@@ -347,7 +349,7 @@ wss.on('connection', (ws, _req) => {
           properties: {
             reason: {
               type: "string",
-              enum: ["complaint", "manager_request", "complex_order", "technical_issue", "billing_question", "custom_request", "refund_request", "delivery_issue"],
+              enum: ["complaint", "manager_request", "complex_order", "technical_issue", "billing_question", "custom_request", "refund_request", "delivery_issue", "credit_card_payment"],
               description: "The reason for transferring the call"
             },
             customer_message: {
@@ -356,6 +358,22 @@ wss.on('connection', (ws, _req) => {
             }
           },
           required: ["reason", "customer_message"]
+        }
+      },
+      {
+        type: "function",
+        name: "process_payment_method",
+        description: "Process customer's payment method choice for delivery orders. System will automatically handle credit card call forwarding if configured.",
+        parameters: {
+          type: "object",
+          properties: {
+            payment_method: {
+              type: "string",
+              enum: ["cash", "credit card"],
+              description: "How customer wants to pay"
+            }
+          },
+          required: ["payment_method"]
         }
       }
     ];
@@ -695,6 +713,47 @@ wss.on('connection', (ws, _req) => {
           };
         }
         break;
+
+      case 'process_payment_method':
+        console.log('💳 Processing payment method:', parsedArgs.payment_method);
+        paymentMethod = parsedArgs.payment_method.toLowerCase();
+
+        // If credit card payment, check if we should transfer call
+        if (paymentMethod === 'credit card') {
+          // Check if call forwarding is enabled for credit card payments
+          const forwardingReasons = restaurant.call_forwarding_reasons || [];
+          const shouldForward = restaurant.call_forwarding_enabled &&
+                               forwardingReasons.includes('credit_card_payment') &&
+                               restaurant.call_forwarding_number;
+
+          if (shouldForward) {
+            console.log('💳 Credit card payment - will transfer call after order confirmation');
+            result = {
+              success: true,
+              payment_method: paymentMethod,
+              requires_transfer: true,
+              message: 'Payment method recorded. Please complete your order and we will transfer you to process the credit card payment.'
+            };
+          } else {
+            console.log('💳 Credit card payment - but forwarding not configured (will create order with credit card status)');
+            result = {
+              success: true,
+              payment_method: paymentMethod,
+              requires_transfer: false,
+              message: 'Payment method recorded as credit card. Order will be marked for credit card payment.'
+            };
+          }
+        } else {
+          // Cash payment - no special handling needed
+          console.log('💵 Cash payment - no transfer needed');
+          result = {
+            success: true,
+            payment_method: paymentMethod,
+            requires_transfer: false,
+            message: 'Cash payment recorded. Please complete your order.'
+          };
+        }
+        break;
     }
 
     // Send function result back to OpenAI
@@ -797,6 +856,10 @@ wss.on('connection', (ws, _req) => {
         finalTotal
       });
 
+      // Determine order status based on payment method
+      const isCreditCard = orderInfo.paymentMethod === 'credit card';
+      const orderStatus = isCreditCard ? 'credit_card' : 'pending';
+
       const orderData = {
         restaurant_id: restaurant.id,
         customer_name: orderInfo.customerName,
@@ -805,13 +868,14 @@ wss.on('connection', (ws, _req) => {
         delivery_address: orderInfo.deliveryAddress,
         delivery_instructions: orderInfo.deliveryInstructions,
         delivery_address_id: isDelivery ? deliveryAddressId : null, // Link to cached address if delivery
+        payment_method: orderInfo.paymentMethod || null,
         order_details: orderInfo.items,
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
         call_sid: callSid,
         ready_time: readyTimeInfo.readyTimeString,
         estimated_ready_at: readyTimeInfo.readyTime,
-        status: 'pending'
+        status: orderStatus
       };
 
       console.log('Creating order with delivery_address_id:', deliveryAddressId);
@@ -842,10 +906,45 @@ wss.on('connection', (ws, _req) => {
         // Update call data with order reference
         stateManager.updateCallData(callSid, { order_id: order.id });
 
-        // Schedule hangup after 3 seconds to allow AI to finish speaking goodbye message
-        hangupTimer = setTimeout(async () => {
-          await initiateHangup('order_completed');
-        }, 3000);
+        // Check if we need to transfer for credit card payment
+        if (isCreditCard) {
+          const forwardingReasons = restaurant.call_forwarding_reasons || [];
+          const shouldTransfer = restaurant.call_forwarding_enabled &&
+                                forwardingReasons.includes('credit_card_payment') &&
+                                restaurant.call_forwarding_number;
+
+          if (shouldTransfer) {
+            console.log('💳 Credit card order - transferring call for payment processing');
+
+            // Transfer call for credit card processing
+            const transferResult = await twilioService.transferCall(
+              callSid,
+              restaurant.call_forwarding_number,
+              'Your order has been placed. Transferring you now to process your credit card payment.'
+            );
+
+            if (transferResult.success) {
+              console.log(`✅ Call transferred successfully for credit card payment to ${restaurant.call_forwarding_number}`);
+            } else {
+              console.error('❌ Credit card payment transfer failed:', transferResult.error);
+              // Fallback to normal hangup if transfer fails
+              hangupTimer = setTimeout(async () => {
+                await initiateHangup('order_completed_transfer_failed');
+              }, 3000);
+            }
+          } else {
+            console.log('💳 Credit card order created but call forwarding not configured - normal hangup');
+            // Schedule hangup after 3 seconds to allow AI to finish speaking goodbye message
+            hangupTimer = setTimeout(async () => {
+              await initiateHangup('order_completed');
+            }, 3000);
+          }
+        } else {
+          // Cash order or no payment method - normal hangup
+          hangupTimer = setTimeout(async () => {
+            await initiateHangup('order_completed');
+          }, 3000);
+        }
       }
     } catch (error) {
       console.error('Error processing order:', error);
@@ -862,6 +961,7 @@ wss.on('connection', (ws, _req) => {
         orderType: 'pickup',
         deliveryAddress: 'N/A',
         deliveryInstructions: null,
+        paymentMethod: null,
         items: '',
         totalAmount: 0,
         specialInstructions: ''
@@ -878,6 +978,9 @@ wss.on('connection', (ws, _req) => {
         } else if (line.includes('Delivery Instructions:')) {
           const instructions = line.split(':')[1]?.trim();
           orderInfo.deliveryInstructions = instructions && instructions !== 'N/A' ? instructions : null;
+        } else if (line.includes('Payment Method:')) {
+          const method = line.split(':')[1]?.trim().toLowerCase();
+          orderInfo.paymentMethod = method && method !== 'n/a' ? method : null;
         } else if (line.includes('Items:')) {
           orderInfo.items = line.split(':')[1]?.trim() || '';
         } else if (line.includes('Total:')) {

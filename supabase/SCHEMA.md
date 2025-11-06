@@ -96,6 +96,9 @@ CREATE TABLE public.restaurants (
   printer_enabled boolean DEFAULT false,
   printer_auto_print boolean DEFAULT false,
   printer_name text,
+  call_forwarding_enabled boolean DEFAULT false,
+  call_forwarding_number character varying,
+  call_forwarding_reasons text[],
   CONSTRAINT restaurants_pkey PRIMARY KEY (id),
   CONSTRAINT restaurants_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES auth.users(id)
 );
@@ -112,6 +115,9 @@ CREATE TABLE public.restaurants (
 - `additional_ai_instructions` - Custom AI behavior instructions
 - `printer_enabled`, `printer_auto_print`, `printer_name` - Printer integration settings
 - `specials` - Daily/weekly specials text
+- `call_forwarding_enabled` - Enable/disable call forwarding (boolean)
+- `call_forwarding_number` - Phone number to transfer calls to (E.164 format: +14105551234)
+- `call_forwarding_reasons` - Array of reasons that trigger call transfer: ['credit_card_payment', 'complaint', 'manager_request', 'complex_order', 'technical_issue', 'billing_question', 'custom_request', 'refund_request', 'delivery_issue']
 
 **Relationships:**
 - Has many: menu_items, orders, call_logs, customer_messages
@@ -203,6 +209,7 @@ CREATE TABLE public.orders (
   printed_at timestamp with time zone,
   delivery_instructions text,
   delivery_address_id uuid,
+  payment_method character varying,
   CONSTRAINT orders_pkey PRIMARY KEY (id),
   CONSTRAINT orders_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
   CONSTRAINT orders_delivery_address_id_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.customer_delivery_addresses(id)
@@ -213,11 +220,12 @@ CREATE TABLE public.orders (
 - `customer_phone` - Customer's phone number (from Caller ID)
 - `customer_name` - Customer's name
 - `total_amount` - Total order amount including tax and fees
-- `status` - Order status: pending, modified, cancelled, completed
+- `status` - Order status: pending, modified, cancelled, completed, credit_card
 - `order_type` - pickup or delivery
 - `delivery_address` - Full delivery address (if delivery order)
 - `delivery_instructions` - Where to leave delivery: "Front door", "Ring bell", "Side entrance", etc.
 - `delivery_address_id` - Foreign key to `customer_delivery_addresses` table (links to cached address record)
+- `payment_method` - How customer wants to pay: 'cash', 'credit card', or null for pickup orders
 - `order_details` - Detailed order description (text)
 - `special_instructions` - Customer notes/modifications
 - `call_sid` - Twilio call SID that created this order
