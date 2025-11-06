@@ -86,15 +86,9 @@ All database operations go through **Supabase Edge Functions** (services/databas
 - `createCustomerMessage()` - Save customer messages/complaints
 - `getCustomerAddress()` - Retrieve cached delivery address ⭐ NEW (v2.3)
 - `saveCustomerAddress()` - Save validated delivery address for future orders ⭐ NEW (v2.3)
-- `createCallLog()` - Save call logs with conversation transcripts ⭐ NEW (v2.6)
+- `createCallLog()` - Save call logs (called by Twilio webhooks after call completes)
 
-**Call Logging with Conversation Transcripts**: The system automatically logs all calls to the `call_logs` table with full conversation transcripts. The transcript includes:
-- Customer speech (transcribed via OpenAI Whisper)
-- AI responses (text transcripts)
-- Timestamps for each message
-- Call metadata (duration, caller location, restaurant, order reference)
-
-This feature has **zero additional OpenAI cost** as transcripts are automatically provided by the Realtime API.
+**Call Logging**: Call logs are saved to the `call_logs` table by Twilio webhooks after calls complete, not during the WebSocket connection. The `createCallLog()` edge function is available for Twilio to use but is not called directly by the AI system.
 
 **Important**: The system makes HTTP POST requests to Supabase Edge Functions at `${SUPABASE_URL}/functions/v1/{function-name}`.
 
@@ -686,6 +680,7 @@ Implementation: `services/audioProcessor.js`
 - **v2.3**: Added delivery address caching system with delivery instructions tracking
 - **v2.4**: Added intelligent call forwarding system with hybrid forwarding/messaging flow
 - **v2.5**: Switched to Semantic VAD for better conversation understanding and turn detection
-- **v2.6**: Added automatic conversation transcript logging to call_logs table (zero additional OpenAI cost)
+- **v2.6**: Added createCallLog edge function for Twilio webhook integration (deprecated in-call transcript collection in v2.7.1)
 - **v2.6.1**: Fixed critical bug preventing fake orders from being created when customers say goodbye without ordering
 - **v2.7**: Added payment method collection for delivery orders with credit card call forwarding and PCI-compliant workflow
+- **v2.7.1**: Removed conversation transcript collection from WebSocket (call logging now handled by Twilio webhooks)
