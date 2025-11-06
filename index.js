@@ -53,6 +53,7 @@ wss.on('connection', (ws, _req) => {
   let maxAddressRetries = config.order.maxAddressRetries;
   let validationRetryInfo = null;
   let recentOrders = [];
+  let prefetchedCustomerAddress = null; // Pre-loaded customer address to eliminate delay
   let customerHasSpoken = false;
   let greetingTimeout = null;
   let callFinalized = false;
@@ -155,6 +156,22 @@ wss.on('connection', (ws, _req) => {
     callSid = callId;
 
     console.log('Customer phone set to:', customerPhone);
+
+    // Pre-fetch customer's saved delivery address to eliminate delay when they choose delivery
+    if (customerPhone && restaurant.delivery_enabled) {
+      console.log('🚀 Pre-fetching customer delivery address for instant access...');
+      try {
+        prefetchedCustomerAddress = await database.getCustomerAddress(restaurant.id, customerPhone);
+        if (prefetchedCustomerAddress && prefetchedCustomerAddress.is_valid) {
+          console.log(`✅ Address pre-loaded: ${prefetchedCustomerAddress.delivery_address} (${prefetchedCustomerAddress.delivery_instructions || 'no instructions'})`);
+        } else {
+          console.log('ℹ️  No saved address found for customer');
+        }
+      } catch (error) {
+        console.error('⚠️  Failed to pre-fetch customer address:', error);
+        // Continue anyway - will fetch on demand if needed
+      }
+    }
 
     const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
@@ -528,24 +545,26 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'check_customer_address':
-        const savedAddress = await database.getCustomerAddress(restaurant.id, customerPhone);
-        if (savedAddress && savedAddress.is_valid) {
+        // Use pre-fetched address data for instant response (no API delay)
+        console.log('⚡ Using pre-fetched customer address data (instant)');
+
+        if (prefetchedCustomerAddress && prefetchedCustomerAddress.is_valid) {
           // Store the address ID for later use in order creation
-          deliveryAddressId = savedAddress.id;
-          validatedDeliveryAddress = savedAddress.delivery_address;
+          deliveryAddressId = prefetchedCustomerAddress.id;
+          validatedDeliveryAddress = prefetchedCustomerAddress.delivery_address;
           addressValidated = true;
 
           result = {
             has_saved_address: true,
-            address_id: savedAddress.id,
-            customer_name: savedAddress.customer_name,
-            delivery_address: savedAddress.delivery_address,
-            delivery_instructions: savedAddress.delivery_instructions,
-            distance: savedAddress.distance_from_restaurant,
-            times_used: savedAddress.times_used
+            address_id: prefetchedCustomerAddress.id,
+            customer_name: prefetchedCustomerAddress.customer_name,
+            delivery_address: prefetchedCustomerAddress.delivery_address,
+            delivery_instructions: prefetchedCustomerAddress.delivery_instructions,
+            distance: prefetchedCustomerAddress.distance_from_restaurant,
+            times_used: prefetchedCustomerAddress.times_used
           };
 
-          console.log(`✅ Using cached address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
+          console.log(`✅ Using pre-loaded address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
         } else {
           result = {
             has_saved_address: false,
