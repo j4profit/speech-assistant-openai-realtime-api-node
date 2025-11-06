@@ -62,6 +62,15 @@ wss.on('connection', (ws, _req) => {
   let currentModel = config.openai.model; // Track which model is being used
   let modelFallbackAttempted = false; // Prevent infinite fallback loops
 
+  // Usage tracking for OpenAI Realtime API costs
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalInputAudioTokens = 0;
+  let totalOutputAudioTokens = 0;
+  let totalInputTextTokens = 0;
+  let totalOutputTextTokens = 0;
+  let estimatedCost = 0;
+
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
     if (callFinalized) {
@@ -259,6 +268,44 @@ wss.on('connection', (ws, _req) => {
     });
   }
 
+  // Accumulate usage data from OpenAI responses
+  function accumulateUsage(usage) {
+    const inputTokens = usage.input_tokens || 0;
+    const outputTokens = usage.output_tokens || 0;
+    const inputAudio = usage.input_token_details?.audio || 0;
+    const outputAudio = usage.output_token_details?.audio || 0;
+    const inputText = usage.input_token_details?.text || 0;
+    const outputText = usage.output_token_details?.text || 0;
+
+    totalInputTokens += inputTokens;
+    totalOutputTokens += outputTokens;
+    totalInputAudioTokens += inputAudio;
+    totalOutputAudioTokens += outputAudio;
+    totalInputTextTokens += inputText;
+    totalOutputTextTokens += outputText;
+
+    // Calculate cost based on OpenAI pricing (per 1M tokens)
+    const PRICE_TEXT_INPUT = 2.50 / 1_000_000;
+    const PRICE_TEXT_OUTPUT = 10.00 / 1_000_000;
+    const PRICE_AUDIO_INPUT = 100.00 / 1_000_000;
+    const PRICE_AUDIO_OUTPUT = 200.00 / 1_000_000;
+
+    const textInputCost = inputText * PRICE_TEXT_INPUT;
+    const textOutputCost = outputText * PRICE_TEXT_OUTPUT;
+    const audioInputCost = inputAudio * PRICE_AUDIO_INPUT;
+    const audioOutputCost = outputAudio * PRICE_AUDIO_OUTPUT;
+
+    estimatedCost = textInputCost + textOutputCost + audioInputCost + audioOutputCost;
+
+    console.log('💰 Current call cost:', {
+      text_input: `$${textInputCost.toFixed(4)}`,
+      text_output: `$${textOutputCost.toFixed(4)}`,
+      audio_input: `$${audioInputCost.toFixed(4)}`,
+      audio_output: `$${audioOutputCost.toFixed(4)}`,
+      total: `$${estimatedCost.toFixed(4)}`
+    });
+  }
+
 
   // Get AI function tools configuration
   function getAITools() {
@@ -430,6 +477,26 @@ wss.on('connection', (ws, _req) => {
               streamSid: streamSid,
               media: { payload: response.delta }
             }));
+          }
+          break;
+
+        case 'response.done':
+          console.log('Response completed');
+
+          // Capture usage data from response
+          if (response.response?.usage) {
+            const usage = response.response.usage;
+            console.log('📊 Usage data received:', {
+              input_tokens: usage.input_tokens || 0,
+              output_tokens: usage.output_tokens || 0,
+              input_audio_tokens: usage.input_token_details?.audio || 0,
+              output_audio_tokens: usage.output_token_details?.audio || 0,
+              input_text_tokens: usage.input_token_details?.text || 0,
+              output_text_tokens: usage.output_token_details?.text || 0
+            });
+
+            // Accumulate usage throughout the call
+            accumulateUsage(usage);
           }
           break;
 
@@ -1091,11 +1158,56 @@ wss.on('connection', (ws, _req) => {
     const callEndTime = new Date();
     const callDuration = Math.round((callEndTime - callStartTime) / 1000);
 
-    console.log('Finalizing call:', {
+    console.log('📊 Call Statistics:', {
       callSid,
       duration: callDuration,
-      ai_responses: aiResponseCount
+      ai_responses: aiResponseCount,
+      total_cost: `$${estimatedCost.toFixed(4)}`,
+      usage: {
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
+        input_audio_tokens: totalInputAudioTokens,
+        output_audio_tokens: totalOutputAudioTokens,
+        input_text_tokens: totalInputTextTokens,
+        output_text_tokens: totalOutputTextTokens
+      }
     });
+
+    // Save usage data to database
+    if (callSid && restaurant && totalInputTokens > 0) {
+      try {
+        const orderId = stateManager.getCallData(callSid)?.order_id || null;
+
+        await database.saveCallUsage({
+          call_sid: callSid,
+          restaurant_id: restaurant.id,
+          customer_phone: customerPhone,
+          call_duration_seconds: callDuration,
+          ai_response_count: aiResponseCount,
+          model_used: currentModel,
+
+          // Token counts
+          input_tokens: totalInputTokens,
+          output_tokens: totalOutputTokens,
+          input_audio_tokens: totalInputAudioTokens,
+          output_audio_tokens: totalOutputAudioTokens,
+          input_text_tokens: totalInputTextTokens,
+          output_text_tokens: totalOutputTextTokens,
+
+          // Pricing (per 1M tokens)
+          price_text_input: 2.50,
+          price_text_output: 10.00,
+          price_audio_input: 100.00,
+          price_audio_output: 200.00,
+
+          // Metadata
+          order_created: orderProcessed,
+          order_id: orderId
+        });
+      } catch (error) {
+        console.error('❌ Failed to save usage data:', error);
+      }
+    }
 
     // Note: Call logging is handled by Twilio webhooks, not here
 
