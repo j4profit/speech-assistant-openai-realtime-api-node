@@ -272,10 +272,24 @@ wss.on('connection', (ws, _req) => {
   function accumulateUsage(usage) {
     const inputTokens = usage.input_tokens || 0;
     const outputTokens = usage.output_tokens || 0;
-    const inputAudio = usage.input_token_details?.audio || 0;
-    const outputAudio = usage.output_token_details?.audio || 0;
-    const inputText = usage.input_token_details?.text || 0;
-    const outputText = usage.output_token_details?.text || 0;
+
+    // Check if we have detailed token breakdown
+    const hasDetails = usage.input_token_details || usage.output_token_details;
+
+    let inputAudio = usage.input_token_details?.audio || 0;
+    let outputAudio = usage.output_token_details?.audio || 0;
+    let inputText = usage.input_token_details?.text || 0;
+    let outputText = usage.output_token_details?.text || 0;
+
+    // FALLBACK: If no breakdown provided, assume ALL tokens are AUDIO
+    // (since this is a voice-only Realtime API system)
+    if (!hasDetails && (inputTokens > 0 || outputTokens > 0)) {
+      console.log('⚠️  No token breakdown provided - assuming all tokens are AUDIO');
+      inputAudio = inputTokens;
+      outputAudio = outputTokens;
+      inputText = 0;
+      outputText = 0;
+    }
 
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
@@ -284,11 +298,12 @@ wss.on('connection', (ws, _req) => {
     totalInputTextTokens += inputText;
     totalOutputTextTokens += outputText;
 
-    // Calculate cost based on OpenAI pricing (per 1M tokens)
-    const PRICE_TEXT_INPUT = 2.50 / 1_000_000;
-    const PRICE_TEXT_OUTPUT = 10.00 / 1_000_000;
-    const PRICE_AUDIO_INPUT = 100.00 / 1_000_000;
-    const PRICE_AUDIO_OUTPUT = 200.00 / 1_000_000;
+    // Calculate cost based on OpenAI gpt-4o-mini-realtime pricing (per 1M tokens)
+    // Source: https://openai.com/api/pricing/ (as of Jan 2025)
+    const PRICE_TEXT_INPUT = 0.60 / 1_000_000;   // $0.60 per 1M tokens
+    const PRICE_TEXT_OUTPUT = 2.40 / 1_000_000;  // $2.40 per 1M tokens
+    const PRICE_AUDIO_INPUT = 60.00 / 1_000_000;  // $60 per 1M tokens (40% cheaper than standard)
+    const PRICE_AUDIO_OUTPUT = 120.00 / 1_000_000; // $120 per 1M tokens (40% cheaper than standard)
 
     const textInputCost = inputText * PRICE_TEXT_INPUT;
     const textOutputCost = outputText * PRICE_TEXT_OUTPUT;
@@ -501,6 +516,10 @@ wss.on('connection', (ws, _req) => {
           // Capture usage data from response
           if (response.response?.usage) {
             const usage = response.response.usage;
+
+            // Log full usage object to debug token details
+            console.log('📊 Full usage object:', JSON.stringify(usage, null, 2));
+
             console.log('📊 Usage data received:', {
               input_tokens: usage.input_tokens || 0,
               output_tokens: usage.output_tokens || 0,
@@ -1209,11 +1228,11 @@ wss.on('connection', (ws, _req) => {
           input_text_tokens: totalInputTextTokens,
           output_text_tokens: totalOutputTextTokens,
 
-          // Pricing (per 1M tokens)
-          price_text_input: 2.50,
-          price_text_output: 10.00,
-          price_audio_input: 100.00,
-          price_audio_output: 200.00,
+          // Pricing (per 1M tokens) - gpt-4o-mini-realtime pricing
+          price_text_input: 0.60,
+          price_text_output: 2.40,
+          price_audio_input: 60.00,
+          price_audio_output: 120.00,
 
           // Metadata
           order_created: orderProcessed,

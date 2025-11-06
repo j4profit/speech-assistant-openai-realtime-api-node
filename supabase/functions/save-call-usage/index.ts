@@ -70,11 +70,11 @@ serve(async (req) => {
       )
     }
 
-    // Set default pricing if not provided (current OpenAI rates per 1M tokens)
-    const priceTextInput = usageData.price_text_input ?? 2.50
-    const priceTextOutput = usageData.price_text_output ?? 10.00
-    const priceAudioInput = usageData.price_audio_input ?? 100.00
-    const priceAudioOutput = usageData.price_audio_output ?? 200.00
+    // Set default pricing if not provided (gpt-4o-mini-realtime rates per 1M tokens)
+    const priceTextInput = usageData.price_text_input ?? 0.60
+    const priceTextOutput = usageData.price_text_output ?? 2.40
+    const priceAudioInput = usageData.price_audio_input ?? 60.00
+    const priceAudioOutput = usageData.price_audio_output ?? 120.00
 
     // Calculate costs (convert from per-1M to per-token)
     const textInputCost = (usageData.input_text_tokens * priceTextInput) / 1_000_000
