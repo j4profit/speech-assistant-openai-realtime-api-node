@@ -60,7 +60,6 @@ wss.on('connection', (ws, _req) => {
   let referenceSignal = null; // For echo cancellation
   let currentModel = config.openai.model; // Track which model is being used
   let modelFallbackAttempted = false; // Prevent infinite fallback loops
-  let conversationTranscript = []; // Accumulate conversation for call log
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -424,13 +423,6 @@ wss.on('connection', (ws, _req) => {
           console.log('AI said:', response.transcript);
           aiResponseCount++;
 
-          // Add AI response to conversation transcript
-          conversationTranscript.push({
-            role: 'assistant',
-            text: response.transcript,
-            timestamp: new Date().toISOString()
-          });
-
           // Mark customer as having spoken after first AI response
           // (AI only responds when customer speaks)
           if (!customerHasSpoken) {
@@ -490,14 +482,9 @@ wss.on('connection', (ws, _req) => {
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
-          // Capture user speech transcript
+          // Log user speech transcript for debugging
           if (response.transcript) {
             console.log('Customer said:', response.transcript);
-            conversationTranscript.push({
-              role: 'user',
-              text: response.transcript,
-              timestamp: new Date().toISOString()
-            });
           }
           break;
 
@@ -1098,63 +1085,10 @@ wss.on('connection', (ws, _req) => {
     console.log('Finalizing call:', {
       callSid,
       duration: callDuration,
-      ai_responses: aiResponseCount,
-      transcript_entries: conversationTranscript.length
+      ai_responses: aiResponseCount
     });
 
-    // Save call log with conversation transcript
-    if (callSid) {
-      try {
-        // Get call data that was stored during /voice webhook
-        const storedCallData = stateManager.getCallData(callSid);
-
-        // Format transcript as readable conversation log
-        let formattedTranscript = '';
-        if (conversationTranscript.length > 0) {
-          formattedTranscript = conversationTranscript
-            .map(entry => {
-              const role = entry.role === 'user' ? 'Customer' : 'AI';
-              const time = new Date(entry.timestamp).toLocaleTimeString();
-              return `[${time}] ${role}: ${entry.text}`;
-            })
-            .join('\n\n');
-
-          console.log(`💬 Conversation transcript captured: ${conversationTranscript.length} messages`);
-        } else {
-          formattedTranscript = 'No conversation recorded';
-        }
-
-        // Prepare call log data
-        const callLogData = {
-          call_sid: callSid,
-          restaurant_id: storedCallData?.restaurant_id || restaurant?.id || null,
-          from_number: storedCallData?.from_number || customerPhone || null,
-          to_number: storedCallData?.to_number || null,
-          call_status: 'completed',
-          call_direction: storedCallData?.call_direction || 'inbound',
-          caller_country: storedCallData?.caller_country || null,
-          caller_state: storedCallData?.caller_state || null,
-          caller_city: storedCallData?.caller_city || null,
-          caller_zip: storedCallData?.caller_zip || null,
-          to_country: storedCallData?.to_country || null,
-          to_state: storedCallData?.to_state || null,
-          to_city: storedCallData?.to_city || null,
-          to_zip: storedCallData?.to_zip || null,
-          call_duration: callDuration,
-          call_started_at: callStartTime.toISOString(),
-          call_ended_at: callEndTime.toISOString(),
-          conversation_transcript: formattedTranscript,
-          twilio_data: storedCallData?.twilio_data || null,
-          order_id: storedCallData?.order_id || null
-        };
-
-        // Save call log
-        await database.createCallLog(callLogData);
-      } catch (error) {
-        console.error('❌ Error creating call log:', error);
-        // Don't fail call finalization if logging fails
-      }
-    }
+    // Note: Call logging is handled by Twilio webhooks, not here
 
     // Clean up call state
     stateManager.removeCallData(callSid);
