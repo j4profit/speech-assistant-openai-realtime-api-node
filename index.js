@@ -872,6 +872,12 @@ wss.on('connection', (ws, _req) => {
           output: JSON.stringify(result)
         }
       }));
+
+      // CRITICAL: Trigger AI to respond after function result
+      // Without this, AI receives the result but doesn't know to respond to customer
+      openaiWs.send(JSON.stringify({
+        type: 'response.create'
+      }));
     }
   }
 
