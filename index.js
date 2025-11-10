@@ -273,15 +273,16 @@ wss.on('connection', (ws, _req) => {
     const inputTokens = usage.input_tokens || 0;
     const outputTokens = usage.output_tokens || 0;
 
-    // Check if we have detailed token breakdown
-    const hasDetails = usage.input_token_details || usage.output_token_details;
-
+    // Extract token breakdown details
     let inputAudio = usage.input_token_details?.audio || 0;
     let outputAudio = usage.output_token_details?.audio || 0;
     let inputText = usage.input_token_details?.text || 0;
     let outputText = usage.output_token_details?.text || 0;
 
-    // FALLBACK: If no breakdown provided, assume ALL tokens are AUDIO
+    // Check if we have a MEANINGFUL token breakdown (non-zero values)
+    const hasDetails = (inputAudio + outputAudio + inputText + outputText) > 0;
+
+    // FALLBACK: If no breakdown provided or all zeros, assume ALL tokens are AUDIO
     // (since this is a voice-only Realtime API system)
     if (!hasDetails && (inputTokens > 0 || outputTokens > 0)) {
       console.log('⚠️  No token breakdown provided - assuming all tokens are AUDIO');
