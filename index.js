@@ -485,6 +485,13 @@ wss.on('connection', (ws, _req) => {
               }
             }));
             openaiWs.send(JSON.stringify({ type: 'response.create' }));
+
+            // Cancel backup greeting since we've sent the greeting
+            if (greetingTimeout) {
+              clearTimeout(greetingTimeout);
+              greetingTimeout = null;
+              console.log('Backup greeting canceled (session.updated greeting sent)');
+            }
           }
           break;
         case 'response.audio.delta':
@@ -538,10 +545,11 @@ wss.on('connection', (ws, _req) => {
           console.log('AI said:', response.transcript);
           aiResponseCount++;
 
-          // Mark customer as having spoken after first AI response
-          // (AI only responds when customer speaks)
-          if (!customerHasSpoken) {
+          // Mark customer as having spoken after second AI response
+          // (First response is the greeting, second means customer actually spoke)
+          if (!customerHasSpoken && aiResponseCount > 1) {
             customerHasSpoken = true;
+            console.log('Customer has spoken (detected after AI response #' + aiResponseCount + ')');
           }
 
           // Check for order confirmation
