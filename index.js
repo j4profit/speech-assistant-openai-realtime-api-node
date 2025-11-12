@@ -972,6 +972,18 @@ wss.on('connection', (ws, _req) => {
       const isCreditCard = orderInfo.paymentMethod === 'credit card';
       const orderStatus = isCreditCard ? 'credit_card' : 'pending';
 
+      // Generate complete order ticket BEFORE creating order
+      const ticket = createOrderTicket({
+        ...orderInfo,
+        subtotal,
+        deliveryFee,
+        taxRate: restaurant.tax_rate,
+        taxAmount,
+        totalAmount: finalTotal,
+        readyTime: readyTimeInfo.readyTimeString,
+        restaurantName: restaurant.name
+      });
+
       const orderData = {
         restaurant_id: restaurant.id,
         customer_name: orderInfo.customerName,
@@ -981,7 +993,7 @@ wss.on('connection', (ws, _req) => {
         delivery_instructions: orderInfo.deliveryInstructions,
         delivery_address_id: isDelivery ? deliveryAddressId : null, // Link to cached address if delivery
         payment_method: orderInfo.paymentMethod || null,
-        order_details: orderInfo.items,
+        order_details: ticket, // Store complete formatted ticket
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
         call_sid: callSid,
@@ -1001,18 +1013,6 @@ wss.on('connection', (ws, _req) => {
 
       if (order) {
         console.log('Order created successfully:', order.id);
-
-        const ticket = createOrderTicket({
-          ...orderInfo,
-          subtotal,
-          deliveryFee,
-          taxRate: restaurant.tax_rate,
-          taxAmount,
-          totalAmount: finalTotal,
-          readyTime: readyTimeInfo.readyTimeString,
-          restaurantName: restaurant.name
-        });
-
         console.log('\n' + ticket + '\n');
 
         // Update call data with order reference
