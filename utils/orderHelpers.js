@@ -219,19 +219,20 @@ function formatMenuForAI(menuItems, restaurant) {
 
   const categories = {};
   menuItems.forEach(item => {
-    if (!item.available) return;
-
+    // Note: available field is already filtered at DB level in edge function
     const categoryName = item.category || 'Other';
     if (!categories[categoryName]) {
       categories[categoryName] = [];
     }
 
-    categories[categoryName].push({
-      name: item.name,
-      description: item.description,
-      price: item.price,
-      id: item.id
-    });
+    // Handle new grouped menu structure with sizes array
+    if (item.sizes && item.sizes.length > 0) {
+      categories[categoryName].push({
+        name: item.name,
+        description: item.description,
+        sizes: item.sizes
+      });
+    }
   });
 
   let menuText = "MENU:\n";
@@ -242,7 +243,17 @@ function formatMenuForAI(menuItems, restaurant) {
     categories[category]
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach(item => {
-        menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.price}\n`;
+        // Format with sizes and prices
+        if (item.sizes.length === 1) {
+          // Single size - simple format
+          menuText += `- ${item.name}: ${item.description || 'No description'} - $${item.sizes[0].price.toFixed(2)}\n`;
+        } else {
+          // Multiple sizes - show all options
+          menuText += `- ${item.name}: ${item.description || 'No description'}\n`;
+          item.sizes.forEach(sizeOption => {
+            menuText += `  • ${sizeOption.size}: $${sizeOption.price.toFixed(2)}\n`;
+          });
+        }
       });
   });
 
