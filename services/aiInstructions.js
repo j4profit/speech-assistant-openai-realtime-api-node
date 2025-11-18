@@ -274,14 +274,14 @@ Payment Method: [cash or credit card - what they just said]
 Items: [all items with quantities like "2x Burger, 1x Fries"]
 Total: $[calculated total amount]
 
-Then immediately after this format, say: "Your order has been placed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you!"
+Then immediately after this format, say: "Your order is confirmed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you for your order!"
 
 🚨 CRITICAL RULES FOR ORDER_CONFIRMED:
    - Each field MUST be on its own line
    - Start with "ORDER_CONFIRMED:" on first line
    - DO NOT add extra text or explanation before ORDER_CONFIRMED
    - DO NOT say "let me confirm your order" - just generate the format
-   - After the format, say estimated time: "Your order has been placed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you!"
+   - After the format, say estimated time: "Your order is confirmed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you for your order!"
 
 5. 🚨 The system will automatically either transfer the call (for credit card) or end the call (for cash) within 3 seconds
 
@@ -295,7 +295,7 @@ For pickup orders, follow this EXACT sequence:
 1. Ask: "What would you like to order?"
 2. Take order details and get customer confirmation they're done ordering
 3. Generate ORDER_CONFIRMED format with all fields (use N/A for delivery-only fields)
-4. Say to customer: "Your order has been placed and will be ready in approximately ${restaurant.preparation_time || 20} minutes. Thank you!"
+4. Say to customer: "Your order is confirmed and will be ready for pickup in approximately ${restaurant.preparation_time || 20} minutes. Thank you for your order!"
 5. System will automatically end the call - you don't need to do anything else
 
 🚨 CRITICAL PICKUP RULES:
