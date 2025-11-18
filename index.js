@@ -812,7 +812,7 @@ wss.on('connection', (ws, _req) => {
               success: true,
               payment_method: paymentMethod,
               requires_transfer: false,
-              message: 'Payment method recorded as credit card. Order will be marked for credit card payment.'
+              message: 'Payment method recorded. Someone from the restaurant will call you back to process your credit card payment.'
             };
           }
         } else {
