@@ -114,7 +114,7 @@ Identify what kind of issue the customer has (use these EXACT reason codes):
 - **credit_card_payment** - Handled automatically via process_payment_method function
 
 **🍽️ CATERING ORDER DETECTION:**
-Detect `complex_order` when customer mentions:
+Detect "complex_order" when customer mentions:
 - "Catering" or "catering order"
 - Large quantities: "50 people", "100 guests", "party of 75", "for 20 people"
 - Corporate/office: "office party", "company event", "corporate lunch", "business meeting"
