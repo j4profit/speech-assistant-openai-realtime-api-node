@@ -704,6 +704,33 @@ wss.on('connection', (ws, _req) => {
       case 'transfer_call':
         console.log('🔀 Transfer call request:', parsedArgs);
 
+        // CRITICAL: Validate required parameters
+        if (!parsedArgs.reason || !parsedArgs.customer_message) {
+          console.error('❌ transfer_call called with missing parameters!');
+          console.error('   Received:', JSON.stringify(parsedArgs));
+          console.error('   Required: reason (string), customer_message (string)');
+
+          result = {
+            success: false,
+            error: 'MISSING_PARAMETERS',
+            message: `You must provide BOTH parameters when calling transfer_call:
+1. reason - Use one of these EXACT strings:
+   - "Forward calls for catering orders" (for catering/large orders)
+   - "Forward calls for credit card transactions" (for credit card payments)
+   - "Forward calls for issues or complaints" (for complaints)
+   - "Forward calls when customer requests to speak with manager" (for manager requests)
+
+2. customer_message - Brief description of what the customer needs
+
+Example: transfer_call with parameters:
+  reason: "Forward calls for catering orders"
+  customer_message: "Customer asked about catering for 20 people"
+
+IMPORTANT: You MUST call this function again with BOTH parameters, or call create_customer_message instead.`
+          };
+          break;
+        }
+
         // Check if call forwarding is enabled
         if (!restaurant.call_forwarding_enabled) {
           console.log('❌ Call forwarding not enabled for this restaurant');

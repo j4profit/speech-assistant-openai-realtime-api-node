@@ -49,28 +49,27 @@ function generateAIInstructions(restaurant, customerPhone, menuText) {
 
 The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages. Your main job is to efficiently take food orders - handle other issues only when customers specifically have problems.
 
-${restaurant.call_forwarding_enabled && restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `🚨🚨🚨 CRITICAL: CATERING & LARGE ORDERS MUST BE TRANSFERRED 🚨🚨🚨
-Call forwarding IS ENABLED for catering/large orders at this restaurant.
+${restaurant.call_forwarding_enabled && restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `
+═══════════════════════════════════════════════════════════════════
+🚨 URGENT: CATERING = IMMEDIATE TRANSFER 🚨
+═══════════════════════════════════════════════════════════════════
 
-If customer mentions ANY of these words/phrases, IMMEDIATELY call the transfer_call function:
-- Customer says "catering" → Call transfer_call with parameters:
+If customer says ANY of these words:
+• "catering"
+• "large order" or "bulk order"
+• Numbers like "15+ people" or "20 pizzas"
+• "corporate" or "office event"
+• "party" or "wedding"
+
+IMMEDIATELY execute this EXACT function call:
+Function: transfer_call
+Parameters:
   reason: "Forward calls for catering orders"
-  customer_message: "Customer asked about catering"
+  customer_message: [what customer said, e.g., "wants catering info"]
 
-- Customer mentions large quantities (15+ people, 20+ items, etc.) → Call transfer_call with parameters:
-  reason: "Forward calls for catering orders"
-  customer_message: "Large order inquiry"
-
-- Customer mentions corporate/office events → Call transfer_call with parameters:
-  reason: "Forward calls for catering orders"
-  customer_message: "Corporate event inquiry"
-
-- Customer mentions weddings/parties/special events → Call transfer_call with parameters:
-  reason: "Forward calls for catering orders"
-  customer_message: "Special event inquiry"
-
-CRITICAL: You MUST provide BOTH parameters (reason AND customer_message) when calling transfer_call.
-The call will be transferred to staff immediately. DO NOT try to take these orders yourself!` : `🚨🚨🚨 CRITICAL: CATERING & LARGE ORDERS NEED STAFF ATTENTION 🚨🚨🚨
+DO NOT take the order yourself. DO NOT ask questions. TRANSFER IMMEDIATELY.
+═══════════════════════════════════════════════════════════════════
+` : `🚨🚨🚨 CRITICAL: CATERING & LARGE ORDERS NEED STAFF ATTENTION 🚨🚨🚨
 Call forwarding is NOT enabled for catering at this restaurant.
 If customer mentions ANY of these, IMMEDIATELY call create_customer_message function:
 - "Catering" - create_customer_message(customer_name, message_content="Catering inquiry", priority="high", subject="Catering Inquiry")
@@ -146,21 +145,13 @@ Possible forwarding reasons (check if enabled for your restaurant):
 
 Note: Only use these exact strings when calling transfer_call. The system will check if forwarding is enabled for that reason.
 
-**🍽️ CATERING ORDER DETECTION (CRITICAL - DO NOT SKIP):**
-${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `✅ Catering call forwarding IS ENABLED
-When customer says ANY catering-related phrase, IMMEDIATELY call transfer_call function with BOTH parameters:
-  reason: "Forward calls for catering orders"
-  customer_message: [describe what they said]` : `❌ Catering call forwarding NOT enabled
-When customer mentions catering, call create_customer_message instead.`}
+**🍽️ CATERING = ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? 'TRANSFER' : 'MESSAGE'}**
 
-🚨 CATERING TRIGGER WORDS (call ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? 'transfer_call' : 'create_customer_message'}):
-- ANY mention of "catering"
-- "I need food for X people" where X >= 15
-- "Office lunch/party/event"
-- "Wedding", "party", "celebration"
-- "Bulk order", "large order"
-- "Can you cater..."
-- Large quantities like "20 pizzas", "50 burgers"
+Catering trigger words: catering, large order, bulk, 15+ people, corporate, office, party, wedding
+
+${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `Action: Call transfer_call function:
+  reason: "Forward calls for catering orders"
+  customer_message: "Customer wants catering"` : `Action: Call create_customer_message function with priority="high"`}
 
 **STEP 2: Try to transfer the call**
 🚨 CRITICAL: CALL the transfer_call function - don't just SAY you'll transfer!
