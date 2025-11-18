@@ -605,47 +605,6 @@ async function createCallLog(callData) {
   }
 }
 
-/**
- * Save call usage data (OpenAI token usage and costs)
- * @param {Object} usageData - Usage data to save
- * @returns {Promise<Object|null>} Saved usage record or null on error
- */
-async function saveCallUsage(usageData) {
-  try {
-    console.log('💰 Saving call usage for call:', usageData.call_sid);
-
-    const response = await fetch(`${config.supabase.url}/functions/v1/save-call-usage`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.supabase.anonKey}`
-      },
-      body: JSON.stringify(usageData)
-    });
-
-    if (!response.ok) {
-      console.error('save-call-usage failed:', response.status);
-      const errorText = await response.text();
-      console.error('save-call-usage error response:', errorText);
-      return null;
-    }
-
-    const result = await response.json();
-
-    if (!result.success) {
-      console.error('save-call-usage error:', result.error);
-      return null;
-    }
-
-    console.log('✅ Call usage saved successfully - Total cost: $' + result.total_cost);
-    return result;
-
-  } catch (error) {
-    console.error('❌ saveCallUsage error:', error);
-    return null;
-  }
-}
-
 module.exports = {
   getRestaurantByPhone,
   searchRecentOrders,
@@ -657,6 +616,5 @@ module.exports = {
   getCustomerAddress,
   saveCustomerAddress,
   updateDeliveryInstructions,
-  createCallLog,
-  saveCallUsage
+  createCallLog
 };

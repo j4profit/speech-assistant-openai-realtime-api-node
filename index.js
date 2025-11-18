@@ -39,7 +39,6 @@ wss.on('connection', (ws, _req) => {
   let callSid = null;
   let customerPhone = null;
   let restaurant = null;
-  let callStartTime = new Date();
   let aiResponseCount = 0;
   let orderProcessed = false;
   let addressValidated = false;
@@ -61,15 +60,6 @@ wss.on('connection', (ws, _req) => {
   let referenceSignal = null; // For echo cancellation
   let currentModel = config.openai.model; // Track which model is being used
   let modelFallbackAttempted = false; // Prevent infinite fallback loops
-
-  // Usage tracking for OpenAI Realtime API costs
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let totalInputAudioTokens = 0;
-  let totalOutputAudioTokens = 0;
-  let totalInputTextTokens = 0;
-  let totalOutputTextTokens = 0;
-  let estimatedCost = 0;
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -291,35 +281,6 @@ wss.on('connection', (ws, _req) => {
       inputText = 0;
       outputText = 0;
     }
-
-    totalInputTokens += inputTokens;
-    totalOutputTokens += outputTokens;
-    totalInputAudioTokens += inputAudio;
-    totalOutputAudioTokens += outputAudio;
-    totalInputTextTokens += inputText;
-    totalOutputTextTokens += outputText;
-
-    // Calculate cost based on OpenAI gpt-4o-mini-realtime pricing (per 1M tokens)
-    // Source: https://openai.com/api/pricing/ (as of Jan 2025)
-    const PRICE_TEXT_INPUT = 0.60 / 1_000_000;   // $0.60 per 1M tokens
-    const PRICE_TEXT_OUTPUT = 2.40 / 1_000_000;  // $2.40 per 1M tokens
-    const PRICE_AUDIO_INPUT = 60.00 / 1_000_000;  // $60 per 1M tokens (40% cheaper than standard)
-    const PRICE_AUDIO_OUTPUT = 120.00 / 1_000_000; // $120 per 1M tokens (40% cheaper than standard)
-
-    const textInputCost = inputText * PRICE_TEXT_INPUT;
-    const textOutputCost = outputText * PRICE_TEXT_OUTPUT;
-    const audioInputCost = inputAudio * PRICE_AUDIO_INPUT;
-    const audioOutputCost = outputAudio * PRICE_AUDIO_OUTPUT;
-
-    estimatedCost = textInputCost + textOutputCost + audioInputCost + audioOutputCost;
-
-    console.log('💰 Current call cost:', {
-      text_input: `$${textInputCost.toFixed(4)}`,
-      text_output: `$${textOutputCost.toFixed(4)}`,
-      audio_input: `$${audioInputCost.toFixed(4)}`,
-      audio_output: `$${audioOutputCost.toFixed(4)}`,
-      total: `$${estimatedCost.toFixed(4)}`
-    });
   }
 
 
@@ -363,7 +324,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "check_customer_address",
-        description: "Check if customer has a saved delivery address on file. Call this BEFORE asking for delivery address.",
+        description: "ONLY for DELIVERY orders: Check if customer has a saved delivery address on file. Call this BEFORE asking for delivery address. NEVER call this for pickup orders.",
         parameters: {
           type: "object",
           properties: {},
@@ -1202,60 +1163,6 @@ wss.on('connection', (ws, _req) => {
     if (greetingTimeout) {
       clearTimeout(greetingTimeout);
       greetingTimeout = null;
-    }
-
-    const callEndTime = new Date();
-    const callDuration = Math.round((callEndTime - callStartTime) / 1000);
-
-    console.log('📊 Call Statistics:', {
-      callSid,
-      duration: callDuration,
-      ai_responses: aiResponseCount,
-      total_cost: `$${estimatedCost.toFixed(4)}`,
-      usage: {
-        input_tokens: totalInputTokens,
-        output_tokens: totalOutputTokens,
-        input_audio_tokens: totalInputAudioTokens,
-        output_audio_tokens: totalOutputAudioTokens,
-        input_text_tokens: totalInputTextTokens,
-        output_text_tokens: totalOutputTextTokens
-      }
-    });
-
-    // Save usage data to database
-    if (callSid && restaurant && totalInputTokens > 0) {
-      try {
-        const orderId = stateManager.getCallData(callSid)?.order_id || null;
-
-        await database.saveCallUsage({
-          call_sid: callSid,
-          restaurant_id: restaurant.id,
-          customer_phone: customerPhone,
-          call_duration_seconds: callDuration,
-          ai_response_count: aiResponseCount,
-          model_used: currentModel,
-
-          // Token counts
-          input_tokens: totalInputTokens,
-          output_tokens: totalOutputTokens,
-          input_audio_tokens: totalInputAudioTokens,
-          output_audio_tokens: totalOutputAudioTokens,
-          input_text_tokens: totalInputTextTokens,
-          output_text_tokens: totalOutputTextTokens,
-
-          // Pricing (per 1M tokens) - gpt-4o-mini-realtime pricing
-          price_text_input: 0.60,
-          price_text_output: 2.40,
-          price_audio_input: 60.00,
-          price_audio_output: 120.00,
-
-          // Metadata
-          order_created: orderProcessed,
-          order_id: orderId
-        });
-      } catch (error) {
-        console.error('❌ Failed to save usage data:', error);
-      }
     }
 
     // Note: Call logging is handled by Twilio webhooks, not here
