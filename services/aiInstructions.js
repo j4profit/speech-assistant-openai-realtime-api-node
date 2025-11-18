@@ -338,11 +338,25 @@ ${restaurant.specials}
 **PRICING INFORMATION:**
 - Tax Rate: ${restaurant.tax_rate ? `${(restaurant.tax_rate * 100).toFixed(1)}%` : '0% (no tax)'}
 - Delivery Fee: $${restaurant.delivery_fee ? restaurant.delivery_fee.toFixed(2) : '0.00'}
-- When calculating order totals:
-  ${restaurant.tax_rate ? `- Add ${(restaurant.tax_rate * 100).toFixed(1)}% tax to subtotal` : '- No tax applied'}
-  ${restaurant.delivery_fee && restaurant.delivery_fee > 0 ? `- For delivery orders, add $${restaurant.delivery_fee.toFixed(2)} delivery fee` : '- No delivery fee'}
-  - Formula for delivery: (Food Subtotal ${restaurant.delivery_fee && restaurant.delivery_fee > 0 ? `+ $${restaurant.delivery_fee.toFixed(2)} delivery fee` : ''}) ${restaurant.tax_rate ? `× ${(1 + restaurant.tax_rate).toFixed(3)}` : ''}
-  - Formula for pickup: Food Subtotal ${restaurant.tax_rate ? `× ${(1 + restaurant.tax_rate).toFixed(3)}` : ''}
+
+🚨 CRITICAL - HOW TO CALCULATE ORDER TOTALS:
+1. **Look up each item's price from the menu above**
+2. **Calculate food subtotal**: (Item Price × Quantity) for each item, then add them all up
+3. **For DELIVERY orders**:
+   a) Add delivery fee: Subtotal + $${restaurant.delivery_fee ? restaurant.delivery_fee.toFixed(2) : '0.00'}
+   b) Calculate tax: (Subtotal + Delivery Fee) × ${restaurant.tax_rate || 0}
+   c) Final Total = Subtotal + Delivery Fee + Tax
+4. **For PICKUP orders**:
+   a) Calculate tax: Subtotal × ${restaurant.tax_rate || 0}
+   b) Final Total = Subtotal + Tax
+
+**EXAMPLE CALCULATION (Delivery):**
+- 2x Burger ($10 each) = $20
+- 1x Fries ($5) = $5
+- Food Subtotal = $25
+${restaurant.delivery_fee && restaurant.delivery_fee > 0 ? `- Add Delivery Fee: $25 + $${restaurant.delivery_fee.toFixed(2)} = $${(25 + restaurant.delivery_fee).toFixed(2)}` : ''}
+${restaurant.tax_rate ? `- Calculate Tax: $${(25 + (restaurant.delivery_fee || 0)).toFixed(2)} × ${restaurant.tax_rate} = $${((25 + (restaurant.delivery_fee || 0)) * restaurant.tax_rate).toFixed(2)}` : ''}
+- Final Total: $${(25 + (restaurant.delivery_fee || 0) + ((25 + (restaurant.delivery_fee || 0)) * (restaurant.tax_rate || 0))).toFixed(2)}
 
 **DELIVERY SETTINGS:**
 - Delivery Enabled: ${restaurant.delivery_enabled ? 'YES' : 'NO'}
@@ -425,10 +439,19 @@ Total: $[amount - MUST BE > $0]
 🚨 CRITICAL: DO NOT generate ORDER_CONFIRMED on a single line with commas - you MUST put EACH field on its OWN LINE
 
 **VALIDATION RULES FOR ORDER_CONFIRMED:**
+- Total MUST be calculated using menu prices from above (not made up)
 - Total MUST be greater than $0
-- Items MUST include quantities (e.g., "2x Burger" not just "Burgers")
+- Items MUST include ACTUAL quantities with numbers (e.g., "1x Burger", "2x Burger" - NOT "x Burger" or just "Burgers")
 - Customer name MUST be provided
 - Items MUST be specific food items, not vague descriptions
+
+🚨 CRITICAL CALCULATION RULES:
+- Use ACTUAL menu prices from the menu section above
+- Multiply each item price by its quantity
+- Add all items together for subtotal
+- For delivery: Add delivery fee, then calculate tax on (subtotal + delivery fee)
+- For pickup: Calculate tax on subtotal only
+- The Total field in ORDER_CONFIRMED is the FINAL amount including all fees and taxes
 
 CRITICAL: For delivery orders, you MUST include the "Delivery Instructions:" line even if customer didn't provide instructions (use "N/A" in that case)`;
 }
