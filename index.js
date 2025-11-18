@@ -352,27 +352,38 @@ wss.on('connection', (ws, _req) => {
       },
       {
         type: "function",
-        name: "transfer_call",
-        description: "Transfer call to restaurant staff when call forwarding is enabled and the detected reason matches. Use this when you detect one of the forwarding reasons.",
+        name: "transfer_call_for_catering",
+        description: "Transfer call to restaurant staff for catering inquiries or large orders (15+ people, bulk orders, corporate events, weddings, parties). Use when customer mentions catering.",
         parameters: {
           type: "object",
-          properties: {
-            reason: {
-              type: "string",
-              enum: [
-                "Forward calls for catering orders",
-                "Forward calls for credit card transactions",
-                "Forward calls for issues or complaints",
-                "Forward calls when customer requests to speak with manager"
-              ],
-              description: "The reason for transferring the call - must match restaurant's configured forwarding reasons exactly"
-            },
-            customer_message: {
-              type: "string",
-              description: "Brief summary of what the customer needs (for context)"
-            }
-          },
-          required: ["reason", "customer_message"]
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_manager",
+        description: "Transfer call to restaurant manager when customer requests to speak with manager or owner.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_complaint",
+        description: "Transfer call to restaurant staff when customer has a complaint about food or service.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_credit_card",
+        description: "Transfer call to restaurant staff to process credit card payment for delivery order.",
+        parameters: {
+          type: "object",
+          properties: {}
         }
       },
       {
@@ -701,99 +712,88 @@ wss.on('connection', (ws, _req) => {
         }
         break;
 
-      case 'transfer_call':
-        console.log('🔀 Transfer call request:', parsedArgs);
-
-        // CRITICAL: Validate required parameters
-        if (!parsedArgs.reason || !parsedArgs.customer_message) {
-          console.error('❌ transfer_call called with missing parameters!');
-          console.error('   Received:', JSON.stringify(parsedArgs));
-          console.error('   Required: reason (string), customer_message (string)');
-
-          result = {
-            success: false,
-            error: 'MISSING_PARAMETERS',
-            message: `You must provide BOTH parameters when calling transfer_call:
-1. reason - Use one of these EXACT strings:
-   - "Forward calls for catering orders" (for catering/large orders)
-   - "Forward calls for credit card transactions" (for credit card payments)
-   - "Forward calls for issues or complaints" (for complaints)
-   - "Forward calls when customer requests to speak with manager" (for manager requests)
-
-2. customer_message - Brief description of what the customer needs
-
-Example: transfer_call with parameters:
-  reason: "Forward calls for catering orders"
-  customer_message: "Customer asked about catering for 20 people"
-
-IMPORTANT: You MUST call this function again with BOTH parameters, or call create_customer_message instead.`
+      case 'transfer_call_for_catering':
+      case 'transfer_call_for_manager':
+      case 'transfer_call_for_complaint':
+      case 'transfer_call_for_credit_card':
+        {
+          // Map function names to database reason strings
+          const functionToReason = {
+            'transfer_call_for_catering': 'Forward calls for catering orders',
+            'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
+            'transfer_call_for_complaint': 'Forward calls for issues or complaints',
+            'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
           };
-          break;
-        }
 
-        // Check if call forwarding is enabled
-        if (!restaurant.call_forwarding_enabled) {
-          console.log('❌ Call forwarding not enabled for this restaurant');
-          result = {
-            success: false,
-            should_create_message: true,
-            reason: 'Call forwarding not enabled for this restaurant'
+          const reason = functionToReason[tool_name];
+          console.log(`🔀 Transfer call request: ${tool_name} → ${reason}`);
+
+          // Check if call forwarding is enabled
+          if (!restaurant.call_forwarding_enabled) {
+            console.log('❌ Call forwarding not enabled for this restaurant');
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Check if this specific reason is in the forwarding reasons array
+          const forwardingReasons = restaurant.call_forwarding_reasons || [];
+          const shouldForward = forwardingReasons.includes(reason);
+
+          if (!shouldForward) {
+            console.log(`❌ Reason "${reason}" not in forwarding reasons: ${forwardingReasons.join(', ')}`);
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Check if forwarding number is configured
+          if (!restaurant.call_forwarding_number) {
+            console.error('❌ Call forwarding enabled but no number configured');
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Perform the transfer
+          console.log(`✅ Transferring call to ${restaurant.call_forwarding_number} - Reason: ${reason}`);
+          const transferMessages = {
+            'transfer_call_for_catering': 'Transferring you to our catering specialist',
+            'transfer_call_for_manager': 'Transferring you to the manager',
+            'transfer_call_for_complaint': 'Transferring you to our staff to help with your concern',
+            'transfer_call_for_credit_card': 'Transferring you to process your payment'
           };
-          break;
-        }
 
-        // Check if the reason is in the forwarding reasons array
-        // Valid reason codes (must match enum in getAITools() transfer_call function):
-        // - complaint, manager_request, complex_order, technical_issue
-        // - billing_question, custom_request, refund_request, delivery_issue
-        // - credit_card_payment
-        // Database field call_forwarding_reasons must contain these EXACT codes
-        const forwardingReasons = restaurant.call_forwarding_reasons || [];
-        const shouldForward = forwardingReasons.includes(parsedArgs.reason);
+          const transferResult = await twilioService.transferCall(
+            callSid,
+            restaurant.call_forwarding_number,
+            transferMessages[tool_name]
+          );
 
-        if (!shouldForward) {
-          console.log(`❌ Reason "${parsedArgs.reason}" not in forwarding reasons: ${forwardingReasons.join(', ')}`);
-          result = {
-            success: false,
-            should_create_message: true,
-            reason: `Reason "${parsedArgs.reason}" not configured for forwarding - creating message instead`
-          };
-          break;
-        }
-
-        // Check if forwarding number is configured
-        if (!restaurant.call_forwarding_number) {
-          console.error('❌ Call forwarding enabled but no number configured');
-          result = {
-            success: false,
-            should_create_message: true,
-            reason: 'No forwarding number configured'
-          };
-          break;
-        }
-
-        // Perform the transfer
-        console.log(`✅ Transferring call to ${restaurant.call_forwarding_number} - Reason: ${parsedArgs.reason}`);
-        const transferResult = await twilioService.transferCall(
-          callSid,
-          restaurant.call_forwarding_number,
-          `Let me transfer you to our staff. ${parsedArgs.customer_message || ''}`
-        );
-
-        if (transferResult.success) {
-          console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
-          result = {
-            success: true,
-            transferred_to: restaurant.call_forwarding_number,
-            reason: parsedArgs.reason
-          };
-        } else {
-          console.error('❌ Transfer failed:', transferResult.error);
-          result = {
-            success: false,
-            should_create_message: true,
-            reason: `Transfer failed: ${transferResult.error}`
-          };
+          if (transferResult.success) {
+            console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
+            result = {
+              success: true,
+              transferred_to: restaurant.call_forwarding_number,
+              message: "Transferring you now. Please hold."
+            };
+          } else {
+            console.error('❌ Transfer failed:', transferResult.error);
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+          }
         }
         break;
 
