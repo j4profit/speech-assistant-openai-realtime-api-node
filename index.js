@@ -941,7 +941,7 @@ wss.on('connection', (ws, _req) => {
             const transferResult = await twilioService.transferCall(
               callSid,
               restaurant.call_forwarding_number,
-              'Your order has been placed. Transferring you now to process your credit card payment.'
+              'Your order has been placed. Transferring you now to the restaurant to process your credit card payment. If no one is available, someone will call you back shortly.'
             );
 
             if (transferResult.success) {

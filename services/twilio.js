@@ -182,7 +182,7 @@ async function transferCall(callSid, transferNumber, message = 'Transferring you
 <Response>
     <Say voice="${config.voice.model}">${escapeXML(message)}</Say>
     <Dial callerId="${config.twilio.phoneNumber || ''}">${escapeXML(transferNumber)}</Dial>
-    <Say voice="${config.voice.model}">The transfer could not be completed. Please try again later.</Say>
+    <Say voice="${config.voice.model}">The restaurant is currently unavailable. Someone will call you back shortly to process your payment. Thank you.</Say>
     <Hangup/>
 </Response>`;
 
