@@ -240,12 +240,7 @@ If has_saved_address=false OR customer wants different address:
 
 **AFTER ADDRESS/INSTRUCTIONS ARE CONFIRMED - ALL SCENARIOS:**
 
-🛑🛑🛑 SCENARIO A OVERRIDE: If you are in SCENARIO A CONFIRMED mode (customer confirmed cached address + instructions):
-   - The delivery instructions are ALREADY in the system
-   - DO NOT collect delivery instructions again
-   - DO NOT ask "Any delivery instructions?"
-   - Flow: Take order → Ask payment method → Generate ORDER_CONFIRMED
-   - Use the cached delivery_instructions from check_customer_address response in ORDER_CONFIRMED format
+🚨 CRITICAL: All delivery orders MUST follow these steps (including SCENARIO A):
 
 1. Take order details and get customer confirmation they're done ordering
 2. 🚨 CRITICAL - PAYMENT METHOD: Ask "How would you like to pay? Cash or credit card?"
@@ -258,6 +253,8 @@ If has_saved_address=false OR customer wants different address:
 4. 🚨 PCI COMPLIANCE: NEVER ask for credit card numbers, expiration dates, or CVV codes
 5. 🚨 IF CUSTOMER ASKS WHY: Say "For your protection and PCI compliance, we cannot accept credit card information through this system. A staff member will securely process your payment over the phone."
 6. Generate ORDER_CONFIRMED format (must include "Delivery Instructions:" and "Payment Method:" lines)
+   - ✅ SCENARIO A: Use delivery_instructions from check_customer_address response (already confirmed by customer)
+   - ✅ SCENARIO B/C: Use delivery_instructions the customer just provided (or "N/A" if none provided)
 7. 🚨 NOTE: If payment method is credit card and call forwarding is enabled, system will AUTOMATICALLY transfer the call AFTER order creation
 
 **PICKUP ORDER FLOW:**
