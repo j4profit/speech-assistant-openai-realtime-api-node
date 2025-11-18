@@ -725,8 +725,8 @@ wss.on('connection', (ws, _req) => {
             'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
           };
 
-          const reason = functionToReason[tool_name];
-          console.log(`🔀 Transfer call request: ${tool_name} → ${reason}`);
+          const reason = functionToReason[functionName];
+          console.log(`🔀 Transfer call request: ${functionName} → ${reason}`);
 
           // Check if call forwarding is enabled
           if (!restaurant.call_forwarding_enabled) {
@@ -776,7 +776,7 @@ wss.on('connection', (ws, _req) => {
           const transferResult = await twilioService.transferCall(
             callSid,
             restaurant.call_forwarding_number,
-            transferMessages[tool_name]
+            transferMessages[functionName]
           );
 
           if (transferResult.success) {
