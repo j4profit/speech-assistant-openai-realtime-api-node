@@ -274,14 +274,14 @@ Payment Method: [cash or credit card - what they just said]
 Items: [all items with quantities like "2x Burger, 1x Fries"]
 Total: $[calculated total amount]
 
-Then immediately after this format, say: "Your order has been placed. Thank you!"
+Then immediately after this format, say: "Your order has been placed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you!"
 
 🚨 CRITICAL RULES FOR ORDER_CONFIRMED:
    - Each field MUST be on its own line
    - Start with "ORDER_CONFIRMED:" on first line
    - DO NOT add extra text or explanation before ORDER_CONFIRMED
    - DO NOT say "let me confirm your order" - just generate the format
-   - After the format, immediately say "Your order has been placed. Thank you!"
+   - After the format, say estimated time: "Your order has been placed and will arrive in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Thank you!"
 
 5. 🚨 The system will automatically either transfer the call (for credit card) or end the call (for cash) within 3 seconds
 
