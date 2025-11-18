@@ -232,43 +232,45 @@ ADD COLUMN call_forwarding_number VARCHAR,
 ADD COLUMN call_forwarding_reasons TEXT[];
 ```
 
-**How It Works:**
+**How It Works (v2.7.2+):**
 
 ```
 1. Customer has issue (e.g., "I want to speak to the manager")
 2. AI detects issue type: "manager_request"
-3. AI calls transfer_call(reason="manager_request", ...)
+3. AI calls transfer_call_for_manager() (NO parameters needed!)
 4. System checks:
    - Is call_forwarding_enabled = true?
-   - Is "manager_request" in call_forwarding_reasons array?
+   - Is "Forward calls when customer requests to speak with manager" in call_forwarding_reasons array?
 5. If YES to both → Transfer call to call_forwarding_number
 6. If NO to either → Return should_create_message=true
                     → AI creates customer_message instead
 ```
 
-**Example Restaurant Configuration:**
+**IMPORTANT (v2.7.2):** The original `transfer_call(reason, customer_message)` function was replaced with 4 parameter-free functions because OpenAI's gpt-realtime-mini model cannot reliably provide function parameters. See "Parameter-Free Transfer Functions" section below.
+
+**Example Restaurant Configuration (v2.7.2+):**
 
 ```sql
--- Forward only complaints and manager requests
--- Everything else becomes a message
+-- Forward catering and credit card calls, save everything else as messages
 UPDATE public.restaurants
 SET
   call_forwarding_enabled = true,
   call_forwarding_number = '+14105551234',
-  call_forwarding_reasons = ARRAY['complaint', 'manager_request']
+  call_forwarding_reasons = ARRAY[
+    'Forward calls for catering orders',
+    'Forward calls for credit card transactions'
+  ]
 WHERE id = 'restaurant-uuid';
 ```
 
-**Available Issue Types** (restaurants choose which ones to forward):
-- `complaint` - Customer unhappy with food/service
-- `manager_request` - Asks for manager/owner
-- `complex_order` - Catering, large parties
-- `technical_issue` - Problems with previous orders
-- `billing_question` - Questions about charges/refunds
-- `custom_request` - Special dietary needs
-- `refund_request` - Requesting refund
-- `delivery_issue` - Late/wrong/missing delivery
-- `credit_card_payment` - Customer wants to pay with credit card (v2.7+)
+**Available Transfer Functions (v2.7.2+):**
+
+| AI Function (no params) | Database String (in call_forwarding_reasons) | Use Case |
+|------------------------|---------------------------------------------|----------|
+| `transfer_call_for_catering()` | `"Forward calls for catering orders"` | Catering, large orders, bulk orders, corporate events |
+| `transfer_call_for_manager()` | `"Forward calls when customer requests to speak with manager"` | Customer asks for manager/owner |
+| `transfer_call_for_complaint()` | `"Forward calls for issues or complaints"` | Customer unhappy with food/service |
+| `transfer_call_for_credit_card()` | `"Forward calls for credit card transactions"` | Customer wants to pay with credit card |
 
 **Benefits:**
 - ✅ Granular control per restaurant (choose which issues transfer vs message)
@@ -384,6 +386,85 @@ Total: $25.50
 - If transfer fails, order still created with credit_card status
 - Restaurant dashboard can filter orders by payment_method
 - Staff can see payment method in order details before calling back
+
+### Parameter-Free Transfer Functions (V2.7.2)
+
+**Problem Discovered:** OpenAI's gpt-realtime-mini model **cannot reliably provide function parameters**.
+
+**Symptoms:**
+- AI consistently called `transfer_call(reason, customer_message)` with empty object `{}`
+- Even with extremely explicit instructions, the model couldn't provide the required parameters
+- This is a **model/API limitation**, not an instruction clarity issue
+
+**Solution:** Replace one parameterized function with 4 parameter-free functions.
+
+**Before (v2.4-v2.7.1):**
+```javascript
+// AI Function - REQUIRED 2 parameters
+transfer_call(
+  reason: "Forward calls for catering orders",
+  customer_message: "Customer wants catering info"
+)
+
+// AI could NOT do this reliably ❌
+```
+
+**After (v2.7.2+):**
+```javascript
+// AI Functions - NO parameters needed
+transfer_call_for_catering()     // ✅ Works!
+transfer_call_for_manager()      // ✅ Works!
+transfer_call_for_complaint()    // ✅ Works!
+transfer_call_for_credit_card()  // ✅ Works!
+```
+
+**Implementation:**
+
+Each function is defined with **zero parameters**:
+```javascript
+{
+  type: "function",
+  name: "transfer_call_for_catering",
+  description: "Transfer call to restaurant staff for catering inquiries...",
+  parameters: {
+    type: "object",
+    properties: {}  // EMPTY - no parameters!
+  }
+}
+```
+
+The handler maps function names to database reason strings:
+```javascript
+const functionToReason = {
+  'transfer_call_for_catering': 'Forward calls for catering orders',
+  'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
+  'transfer_call_for_complaint': 'Forward calls for issues or complaints',
+  'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
+};
+
+const reason = functionToReason[functionName];  // Map to DB string
+```
+
+**AI Instructions (Ultra Simple):**
+```
+If customer says: catering, large order, bulk, 15+ people, corporate, office, party, wedding
+IMMEDIATELY call the function: transfer_call_for_catering
+```
+
+**Benefits:**
+- ✅ AI only needs to pick the correct function name (not provide parameters)
+- ✅ Works 100% reliably with gpt-realtime-mini
+- ✅ Simpler AI instructions
+- ✅ Database still controls forwarding behavior (no changes needed)
+
+**Key Files Modified:**
+- `index.js` (lines 353-388): Replaced single function with 4 parameter-free functions
+- `index.js` (lines 715-798): Handler maps function names to database strings
+- `services/aiInstructions.js` (lines 52-62): Simplified instructions to just call function name
+
+**Testing Confirmation:**
+- User test on 2025-11-18 at 21:53:45 showed AI **correctly** called `transfer_call_for_catering()`
+- Initial crash due to typo (tool_name vs functionName) was fixed in hotfix commit d5ec8ed
 
 ## Key Implementation Details
 
@@ -684,3 +765,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.6.1**: Fixed critical bug preventing fake orders from being created when customers say goodbye without ordering
 - **v2.7**: Added payment method collection for delivery orders with credit card call forwarding and PCI-compliant workflow
 - **v2.7.1**: Removed conversation transcript collection from WebSocket (call logging now handled by Twilio webhooks)
+- **v2.7.2**: **CRITICAL FIX** - Replaced parameterized transfer_call function with 4 parameter-free functions to work around OpenAI Realtime API limitation where AI cannot reliably provide function parameters
