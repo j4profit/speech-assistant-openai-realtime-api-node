@@ -395,6 +395,47 @@ wss.on('connection', (ws, _req) => {
           },
           required: ["reason", "customer_message"]
         }
+      },
+      {
+        type: "function",
+        name: "submit_order",
+        description: "Submit a complete order to the system. After calling this, say brief confirmation to customer.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "Customer's name"
+            },
+            order_type: {
+              type: "string",
+              enum: ["delivery", "pickup"],
+              description: "Order type"
+            },
+            delivery_address: {
+              type: "string",
+              description: "Full delivery address (or N/A for pickup)"
+            },
+            delivery_instructions: {
+              type: "string",
+              description: "Delivery instructions (or N/A for pickup or if none provided)"
+            },
+            payment_method: {
+              type: "string",
+              enum: ["cash", "credit card", "N/A"],
+              description: "Payment method (cash, credit card, or N/A for pickup)"
+            },
+            items: {
+              type: "string",
+              description: "Order items with quantities (e.g., '2x Burger, 1x Fries')"
+            },
+            total_amount: {
+              type: "number",
+              description: "Total order amount in dollars"
+            }
+          },
+          required: ["customer_name", "order_type", "items", "total_amount"]
+        }
       }
     ];
   }
@@ -497,10 +538,8 @@ wss.on('connection', (ws, _req) => {
             console.log('Customer has spoken (detected after AI response #' + aiResponseCount + ')');
           }
 
-          // Check for order confirmation
-          if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
-            await processOrderFromTranscript(response.transcript);
-          }
+          // NOTE: Order confirmation now handled via submit_order function call (not transcript parsing)
+          // The old ORDER_CONFIRMED transcript parsing has been deprecated
 
           // Detect AI goodbye phrases and trigger graceful hangup
           // Only after customer has interacted (not just the initial greeting)
@@ -765,6 +804,188 @@ wss.on('connection', (ws, _req) => {
             success: false,
             should_create_message: true,
             reason: `Transfer failed: ${transferResult.error}`
+          };
+        }
+        break;
+
+      case 'submit_order':
+        console.log('📦 submit_order called:', parsedArgs);
+
+        // Build order info from function parameters
+        const orderInfo = {
+          customerName: parsedArgs.customer_name || 'Unknown',
+          customerPhone: customerPhone,
+          orderType: parsedArgs.order_type || 'pickup',
+          deliveryAddress: parsedArgs.delivery_address || 'N/A',
+          deliveryInstructions: parsedArgs.delivery_instructions === 'N/A' ? null : parsedArgs.delivery_instructions,
+          paymentMethod: parsedArgs.payment_method === 'N/A' ? null : parsedArgs.payment_method,
+          items: parsedArgs.items || '',
+          totalAmount: parsedArgs.total_amount || 0,
+          specialInstructions: ''
+        };
+
+        // Validate the order
+        const validation = validateOrder(orderInfo);
+        if (!validation.valid) {
+          console.log('❌ INVALID ORDER REJECTED:', validation.reason);
+          console.log('Order details:', orderInfo);
+          result = {
+            success: false,
+            error: validation.reason,
+            message: 'Order validation failed - please ensure all required information is provided'
+          };
+          break;
+        }
+
+        // Process the order (same logic as processOrderFromTranscript)
+        try {
+          orderProcessed = true;
+
+          const isDelivery = orderInfo.orderType === 'delivery';
+          const isCreditCard = orderInfo.paymentMethod && orderInfo.paymentMethod.toLowerCase() === 'credit card';
+
+          // Calculate pricing
+          const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
+          const subtotal = orderInfo.totalAmount;
+          const deliveryFee = isDelivery ? (restaurant.delivery_fee || 0) : 0;
+          const taxableAmount = subtotal + deliveryFee;
+          const taxAmount = taxableAmount * (restaurant.tax_rate || 0);
+          const finalTotal = taxableAmount + taxAmount;
+
+          // Determine order status
+          let orderStatus = 'pending';
+          if (isCreditCard) {
+            orderStatus = 'credit_card';
+          }
+
+          // Create order ticket
+          const ticket = createOrderTicket({
+            customerName: orderInfo.customerName,
+            customerPhone: orderInfo.customerPhone,
+            orderType: orderInfo.orderType,
+            deliveryAddress: orderInfo.deliveryAddress,
+            deliveryInstructions: orderInfo.deliveryInstructions,
+            paymentMethod: orderInfo.paymentMethod,
+            items: orderInfo.items,
+            specialInstructions: orderInfo.specialInstructions,
+            subtotal: subtotal,
+            deliveryFee: deliveryFee,
+            taxRate: restaurant.tax_rate || 0,
+            taxAmount: taxAmount,
+            totalAmount: finalTotal,
+            readyTime: readyTimeInfo.readyTimeString,
+            restaurantName: restaurant.name
+          });
+
+          // Create order in database
+          const orderData = {
+            restaurant_id: restaurant.id,
+            customer_name: orderInfo.customerName,
+            customer_phone: orderInfo.customerPhone,
+            order_type: orderInfo.orderType,
+            delivery_address: orderInfo.deliveryAddress,
+            delivery_instructions: orderInfo.deliveryInstructions,
+            delivery_address_id: isDelivery ? deliveryAddressId : null,
+            payment_method: orderInfo.paymentMethod || null,
+            order_details: ticket,
+            total_amount: finalTotal,
+            special_instructions: orderInfo.specialInstructions || '',
+            call_sid: callSid,
+            ready_time: readyTimeInfo.readyTimeString,
+            estimated_ready_at: readyTimeInfo.readyTime,
+            status: orderStatus
+          };
+
+          console.log('Creating order with delivery_address_id:', deliveryAddressId);
+
+          // Update delivery instructions if needed
+          if (isDelivery && deliveryAddressId && orderInfo.deliveryInstructions) {
+            await database.updateDeliveryInstructions(deliveryAddressId, orderInfo.deliveryInstructions);
+          }
+
+          const order = await database.createOrder(orderData);
+
+          if (order) {
+            console.log('Order created successfully:', order.id);
+            console.log('\n' + ticket + '\n');
+
+            stateManager.updateCallData(callSid, { order_id: order.id });
+
+            // Check if we need to transfer for credit card payment
+            if (isCreditCard) {
+              const forwardingReasons = restaurant.call_forwarding_reasons || [];
+              const shouldTransfer = restaurant.call_forwarding_enabled &&
+                                    forwardingReasons.includes('credit_card_payment') &&
+                                    restaurant.call_forwarding_number;
+
+              if (shouldTransfer) {
+                console.log('💳 Credit card order - transferring call for payment processing');
+
+                const transferResult = await twilioService.transferCall(
+                  callSid,
+                  restaurant.call_forwarding_number,
+                  'Your order has been placed. Transferring you now to the restaurant to process your credit card payment. If no one is available, someone will call you back shortly.'
+                );
+
+                if (transferResult.success) {
+                  console.log(`✅ Call transferred successfully for credit card payment to ${restaurant.call_forwarding_number}`);
+                  result = {
+                    success: true,
+                    order_id: order.id,
+                    transferred: true,
+                    ready_time: readyTimeInfo.readyTimeString,
+                    total_minutes: readyTimeInfo.totalMinutes
+                  };
+                } else {
+                  console.error('❌ Credit card payment transfer failed:', transferResult.error);
+                  hangupTimer = setTimeout(async () => {
+                    await initiateHangup('order_completed_transfer_failed');
+                  }, 5000);
+                  result = {
+                    success: true,
+                    order_id: order.id,
+                    transferred: false,
+                    ready_time: readyTimeInfo.readyTimeString,
+                    total_minutes: readyTimeInfo.totalMinutes
+                  };
+                }
+              } else {
+                console.log('💳 Credit card order created but call forwarding not configured - normal hangup');
+                hangupTimer = setTimeout(async () => {
+                  await initiateHangup('order_completed');
+                }, 5000);
+                result = {
+                  success: true,
+                  order_id: order.id,
+                  transferred: false,
+                  ready_time: readyTimeInfo.readyTimeString,
+                  total_minutes: readyTimeInfo.totalMinutes
+                };
+              }
+            } else {
+              // Cash order or no payment method - normal hangup
+              hangupTimer = setTimeout(async () => {
+                await initiateHangup('order_completed');
+              }, 5000);
+              result = {
+                success: true,
+                order_id: order.id,
+                transferred: false,
+                ready_time: readyTimeInfo.readyTimeString,
+                total_minutes: readyTimeInfo.totalMinutes
+              };
+            }
+          } else {
+            result = {
+              success: false,
+              error: 'Failed to create order in database'
+            };
+          }
+        } catch (error) {
+          console.error('Error processing order:', error);
+          result = {
+            success: false,
+            error: error.message
           };
         }
         break;
