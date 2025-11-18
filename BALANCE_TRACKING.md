@@ -2,16 +2,18 @@
 
 ## Overview
 
-The `call_logs` table now includes a `balance_after_call` field that records the restaurant's remaining balance (in minutes) after each call deduction. This provides a complete audit trail for billing and accounting purposes.
+The `call_logs` table now includes `balance_before_call` and `balance_after_call` fields that record the restaurant's balance (in minutes) before and after each call deduction. This provides a complete transaction-style audit trail for billing and accounting purposes.
 
 ## What Was Added
 
-### Database Field
+### Database Fields
 
 **Table:** `call_logs`
-**New Column:** `balance_after_call` (NUMERIC)
+**New Columns:**
+- `balance_before_call` (NUMERIC) - Balance BEFORE call deduction
+- `balance_after_call` (NUMERIC) - Balance AFTER call deduction
 
-This field stores the value of `restaurant_balances.current_balance_minutes` immediately after the call minutes are deducted.
+These fields store the value of `restaurant_balances.current_balance_minutes` immediately before and after the call minutes are deducted, giving you a complete transaction record.
 
 ### How It Works
 
@@ -20,24 +22,24 @@ This field stores the value of `restaurant_balances.current_balance_minutes` imm
    ↓
 2. Twilio webhook calls create-call-log edge function
    ↓
-3. Edge function deducts minutes from restaurant_balances.total_used_minutes
+3. Edge function fetches current balance → saves to balance_before_call
    ↓
-4. Edge function fetches updated restaurant_balances.current_balance_minutes
+4. Edge function deducts minutes from restaurant_balances.total_used_minutes
    ↓
-5. Edge function saves balance to call_logs.balance_after_call
+5. Edge function fetches updated balance → saves to balance_after_call
    ↓
-6. Complete audit trail created
+6. Complete transaction record created
 ```
 
 ### Example Data
 
-| call_sid | restaurant_id | call_duration | minutes_billed | balance_after_call |
-|----------|---------------|---------------|----------------|-------------------|
-| CA123... | rest-uuid-1   | 127           | 3              | 297.0             |
-| CA124... | rest-uuid-1   | 65            | 2              | 295.0             |
-| CA125... | rest-uuid-1   | 180           | 3              | 292.0             |
+| call_sid | call_duration | minutes_billed | balance_before_call | balance_after_call | difference |
+|----------|---------------|----------------|--------------------|--------------------|-----------|
+| CA123... | 127           | 3              | 300.0              | 297.0              | -3.0      |
+| CA124... | 65            | 2              | 297.0              | 295.0              | -2.0      |
+| CA125... | 180           | 3              | 295.0              | 292.0              | -3.0      |
 
-This shows the restaurant started with 300 minutes, and you can track the balance decreasing with each call.
+This shows a complete transaction ledger - you can see the balance before, the deduction, and the balance after for every call.
 
 ## Deployment Steps
 
@@ -46,14 +48,17 @@ This shows the restaurant started with 300 minutes, and you can track the balanc
 Run this SQL in your Supabase SQL Editor:
 
 ```sql
--- Add balance tracking field to call_logs table
+-- Add balance tracking fields to call_logs table
 ALTER TABLE public.call_logs
+ADD COLUMN balance_before_call NUMERIC,
 ADD COLUMN balance_after_call NUMERIC;
 
--- Add helpful comment
-COMMENT ON COLUMN public.call_logs.balance_after_call IS 'Restaurant balance (in minutes) remaining after this call was deducted from restaurant_balances.current_balance_minutes';
+-- Add helpful comments
+COMMENT ON COLUMN public.call_logs.balance_before_call IS 'Restaurant balance (in minutes) BEFORE this call was deducted from restaurant_balances.current_balance_minutes';
+COMMENT ON COLUMN public.call_logs.balance_after_call IS 'Restaurant balance (in minutes) AFTER this call was deducted from restaurant_balances.current_balance_minutes';
 
--- Create index for balance queries
+-- Create indexes for balance queries
+CREATE INDEX IF NOT EXISTS idx_call_logs_balance_before_call ON public.call_logs(balance_before_call);
 CREATE INDEX IF NOT EXISTS idx_call_logs_balance_after_call ON public.call_logs(balance_after_call);
 ```
 
@@ -86,7 +91,9 @@ SELECT
   call_sid,
   call_duration,
   minutes_billed,
+  balance_before_call,
   balance_after_call,
+  (balance_before_call - balance_after_call) as actual_deduction,
   billing_status,
   billing_processed_at
 FROM call_logs
@@ -94,58 +101,54 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-You should see `balance_after_call` populated for billed calls.
+You should see both `balance_before_call` and `balance_after_call` populated for billed calls, and the difference should equal `minutes_billed`.
 
 ## Use Cases
 
-### 1. Balance Audit Trail
+### 1. Complete Transaction Ledger
 
-Track exactly when and how the restaurant's balance decreased:
+View complete transaction history with before/after balances:
 
 ```sql
 SELECT
   created_at,
+  call_sid,
   call_duration,
   minutes_billed,
+  balance_before_call,
   balance_after_call,
-  balance_after_call + minutes_billed as balance_before_call
+  (balance_before_call - balance_after_call) as actual_deduction
 FROM call_logs
 WHERE restaurant_id = 'your-restaurant-uuid'
   AND billing_status = 'billed'
-ORDER BY created_at ASC;
+ORDER BY created_at DESC;
 ```
 
 ### 2. Verify Billing Accuracy
 
-Check if balance calculations are correct:
+Check if deductions match expected amounts:
 
 ```sql
--- Compare expected vs actual balance changes
-WITH balance_changes AS (
-  SELECT
-    id,
-    call_sid,
-    minutes_billed,
-    balance_after_call,
-    LAG(balance_after_call) OVER (ORDER BY created_at) as previous_balance
-  FROM call_logs
-  WHERE restaurant_id = 'your-restaurant-uuid'
-    AND billing_status = 'billed'
-  ORDER BY created_at
-)
+-- Verify that balance_before - minutes_billed = balance_after
 SELECT
   call_sid,
   minutes_billed,
-  previous_balance,
+  balance_before_call,
   balance_after_call,
-  (previous_balance - minutes_billed) as expected_balance,
+  (balance_before_call - minutes_billed) as expected_balance_after,
+  (balance_before_call - balance_after_call) as actual_deduction,
   CASE
-    WHEN (previous_balance - minutes_billed) = balance_after_call
+    WHEN (balance_before_call - minutes_billed) = balance_after_call
     THEN '✅ Correct'
+    WHEN ABS((balance_before_call - minutes_billed) - balance_after_call) < 0.01
+    THEN '✅ Correct (rounding)'
     ELSE '❌ Mismatch'
-  END as status
-FROM balance_changes
-WHERE previous_balance IS NOT NULL;
+  END as accuracy_check
+FROM call_logs
+WHERE restaurant_id = 'your-restaurant-uuid'
+  AND billing_status = 'billed'
+  AND balance_before_call IS NOT NULL
+ORDER BY created_at DESC;
 ```
 
 ### 3. Low Balance Detection
@@ -166,7 +169,7 @@ ORDER BY created_at DESC;
 
 ### 4. Monthly Accounting Report
 
-Generate monthly billing reports:
+Generate monthly billing reports with balance trends:
 
 ```sql
 SELECT
@@ -174,7 +177,8 @@ SELECT
   COUNT(*) as total_calls,
   SUM(minutes_billed) as total_minutes_used,
   MIN(balance_after_call) as lowest_balance,
-  MAX(balance_after_call) as highest_balance
+  MAX(balance_before_call) as highest_balance,
+  (MAX(balance_before_call) - MIN(balance_after_call)) as total_balance_decrease
 FROM call_logs
 WHERE restaurant_id = 'your-restaurant-uuid'
   AND billing_status = 'billed'
@@ -186,7 +190,7 @@ ORDER BY month DESC;
 
 ### When Balance is NOT Saved
 
-The `balance_after_call` field will be `NULL` in these cases:
+The `balance_before_call` and `balance_after_call` fields will be `NULL` in these cases:
 
 1. **billing_status = 'skipped'** - Call had no duration or didn't complete
 2. **billing_status = 'failed'** - Balance update failed (e.g., restaurant_balances record not found)
@@ -208,52 +212,66 @@ The database automatically calculates the new balance using the updated `total_u
 
 ### Accuracy
 
-The balance snapshot is taken **immediately after** the deduction, so it represents the exact state at that moment. However:
+Balance snapshots are taken:
+1. **Before deduction:** Captured from initial query
+2. **After deduction:** Fetched immediately after update
+
+This provides accurate transaction records. However:
 
 - If multiple calls end simultaneously, there may be minor race conditions
-- The balance is fetched in a separate query, so there's a small time window
+- The after-balance is fetched in a separate query, so there's a small time window
 - For critical accuracy, consider using database transactions (future enhancement)
+
+**Verification:** You can verify accuracy by checking if `balance_before_call - minutes_billed = balance_after_call`
 
 ## Troubleshooting
 
-### balance_after_call is NULL for new calls
+### balance_before_call or balance_after_call is NULL for new calls
 
 **Check:**
-1. Was the database migration applied? Run: `SELECT balance_after_call FROM call_logs LIMIT 1;`
+1. Was the database migration applied? Run: `SELECT balance_before_call, balance_after_call FROM call_logs LIMIT 1;`
 2. Was the edge function updated? Check deployment timestamp in Supabase dashboard
 3. Is the call being billed? Check: `SELECT billing_status FROM call_logs WHERE call_sid = 'CA...'`
 
-### balance_after_call doesn't match expected value
+### Deduction doesn't match (balance_before - balance_after ≠ minutes_billed)
 
 **Possible causes:**
-1. Restaurant had purchases between calls
-2. Manual adjustments were made to `restaurant_balances`
+1. Restaurant had purchases added between the before/after snapshots
+2. Manual adjustments were made to `restaurant_balances` during the call
 3. Multiple concurrent calls processed simultaneously
+4. Database transaction timing issue
 
 **Verify:**
 ```sql
 SELECT
-  total_purchased_minutes,
-  total_used_minutes,
-  current_balance_minutes
-FROM restaurant_balances
-WHERE restaurant_id = 'your-restaurant-uuid';
+  call_sid,
+  minutes_billed,
+  balance_before_call,
+  balance_after_call,
+  (balance_before_call - balance_after_call) as actual_deduction,
+  (balance_before_call - balance_after_call) - minutes_billed as discrepancy
+FROM call_logs
+WHERE restaurant_id = 'your-restaurant-uuid'
+  AND billing_status = 'billed'
+  AND balance_before_call IS NOT NULL
+  AND ABS((balance_before_call - balance_after_call) - minutes_billed) > 0.01
+ORDER BY created_at DESC;
 ```
 
 ## Future Enhancements
 
 Potential improvements:
 
-1. **Add balance_before_call** - Capture balance before deduction for easier auditing
-2. **Transaction support** - Use database transactions to ensure atomic balance updates
-3. **Balance alerts** - Trigger alerts when balance drops below threshold
-4. **Billing reports dashboard** - Web UI to visualize balance history
+1. **Transaction support** - Use database transactions to ensure atomic balance updates
+2. **Balance alerts** - Trigger alerts when balance drops below threshold
+3. **Billing reports dashboard** - Web UI to visualize balance history
+4. **Refund tracking** - Track balance increases from refunds or adjustments
 
 ## Summary
 
-✅ **Added:** `balance_after_call` field to `call_logs` table
-✅ **Purpose:** Complete audit trail for billing and accounting
+✅ **Added:** `balance_before_call` and `balance_after_call` fields to `call_logs` table
+✅ **Purpose:** Complete transaction-style audit trail for billing and accounting
 ✅ **Populated:** Automatically by `create-call-log` edge function
-✅ **Use Cases:** Balance tracking, billing verification, accounting reports
+✅ **Use Cases:** Complete transaction ledger, billing verification, accounting reports, discrepancy detection
 
-This feature provides transparency and accountability for the prepaid minutes billing system.
+This feature provides full transparency and accountability for the prepaid minutes billing system with a complete before/after snapshot for every call deduction.

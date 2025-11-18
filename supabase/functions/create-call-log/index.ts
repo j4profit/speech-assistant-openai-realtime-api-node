@@ -77,8 +77,11 @@ serve(async (req)=>{
     if (callLog.restaurant_id && callLog.call_duration && callLog.call_duration > 0 && callLog.call_status === "completed") {
       const billed_minutes = Math.ceil(callLog.call_duration / 60);
       // Fetch balance row
-      const { data: balanceRow, error: fetchError } = await supabase.from("restaurant_balances").select("id, total_used_minutes").eq("restaurant_id", callLog.restaurant_id).maybeSingle();
+      const { data: balanceRow, error: fetchError } = await supabase.from("restaurant_balances").select("id, total_used_minutes, current_balance_minutes").eq("restaurant_id", callLog.restaurant_id).maybeSingle();
       if (!fetchError && balanceRow) {
+        // Capture balance BEFORE deduction
+        const balance_before = balanceRow.current_balance_minutes;
+
         const new_total_used = balanceRow.total_used_minutes + billed_minutes;
         // Update restaurant's usage
         const { error: updateError } = await supabase.from("restaurant_balances").update({
@@ -86,14 +89,15 @@ serve(async (req)=>{
           last_updated: new Date().toISOString()
         }).eq("id", balanceRow.id);
         if (!updateError) {
-          // Fetch updated balance to get current_balance_minutes after deduction
+          // Fetch updated balance to get current_balance_minutes AFTER deduction
           const { data: updatedBalance } = await supabase.from("restaurant_balances").select("current_balance_minutes").eq("id", balanceRow.id).single();
 
-          // Update log with billing and balance snapshot
+          // Update log with billing and complete balance transaction record
           const { data: updatedLog } = await supabase.from("call_logs").update({
             billing_status: "billed",
             billing_processed_at: new Date().toISOString(),
             minutes_billed: billed_minutes,
+            balance_before_call: balance_before,
             balance_after_call: updatedBalance?.current_balance_minutes || null
           }).eq("id", callLog.id).select().single();
           updatedCallLog = updatedLog || callLog;
