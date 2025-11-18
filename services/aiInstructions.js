@@ -52,10 +52,10 @@ The restaurant is extremely busy and cannot take phone calls right now, so you'r
 ${restaurant.call_forwarding_enabled && restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `🚨🚨🚨 CRITICAL: CATERING & LARGE ORDERS MUST BE TRANSFERRED 🚨🚨🚨
 Call forwarding IS ENABLED for catering/large orders at this restaurant.
 If customer mentions ANY of these, IMMEDIATELY call transfer_call function:
-- "Catering" - call transfer_call(reason="complex_order", customer_message="Catering request")
-- Large quantities (15+ people, 20 pizzas, etc.) - call transfer_call(reason="complex_order", customer_message="Large order for X people")
-- Corporate/office events - call transfer_call(reason="complex_order", customer_message="Corporate event")
-- Weddings, parties, special events - call transfer_call(reason="complex_order", customer_message="Special event")
+- "Catering" - call transfer_call(reason="Forward calls for catering orders", customer_message="Catering request")
+- Large quantities (15+ people, 20 pizzas, etc.) - call transfer_call(reason="Forward calls for catering orders", customer_message="Large order for X people")
+- Corporate/office events - call transfer_call(reason="Forward calls for catering orders", customer_message="Corporate event")
+- Weddings, parties, special events - call transfer_call(reason="Forward calls for catering orders", customer_message="Special event")
 The call will be transferred to staff immediately. DO NOT try to take these orders yourself!` : `🚨🚨🚨 CRITICAL: CATERING & LARGE ORDERS NEED STAFF ATTENTION 🚨🚨🚨
 Call forwarding is NOT enabled for catering at this restaurant.
 If customer mentions ANY of these, IMMEDIATELY call create_customer_message function:
@@ -135,13 +135,13 @@ Identify what kind of issue the customer has (use these EXACT reason codes):
 **🍽️ CATERING ORDER DETECTION (CRITICAL - DO NOT SKIP):**
 ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `✅ Catering call forwarding IS ENABLED - call transfer_call function:` : `❌ Catering call forwarding NOT enabled - call create_customer_message function:`}
 🚨 When customer says ANY of these phrases:
-- ANY mention of "catering" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Catering inquiry")` : `create_customer_message(priority="high", subject="Catering Inquiry")`}
-- "I need food for X people" where X >= 15 → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Order for X people")` : `create_customer_message(priority="high", subject="Large Order Request")`}
-- "Office lunch/party/event" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Corporate event")` : `create_customer_message(priority="high", subject="Corporate Event")`}
-- "Wedding", "party", "celebration" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Special event")` : `create_customer_message(priority="high", subject="Special Event")`}
-- "Bulk order", "large order" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Large order")` : `create_customer_message(priority="high", subject="Bulk Order")`}
-- "Can you cater..." → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Catering inquiry")` : `create_customer_message(priority="high", subject="Catering Inquiry")`}
-- Numbers like "20 pizzas", "50 burgers" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="complex_order", customer_message="Bulk order")` : `create_customer_message(priority="high", subject="Bulk Order")`}
+- ANY mention of "catering" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Catering inquiry")` : `create_customer_message(priority="high", subject="Catering Inquiry")`}
+- "I need food for X people" where X >= 15 → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Order for X people")` : `create_customer_message(priority="high", subject="Large Order Request")`}
+- "Office lunch/party/event" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Corporate event")` : `create_customer_message(priority="high", subject="Corporate Event")`}
+- "Wedding", "party", "celebration" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Special event")` : `create_customer_message(priority="high", subject="Special Event")`}
+- "Bulk order", "large order" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Large order")` : `create_customer_message(priority="high", subject="Bulk Order")`}
+- "Can you cater..." → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Catering inquiry")` : `create_customer_message(priority="high", subject="Catering Inquiry")`}
+- Numbers like "20 pizzas", "50 burgers" → ${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `transfer_call(reason="Forward calls for catering orders", customer_message="Bulk order")` : `create_customer_message(priority="high", subject="Bulk Order")`}
 
 **STEP 2: Try to transfer the call**
 🚨 CRITICAL: CALL the transfer_call function - don't just SAY you'll transfer!
@@ -154,8 +154,8 @@ Examples - THESE ARE FUNCTION CALLS:
 - Customer: "I want to speak to the manager" → CALL transfer_call(reason="manager_request", customer_message="Customer requests manager")
 - Customer: "My order never arrived" → CALL transfer_call(reason="delivery_issue", customer_message="Order never arrived")
 - Customer: "This food was terrible" → CALL transfer_call(reason="complaint", customer_message="Unhappy with food quality")
-- Customer: "I need catering" → CALL transfer_call(reason="complex_order", customer_message="Catering inquiry")
-- Customer: "Do you do catering?" → CALL transfer_call(reason="complex_order", customer_message="Asking about catering services")
+- Customer: "I need catering" → CALL transfer_call(reason="Forward calls for catering orders", customer_message="Catering inquiry")
+- Customer: "Do you do catering?" → CALL transfer_call(reason="Forward calls for catering orders", customer_message="Asking about catering services")
 
 **STEP 3: If transfer fails or not enabled for that issue type**
 - If transfer_call returns should_create_message=true
@@ -467,7 +467,7 @@ You must actually CALL the functions when customers express these intents:
 2. **When customer wants to modify/cancel existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
 3. **When customer provides ANY delivery address (with numbers and street names) FOR DELIVERY ORDERS ONLY** → call validate_delivery_address (include customer_name if known)
 4. **When customer chooses payment method FOR DELIVERY ORDERS ONLY** → Remember their choice ("cash" or "credit card") for submit_order function
-${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `5. 🚨 **When customer mentions CATERING or LARGE ORDERS (15+ people)** → IMMEDIATELY call transfer_call(reason="complex_order", customer_message="...") ✅ FORWARDING ENABLED` : `5. 🚨 **When customer mentions CATERING or LARGE ORDERS (15+ people)** → IMMEDIATELY call create_customer_message(priority="high", subject="Catering Inquiry") ❌ FORWARDING NOT ENABLED`}
+${restaurant.call_forwarding_reasons && restaurant.call_forwarding_reasons.includes('Forward calls for catering orders') ? `5. 🚨 **When customer mentions CATERING or LARGE ORDERS (15+ people)** → IMMEDIATELY call transfer_call(reason="Forward calls for catering orders", customer_message="...") ✅ FORWARDING ENABLED` : `5. 🚨 **When customer mentions CATERING or LARGE ORDERS (15+ people)** → IMMEDIATELY call create_customer_message(priority="high", subject="Catering Inquiry") ❌ FORWARDING NOT ENABLED`}
 ${restaurant.call_forwarding_enabled ? `6. **When you detect ANY other issue requiring staff** → FIRST try transfer_call function (complaint, manager_request, technical_issue, etc.)
 7. **If transfer fails or not enabled for that issue type** → THEN call create_customer_message function` : `6. **When you detect ANY issue requiring staff** → ALWAYS call create_customer_message function (complaint, manager_request, technical_issue, etc.)`}
 8. **When customer completes an order** → call submit_order function
