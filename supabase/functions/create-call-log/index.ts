@@ -13,6 +13,7 @@ serve(async (req)=>{
   }
   try {
     const callData = await req.json();
+    // Validate core data
     if (!callData.call_sid) {
       return new Response(JSON.stringify({
         error: "Missing call_sid"
@@ -25,14 +26,20 @@ serve(async (req)=>{
       });
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
-    // Compose call log data for insert
+    // Try restaurant lookup by phone if restaurant_id is missing
+    let restaurant_id = callData.restaurant_id || null;
+    if (!restaurant_id && callData.to_number) {
+      const { data: restaurant } = await supabase.from("restaurants").select("id").eq("phone_number", callData.to_number).maybeSingle();
+      if (restaurant) restaurant_id = restaurant.id;
+    }
+    // Prepare log record
     const callLogData = {
       call_sid: callData.call_sid,
-      restaurant_id: callData.restaurant_id || null,
+      restaurant_id,
       from_number: callData.from_number || null,
       to_number: callData.to_number || null,
-      call_status: callData.call_status || "completed",
-      call_direction: callData.call_direction || "inbound",
+      call_status: callData.call_status || null,
+      call_direction: callData.call_direction || null,
       caller_country: callData.caller_country || null,
       caller_state: callData.caller_state || null,
       caller_city: callData.caller_city || null,
@@ -64,34 +71,34 @@ serve(async (req)=>{
         status: 500
       });
     }
-    // Process usage - add to total_used_minutes
+    // Only bill for completed calls
     let updatedCallLog = callLog;
     let balanceError = null;
-    // Check if call should be billed (only needs restaurant_id and duration > 0)
-    if (callLog.restaurant_id && callLog.call_duration && callLog.call_duration > 0) {
-      // Round UP call_duration (seconds) to minutes
+    if (callLog.restaurant_id && callLog.call_duration && callLog.call_duration > 0 && callLog.call_status === "completed") {
       const billed_minutes = Math.ceil(callLog.call_duration / 60);
-      // Fetch restaurant balance
+      // Fetch balance row
       const { data: balanceRow, error: fetchError } = await supabase.from("restaurant_balances").select("id, total_used_minutes").eq("restaurant_id", callLog.restaurant_id).maybeSingle();
       if (!fetchError && balanceRow) {
-        // INCREMENT total_used_minutes
         const new_total_used = balanceRow.total_used_minutes + billed_minutes;
-        // Update restaurant balance
+        // Update restaurant's usage
         const { error: updateError } = await supabase.from("restaurant_balances").update({
           total_used_minutes: new_total_used,
           last_updated: new Date().toISOString()
         }).eq("id", balanceRow.id);
         if (!updateError) {
-          // Update call_log with billing details
+          // Fetch updated balance to get current_balance_minutes after deduction
+          const { data: updatedBalance } = await supabase.from("restaurant_balances").select("current_balance_minutes").eq("id", balanceRow.id).single();
+
+          // Update log with billing and balance snapshot
           const { data: updatedLog } = await supabase.from("call_logs").update({
             billing_status: "billed",
             billing_processed_at: new Date().toISOString(),
-            minutes_billed: billed_minutes
+            minutes_billed: billed_minutes,
+            balance_after_call: updatedBalance?.current_balance_minutes || null
           }).eq("id", callLog.id).select().single();
           updatedCallLog = updatedLog || callLog;
         } else {
           balanceError = updateError.message;
-          // Mark as failed
           await supabase.from("call_logs").update({
             billing_status: "failed",
             billing_processed_at: new Date().toISOString()
@@ -99,14 +106,12 @@ serve(async (req)=>{
         }
       } else {
         balanceError = fetchError?.message || "Restaurant balance not found";
-        // Mark as failed
         await supabase.from("call_logs").update({
           billing_status: "failed",
           billing_processed_at: new Date().toISOString()
         }).eq("id", callLog.id);
       }
     } else {
-      // Mark as skipped (no duration or no restaurant)
       await supabase.from("call_logs").update({
         billing_status: "skipped",
         billing_processed_at: new Date().toISOString()
@@ -126,7 +131,7 @@ serve(async (req)=>{
   } catch (error) {
     console.error("Edge function error:", error);
     return new Response(JSON.stringify({
-      error: error.message
+      error: error instanceof Error ? error.message : "Unknown error"
     }), {
       headers: {
         ...corsHeaders,
