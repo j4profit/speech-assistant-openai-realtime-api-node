@@ -732,6 +732,11 @@ wss.on('connection', (ws, _req) => {
         }
 
         // Check if the reason is in the forwarding reasons array
+        // Valid reason codes (must match enum in getAITools() transfer_call function):
+        // - complaint, manager_request, complex_order, technical_issue
+        // - billing_question, custom_request, refund_request, delivery_issue
+        // - credit_card_payment
+        // Database field call_forwarding_reasons must contain these EXACT codes
         const forwardingReasons = restaurant.call_forwarding_reasons || [];
         const shouldForward = forwardingReasons.includes(parsedArgs.reason);
 
