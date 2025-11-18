@@ -809,7 +809,7 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'submit_order':
-        console.log('📦 submit_order called:', parsedArgs);
+        console.log('📦 submit_order called with parameters:', JSON.stringify(parsedArgs, null, 2));
 
         // Build order info from function parameters
         const orderInfo = {
@@ -824,18 +824,22 @@ wss.on('connection', (ws, _req) => {
           specialInstructions: ''
         };
 
+        console.log('📦 Built order info:', JSON.stringify(orderInfo, null, 2));
+
         // Validate the order
         const validation = validateOrder(orderInfo);
         if (!validation.valid) {
           console.log('❌ INVALID ORDER REJECTED:', validation.reason);
-          console.log('Order details:', orderInfo);
+          console.log('❌ Order details:', JSON.stringify(orderInfo, null, 2));
           result = {
             success: false,
             error: validation.reason,
-            message: 'Order validation failed - please ensure all required information is provided'
+            message: `Order validation failed: ${validation.reason}. Please check the order details and try again.`
           };
           break;
         }
+
+        console.log('✅ Order validation passed');
 
         // Process the order (same logic as processOrderFromTranscript)
         try {
@@ -844,13 +848,28 @@ wss.on('connection', (ws, _req) => {
           const isDelivery = orderInfo.orderType === 'delivery';
           const isCreditCard = orderInfo.paymentMethod && orderInfo.paymentMethod.toLowerCase() === 'credit card';
 
-          // Calculate pricing
+          // AI calculates the final total - we use it as-is
           const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
-          const subtotal = orderInfo.totalAmount;
+          const finalTotal = orderInfo.totalAmount; // AI's calculated total (food + delivery + tax)
+
+          // Back-calculate components for display purposes only
           const deliveryFee = isDelivery ? (restaurant.delivery_fee || 0) : 0;
-          const taxableAmount = subtotal + deliveryFee;
-          const taxAmount = taxableAmount * (restaurant.tax_rate || 0);
-          const finalTotal = taxableAmount + taxAmount;
+          const taxRate = restaurant.tax_rate || 0;
+          // Work backwards: finalTotal = subtotal + deliveryFee + tax
+          // tax = (subtotal + deliveryFee) * taxRate
+          // finalTotal = subtotal + deliveryFee + ((subtotal + deliveryFee) * taxRate)
+          // finalTotal = (subtotal + deliveryFee) * (1 + taxRate)
+          // subtotal + deliveryFee = finalTotal / (1 + taxRate)
+          const subtotalPlusDelivery = finalTotal / (1 + taxRate);
+          const subtotal = subtotalPlusDelivery - deliveryFee;
+          const taxAmount = finalTotal - subtotalPlusDelivery;
+
+          console.log('💰 Order pricing (AI calculated total, components for display):');
+          console.log(`   AI provided total: $${finalTotal.toFixed(2)}`);
+          console.log(`   Back-calculated food subtotal: $${subtotal.toFixed(2)}`);
+          console.log(`   Delivery fee: $${deliveryFee.toFixed(2)}`);
+          console.log(`   Tax amount: $${taxAmount.toFixed(2)}`);
+          console.log(`   FINAL TOTAL: $${finalTotal.toFixed(2)} (from AI)`);
 
           // Determine order status
           let orderStatus = 'pending';
@@ -934,7 +953,9 @@ wss.on('connection', (ws, _req) => {
                     order_id: order.id,
                     transferred: true,
                     ready_time: readyTimeInfo.readyTimeString,
-                    total_minutes: readyTimeInfo.totalMinutes
+                    total_minutes: readyTimeInfo.totalMinutes,
+                    subtotal: subtotal,
+                    final_total: finalTotal
                   };
                 } else {
                   console.error('❌ Credit card payment transfer failed:', transferResult.error);
@@ -946,7 +967,9 @@ wss.on('connection', (ws, _req) => {
                     order_id: order.id,
                     transferred: false,
                     ready_time: readyTimeInfo.readyTimeString,
-                    total_minutes: readyTimeInfo.totalMinutes
+                    total_minutes: readyTimeInfo.totalMinutes,
+                    subtotal: subtotal,
+                    final_total: finalTotal
                   };
                 }
               } else {
@@ -959,7 +982,9 @@ wss.on('connection', (ws, _req) => {
                   order_id: order.id,
                   transferred: false,
                   ready_time: readyTimeInfo.readyTimeString,
-                  total_minutes: readyTimeInfo.totalMinutes
+                  total_minutes: readyTimeInfo.totalMinutes,
+                  subtotal: subtotal,
+                  final_total: finalTotal
                 };
               }
             } else {
@@ -972,7 +997,9 @@ wss.on('connection', (ws, _req) => {
                 order_id: order.id,
                 transferred: false,
                 ready_time: readyTimeInfo.readyTimeString,
-                total_minutes: readyTimeInfo.totalMinutes
+                total_minutes: readyTimeInfo.totalMinutes,
+                subtotal: subtotal,
+                final_total: finalTotal
               };
             }
           } else {
