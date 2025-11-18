@@ -257,32 +257,6 @@ wss.on('connection', (ws, _req) => {
     });
   }
 
-  // Accumulate usage data from OpenAI responses
-  function accumulateUsage(usage) {
-    const inputTokens = usage.input_tokens || 0;
-    const outputTokens = usage.output_tokens || 0;
-
-    // Extract token breakdown details
-    let inputAudio = usage.input_token_details?.audio || 0;
-    let outputAudio = usage.output_token_details?.audio || 0;
-    let inputText = usage.input_token_details?.text || 0;
-    let outputText = usage.output_token_details?.text || 0;
-
-    // Check if we have a MEANINGFUL token breakdown (non-zero values)
-    const hasDetails = (inputAudio + outputAudio + inputText + outputText) > 0;
-
-    // FALLBACK: If no breakdown provided or all zeros, assume ALL tokens are AUDIO
-    // (since this is a voice-only Realtime API system)
-    if (!hasDetails && (inputTokens > 0 || outputTokens > 0)) {
-      console.log('⚠️  No token breakdown provided - assuming all tokens are AUDIO');
-      inputAudio = inputTokens;
-      outputAudio = outputTokens;
-      inputText = 0;
-      outputText = 0;
-    }
-  }
-
-
   // Get AI function tools configuration
   function getAITools() {
     return [
@@ -385,8 +359,13 @@ wss.on('connection', (ws, _req) => {
           properties: {
             reason: {
               type: "string",
-              enum: ["complaint", "manager_request", "complex_order", "technical_issue", "billing_question", "custom_request", "refund_request", "delivery_issue", "credit_card_payment"],
-              description: "The reason for transferring the call"
+              enum: [
+                "Forward calls for catering orders",
+                "Forward calls for credit card transactions",
+                "Forward calls for issues or complaints",
+                "Forward calls when customer requests to speak with manager"
+              ],
+              description: "The reason for transferring the call - must match restaurant's configured forwarding reasons exactly"
             },
             customer_message: {
               type: "string",
@@ -507,24 +486,7 @@ wss.on('connection', (ws, _req) => {
           console.log('Response completed');
 
           // Capture usage data from response
-          if (response.response?.usage) {
-            const usage = response.response.usage;
-
-            // Log full usage object to debug token details
-            console.log('📊 Full usage object:', JSON.stringify(usage, null, 2));
-
-            console.log('📊 Usage data received:', {
-              input_tokens: usage.input_tokens || 0,
-              output_tokens: usage.output_tokens || 0,
-              input_audio_tokens: usage.input_token_details?.audio || 0,
-              output_audio_tokens: usage.output_token_details?.audio || 0,
-              input_text_tokens: usage.input_token_details?.text || 0,
-              output_text_tokens: usage.output_token_details?.text || 0
-            });
-
-            // Accumulate usage throughout the call
-            accumulateUsage(usage);
-          }
+          // Usage tracking removed per user request
           break;
 
         case 'response.audio_transcript.done':
