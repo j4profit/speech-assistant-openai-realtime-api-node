@@ -45,7 +45,6 @@ wss.on('connection', (ws, _req) => {
   let validatedDeliveryAddress = null;
   let deliveryAddressId = null; // UUID of cached address record from customer_delivery_addresses table
   let deliveryInstructions = null; // Track delivery instructions separately
-  let paymentMethod = null; // Track payment method: 'cash', 'credit card', or null
   let addressRequested = false;
   let addressProviderAttempts = 0;
   let addressValidationAttempts = 0;
@@ -395,22 +394,6 @@ wss.on('connection', (ws, _req) => {
             }
           },
           required: ["reason", "customer_message"]
-        }
-      },
-      {
-        type: "function",
-        name: "process_payment_method",
-        description: "Process customer's payment method choice for delivery orders. System will automatically handle credit card call forwarding if configured.",
-        parameters: {
-          type: "object",
-          properties: {
-            payment_method: {
-              type: "string",
-              enum: ["cash", "credit card"],
-              description: "How customer wants to pay"
-            }
-          },
-          required: ["payment_method"]
         }
       }
     ];
@@ -786,46 +769,6 @@ wss.on('connection', (ws, _req) => {
         }
         break;
 
-      case 'process_payment_method':
-        console.log('💳 Processing payment method:', parsedArgs.payment_method);
-        paymentMethod = parsedArgs.payment_method.toLowerCase();
-
-        // If credit card payment, check if we should transfer call
-        if (paymentMethod === 'credit card') {
-          // Check if call forwarding is enabled for credit card payments
-          const forwardingReasons = restaurant.call_forwarding_reasons || [];
-          const shouldForward = restaurant.call_forwarding_enabled &&
-                               forwardingReasons.includes('credit_card_payment') &&
-                               restaurant.call_forwarding_number;
-
-          if (shouldForward) {
-            console.log('💳 Credit card payment - will transfer call after order confirmation');
-            result = {
-              success: true,
-              payment_method: paymentMethod,
-              requires_transfer: true,
-              message: 'Payment method recorded. Please complete your order and we will transfer you to process the credit card payment.'
-            };
-          } else {
-            console.log('💳 Credit card payment - but forwarding not configured (will create order with credit card status)');
-            result = {
-              success: true,
-              payment_method: paymentMethod,
-              requires_transfer: false,
-              message: 'Payment method recorded. Someone from the restaurant will call you back to process your credit card payment.'
-            };
-          }
-        } else {
-          // Cash payment - no special handling needed
-          console.log('💵 Cash payment - no transfer needed');
-          result = {
-            success: true,
-            payment_method: paymentMethod,
-            requires_transfer: false,
-            message: 'Cash payment recorded. Please complete your order.'
-          };
-        }
-        break;
     }
 
     // Send function result back to OpenAI
