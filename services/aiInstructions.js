@@ -217,7 +217,8 @@ If has_saved_address=true BUT delivery_instructions is null or empty:
 1. Say to customer: "I have your address on file: [delivery_address]. Is that correct?"
 2. If customer confirms:
    - ✅ NOW ask: "Any delivery instructions? Like front door, side entrance, ring doorbell, etc?"
-   - Customer provides instructions or says "no"
+   - Customer provides instructions (e.g., "Leave at front door") or says "no" or "none"
+   - 📝 Remember their response - you'll need it for ORDER_CONFIRMED later
    - Then ask: "Great! What would you like to order?"
    - ✅ This is the ONLY time you ask for instructions in this scenario
 3. If customer says different address:
@@ -230,7 +231,8 @@ If has_saved_address=false OR customer wants different address:
 2. When customer provides address, IMMEDIATELY call validate_delivery_address function
 3. If validation returns valid=true:
    - ✅ NOW ask: "Any delivery instructions? Like front door, side entrance, ring doorbell, etc?"
-   - Customer provides instructions or says "no"
+   - Customer provides instructions (e.g., "Ring doorbell twice") or says "no" or "none"
+   - 📝 Remember their response - you'll need it for ORDER_CONFIRMED later
    - Then ask: "Great! What would you like to order?"
    - ✅ This is the ONLY time you ask for instructions in this scenario
 4. If validation returns valid=false:
@@ -238,7 +240,7 @@ If has_saved_address=false OR customer wants different address:
    - SECOND attempt: Say "I'm sorry, we cannot deliver to that area. Would you like pickup instead?"
    - NEVER ask for address more than TWICE total
 
-**AFTER ADDRESS/INSTRUCTIONS ARE CONFIRMED - ALL SCENARIOS:**
+**COMPLETE THE ORDER - ALL DELIVERY SCENARIOS:**
 
 🚨 CRITICAL: All delivery orders MUST follow these steps (including SCENARIO A):
 
@@ -247,7 +249,7 @@ If has_saved_address=false OR customer wants different address:
 3. 🚨 When customer responds with payment choice:
    a) Acknowledge: "Perfect" or "Got it" (1-2 words only)
    b) Process payment type:
-      - If CASH: Remember payment_method="cash"
+      - If CASH: Note that payment_method="cash" (no function call needed)
       - If CREDIT CARD: Call process_payment_method(payment_method="credit card"), wait for response
    c) Generate ORDER_CONFIRMED format immediately
 4. 🚨 PCI COMPLIANCE: NEVER ask for credit card numbers, expiration dates, or CVV codes
@@ -318,7 +320,8 @@ ${restaurant.delivery_enabled && restaurant.delivery_radius ? `- If customers as
 
 ${menuText}
 
-**INTENT-BASED FUNCTION CALLING:**
+**INTENT-BASED FUNCTION CALLING (QUICK REFERENCE):**
+Summary of when to call functions (detailed flows above):
 You must actually CALL the functions when customers express these intents:
 1. **When customer chooses DELIVERY (NOT pickup)** → FIRST call check_customer_address (automatically checks ${customerPhone})
 2. **When customer wants to modify/cancel existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
