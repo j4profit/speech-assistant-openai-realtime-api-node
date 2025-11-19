@@ -922,6 +922,7 @@ wss.on('connection', (ws, _req) => {
             deliveryInstructions: orderInfo.deliveryInstructions,
             paymentMethod: orderInfo.paymentMethod,
             items: orderInfo.items,
+            itemsWithPrices: orderInfo.itemsWithPrices, // Detailed item data with customizations
             specialInstructions: orderInfo.specialInstructions,
             subtotal: subtotal,
             deliveryFee: deliveryFee,
@@ -1092,6 +1093,40 @@ wss.on('connection', (ws, _req) => {
     }
   }
 
+  // Helper function to extract customizations from item context
+  function extractItemCustomizations(context) {
+    const customizationPatterns = [
+      // Cooking level
+      /\b(rare|medium rare|medium|medium well|well done)\b/gi,
+      // With toppings
+      /\bwith\s+(lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)[\w\s,and]*/gi,
+      // No toppings
+      /\bno\s+(lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)[\w\s,and]*/gi,
+      // Extra items
+      /\bextra\s+(cheese|bacon|lettuce|tomato|onion|sauce|pickles)[\w\s,and]*/gi,
+      // Add items
+      /\badd\s+(cheese|bacon|lettuce|tomato|onion|pickles)[\w\s,and]*/gi,
+      // On the side
+      /\bon the side[\w\s,and]*/gi
+    ];
+
+    const foundCustomizations = [];
+    const lowerContext = context.toLowerCase();
+
+    customizationPatterns.forEach(pattern => {
+      const matches = lowerContext.matchAll(pattern);
+      for (const match of matches) {
+        const customization = match[0].trim();
+        // Avoid duplicates and very short matches
+        if (customization.length > 2 && !foundCustomizations.includes(customization)) {
+          foundCustomizations.push(customization);
+        }
+      }
+    });
+
+    return foundCustomizations.length > 0 ? foundCustomizations.join(', ') : null;
+  }
+
   // Extract order details from conversation log
   function extractOrderFromConversation() {
     console.log('🔍 Extracting order details from conversation...');
@@ -1142,16 +1177,26 @@ wss.on('connection', (ws, _req) => {
               const qty = parseInt(quantityMap[quantity] || quantity);
               const lineTotal = qty * sizePrice;
 
+              // Extract customizations near this item in the conversation
+              const matchIndex = match.index;
+              const contextStart = Math.max(0, matchIndex - 100); // Look 100 chars before
+              const contextEnd = Math.min(conversationText.length, matchIndex + match[0].length + 150); // Look 150 chars after
+              const itemContext = conversationText.substring(contextStart, contextEnd);
+
+              const customizations = extractItemCustomizations(itemContext);
+
               itemsWithPrices.push({
                 qty: qty,
                 name: menuItem.name,
                 size: sizeOption.size,
                 price: sizePrice,
-                lineTotal: lineTotal
+                lineTotal: lineTotal,
+                customizations: customizations
               });
 
               calculatedSubtotal += lineTotal;
-              console.log(`✅ Found: ${qty}x ${sizeOption.size} ${menuItem.name} @ $${sizePrice.toFixed(2)} = $${lineTotal.toFixed(2)}`);
+              const customText = customizations ? ` (${customizations})` : '';
+              console.log(`✅ Found: ${qty}x ${sizeOption.size} ${menuItem.name} @ $${sizePrice.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
             }
           }
         }
@@ -1178,16 +1223,26 @@ wss.on('connection', (ws, _req) => {
             const defaultSize = menuItem.sizes[0];
             const lineTotal = qty * defaultSize.price;
 
+            // Extract customizations near this item in the conversation
+            const matchIndex = match.index;
+            const contextStart = Math.max(0, matchIndex - 100); // Look 100 chars before
+            const contextEnd = Math.min(conversationText.length, matchIndex + match[0].length + 150); // Look 150 chars after
+            const itemContext = conversationText.substring(contextStart, contextEnd);
+
+            const customizations = extractItemCustomizations(itemContext);
+
             itemsWithPrices.push({
               qty: qty,
               name: menuItem.name,
               size: menuItem.sizes.length > 1 ? defaultSize.size : null, // Only show size if multiple options
               price: defaultSize.price,
-              lineTotal: lineTotal
+              lineTotal: lineTotal,
+              customizations: customizations
             });
 
             calculatedSubtotal += lineTotal;
-            console.log(`✅ Found: ${qty}x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}`);
+            const customText = customizations ? ` (${customizations})` : '';
+            console.log(`✅ Found: ${qty}x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
           }
         }
       }
@@ -1217,42 +1272,12 @@ wss.on('connection', (ws, _req) => {
       console.log('💳 Payment method: credit card');
     }
 
-    // Extract special instructions / customizations
-    // Look for cooking instructions, toppings, modifications
+    // Note: Special instructions are now extracted per-item (see extractItemCustomizations function)
+    // This variable is kept for backward compatibility and order-level instructions
     let specialInstructions = '';
-    const instructionPatterns = [
-      // Cooking level
-      /\b(rare|medium rare|medium|medium well|well done)\b/gi,
-      // With toppings
-      /\bwith\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
-      // No toppings
-      /\bno\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
-      // Extra items
-      /\bextra\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
-      // Add items
-      /\badd\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
-      // On the side
-      /\bon the side:?\s*([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi
-    ];
 
-    const foundInstructions = [];
-    const fullConversationText = conversationLog.map(m => m.text).join(' ');
-
-    instructionPatterns.forEach(pattern => {
-      const matches = fullConversationText.matchAll(pattern);
-      for (const match of matches) {
-        const instruction = match[0].trim();
-        // Avoid duplicates and very short matches
-        if (instruction.length > 3 && !foundInstructions.includes(instruction.toLowerCase())) {
-          foundInstructions.push(instruction);
-        }
-      }
-    });
-
-    if (foundInstructions.length > 0) {
-      specialInstructions = foundInstructions.join('; ');
-      console.log(`📝 Special instructions extracted: "${specialInstructions}"`);
-    }
+    // Could add order-level instruction extraction here in future (e.g., "call when you arrive", "contactless delivery")
+    // For now, customizations are tracked individually with each item
 
     // Extract customer name from conversation (after AI asks "May I have your name for the order?")
     // Look for the name in the conversation - it should appear after the AI asks for it

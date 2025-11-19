@@ -14,6 +14,7 @@ function createOrderTicket(orderInfo) {
     deliveryInstructions,
     paymentMethod,
     items,
+    itemsWithPrices,
     specialInstructions,
     subtotal,
     deliveryFee,
@@ -63,8 +64,25 @@ ORDER TYPE: ${orderType.toUpperCase()}`;
 
   ticket += `
 
-ORDER ITEMS:
-${formatOrderItems(items, null)}
+ORDER ITEMS:`;
+
+  // Format items with customizations shown under each item
+  if (itemsWithPrices && itemsWithPrices.length > 0) {
+    itemsWithPrices.forEach(item => {
+      const sizePart = item.size ? ` (${item.size})` : '';
+      ticket += `\n• ${item.qty}x ${item.name}${sizePart} - $${item.price.toFixed(2)}`;
+
+      // Show customizations directly under the item
+      if (item.customizations) {
+        ticket += `\n  └─ ${item.customizations}`;
+      }
+    });
+  } else {
+    // Fallback to old format if itemsWithPrices not available
+    ticket += `\n${formatOrderItems(items, null)}`;
+  }
+
+  ticket += `
 
 PRICING BREAKDOWN:
 • Subtotal: $${(subtotal || 0).toFixed(2)}`;
@@ -85,10 +103,12 @@ PRICING BREAKDOWN:
 TIMING:
 • Order should be ready: ${readyTime}`;
 
+  // Note: Item-specific customizations (cooking level, toppings) are now shown under each item
+  // This section is reserved for order-level instructions like "call when you arrive", "contactless delivery"
   if (specialInstructions && specialInstructions.trim()) {
     ticket += `
 
-SPECIAL INSTRUCTIONS:
+ORDER-LEVEL INSTRUCTIONS:
 ${specialInstructions}`;
   }
 
