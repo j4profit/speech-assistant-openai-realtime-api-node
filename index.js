@@ -1239,6 +1239,44 @@ wss.on('connection', (ws, _req) => {
             console.log(`✅ Found: ${qty}x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
           }
         }
+
+        // FALLBACK: Try matching item name WITHOUT quantity (assumes qty = 1)
+        // This catches: "I want pizza", "Can I get pizza?", "I'd like some pizza"
+        if (itemsWithPrices.length === 0 || !itemsWithPrices.some(item => item.name.toLowerCase() === itemName)) {
+          const noQtyPattern = new RegExp(
+            `(?:want|like|get|order|have)\\s+(?:a|some|the)?\\s*${itemName}s?`,
+            'gi'
+          );
+
+          const noQtyMatches = conversationText.matchAll(noQtyPattern);
+          for (const match of noQtyMatches) {
+            if (menuItem.sizes && menuItem.sizes.length > 0) {
+              const defaultSize = menuItem.sizes[0];
+              const lineTotal = 1 * defaultSize.price; // Assume qty = 1
+
+              const matchIndex = match.index;
+              const contextStart = Math.max(0, matchIndex - 100);
+              const contextEnd = Math.min(conversationText.length, matchIndex + match[0].length + 150);
+              const itemContext = conversationText.substring(contextStart, contextEnd);
+
+              const customizations = extractItemCustomizations(itemContext);
+
+              itemsWithPrices.push({
+                qty: 1,
+                name: menuItem.name,
+                size: menuItem.sizes.length > 1 ? defaultSize.size : null,
+                price: defaultSize.price,
+                lineTotal: lineTotal,
+                customizations: customizations
+              });
+
+              calculatedSubtotal += lineTotal;
+              const customText = customizations ? ` (${customizations})` : '';
+              console.log(`✅ Found (no qty specified, assumed 1): 1x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
+              break; // Only match once per item
+            }
+          }
+        }
       }
 
       if (itemsWithPrices.length > 0) {
