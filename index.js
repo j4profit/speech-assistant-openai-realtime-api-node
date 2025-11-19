@@ -225,6 +225,9 @@ wss.on('connection', (ws, _req) => {
           voice: restaurant.ai_voice || 'coral',
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
+          input_audio_transcription: {
+            model: 'whisper-1'
+          },
           turn_detection: {
             type: 'semantic_vad'
           },
@@ -576,6 +579,26 @@ wss.on('connection', (ws, _req) => {
           if (response.item?.type === 'function_call') {
             await handleFunctionCall(response.item);
           }
+          break;
+
+        case 'input_audio_buffer.speech_started':
+          console.log('🎤 Customer started speaking');
+          break;
+
+        case 'input_audio_buffer.speech_stopped':
+          console.log('🎤 Customer stopped speaking');
+          break;
+
+        case 'conversation.item.input_audio_transcription.completed':
+          const customerText = response.transcript || '';
+          console.log('👤 Customer said:', customerText);
+
+          // Track customer speech in conversation log
+          conversationLog.push({
+            timestamp: Date.now(),
+            speaker: 'customer',
+            text: customerText
+          });
           break;
 
         case 'error':
