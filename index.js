@@ -986,7 +986,9 @@ wss.on('connection', (ws, _req) => {
                     ready_time: readyTimeInfo.readyTimeString,
                     total_minutes: readyTimeInfo.totalMinutes,
                     subtotal: subtotal,
-                    final_total: finalTotal
+                    final_total: finalTotal,
+                    order_type: orderInfo.orderType,
+                    customer_name: orderInfo.customerName
                   };
                 } else {
                   console.error('❌ Credit card payment transfer failed:', transferResult.error);
@@ -1000,7 +1002,9 @@ wss.on('connection', (ws, _req) => {
                     ready_time: readyTimeInfo.readyTimeString,
                     total_minutes: readyTimeInfo.totalMinutes,
                     subtotal: subtotal,
-                    final_total: finalTotal
+                    final_total: finalTotal,
+                    order_type: orderInfo.orderType,
+                    customer_name: orderInfo.customerName
                   };
                 }
               } else {
@@ -1015,7 +1019,9 @@ wss.on('connection', (ws, _req) => {
                   ready_time: readyTimeInfo.readyTimeString,
                   total_minutes: readyTimeInfo.totalMinutes,
                   subtotal: subtotal,
-                  final_total: finalTotal
+                  final_total: finalTotal,
+                  order_type: orderInfo.orderType,
+                  customer_name: orderInfo.customerName
                 };
               }
             } else {
@@ -1030,7 +1036,9 @@ wss.on('connection', (ws, _req) => {
                 ready_time: readyTimeInfo.readyTimeString,
                 total_minutes: readyTimeInfo.totalMinutes,
                 subtotal: subtotal,
-                final_total: finalTotal
+                final_total: finalTotal,
+                order_type: orderInfo.orderType,
+                customer_name: orderInfo.customerName
               };
             }
           } else {
@@ -1072,9 +1080,25 @@ wss.on('connection', (ws, _req) => {
         // Wait 100ms before triggering to avoid race condition
         setTimeout(() => {
           if (!isResponseInProgress && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.send(JSON.stringify({
+            // Build response.create payload
+            const responsePayload = {
               type: 'response.create'
-            }));
+            };
+
+            // For submit_order, add explicit instructions to use the function result
+            if (functionName === 'submit_order' && result.success) {
+              responsePayload.response = {
+                instructions: `CRITICAL: You just called submit_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
+
+"Your total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+
+Example: "Your total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+
+DO NOT skip any part of this announcement. The customer MUST hear the total, the timing in minutes, and the ready time.`
+              };
+            }
+
+            openaiWs.send(JSON.stringify(responsePayload));
             isResponseInProgress = true;
             console.log(`✅ Triggered response.create after function: ${functionName}`);
           } else if (isResponseInProgress) {
