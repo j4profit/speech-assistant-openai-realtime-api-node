@@ -1121,16 +1121,16 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
     const customizationPatterns = [
       // Cooking level
       /\b(rare|medium rare|medium|medium well|well done)\b/gi,
-      // With toppings
-      /\bwith\s+(lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)[\w\s,and]*/gi,
-      // No toppings
-      /\bno\s+(lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)[\w\s,and]*/gi,
-      // Extra items
-      /\bextra\s+(cheese|bacon|lettuce|tomato|onion|sauce|pickles)[\w\s,and]*/gi,
-      // Add items
-      /\badd\s+(cheese|bacon|lettuce|tomato|onion|pickles)[\w\s,and]*/gi,
+      // With toppings - only match comma-separated toppings, not everything
+      /\bwith\s+((?:lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)(?:\s*,?\s*(?:and\s+)?(?:lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms))*)/gi,
+      // No toppings - only match topping words
+      /\bno\s+((?:lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms)(?:\s*,?\s*(?:and\s+)?(?:lettuce|tomato|onion|pickles|cheese|bacon|mayo|mustard|ketchup|onions|peppers|mushrooms))*)/gi,
+      // Extra items - only match topping words
+      /\bextra\s+((?:cheese|bacon|lettuce|tomato|onion|sauce|pickles)(?:\s*,?\s*(?:and\s+)?(?:cheese|bacon|lettuce|tomato|onion|sauce|pickles))*)/gi,
+      // Add items - only match topping words
+      /\badd\s+((?:cheese|bacon|lettuce|tomato|onion|pickles)(?:\s*,?\s*(?:and\s+)?(?:cheese|bacon|lettuce|tomato|onion|pickles))*)/gi,
       // On the side
-      /\bon the side[\w\s,and]*/gi
+      /\bon the side/gi
     ];
 
     const foundCustomizations = [];
