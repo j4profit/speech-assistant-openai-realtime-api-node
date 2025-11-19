@@ -856,35 +856,32 @@ wss.on('connection', (ws, _req) => {
 
         console.log('✅ Order validation passed');
 
-        // Process the order (same logic as processOrderFromTranscript)
+        // Process the order
         try {
           orderProcessed = true;
 
           const isDelivery = orderInfo.orderType === 'delivery';
           const isCreditCard = orderInfo.paymentMethod && orderInfo.paymentMethod.toLowerCase() === 'credit card';
 
-          // AI calculates the final total - we use it as-is
+          // Calculate pricing using DATABASE PRICES (not AI's estimate)
           const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
-          const finalTotal = orderInfo.totalAmount; // AI's calculated total (food + delivery + tax)
-
-          // Back-calculate components for display purposes only
+          const subtotal = orderInfo.calculatedSubtotal; // From database menu prices
           const deliveryFee = isDelivery ? (restaurant.delivery_fee || 0) : 0;
           const taxRate = restaurant.tax_rate || 0;
-          // Work backwards: finalTotal = subtotal + deliveryFee + tax
-          // tax = (subtotal + deliveryFee) * taxRate
-          // finalTotal = subtotal + deliveryFee + ((subtotal + deliveryFee) * taxRate)
-          // finalTotal = (subtotal + deliveryFee) * (1 + taxRate)
-          // subtotal + deliveryFee = finalTotal / (1 + taxRate)
-          const subtotalPlusDelivery = finalTotal / (1 + taxRate);
-          const subtotal = subtotalPlusDelivery - deliveryFee;
-          const taxAmount = finalTotal - subtotalPlusDelivery;
 
-          console.log('💰 Order pricing (AI calculated total, components for display):');
-          console.log(`   AI provided total: $${finalTotal.toFixed(2)}`);
-          console.log(`   Back-calculated food subtotal: $${subtotal.toFixed(2)}`);
+          // Calculate tax on (subtotal + delivery fee)
+          const taxableAmount = subtotal + deliveryFee;
+          const taxAmount = taxableAmount * taxRate;
+
+          // Calculate final total
+          const finalTotal = subtotal + deliveryFee + taxAmount;
+
+          console.log('💰 Order pricing (calculated from database menu prices):');
+          console.log(`   Food subtotal: $${subtotal.toFixed(2)} (from menu prices)`);
           console.log(`   Delivery fee: $${deliveryFee.toFixed(2)}`);
-          console.log(`   Tax amount: $${taxAmount.toFixed(2)}`);
-          console.log(`   FINAL TOTAL: $${finalTotal.toFixed(2)} (from AI)`);
+          console.log(`   Taxable amount: $${taxableAmount.toFixed(2)}`);
+          console.log(`   Tax (${(taxRate * 100).toFixed(2)}%): $${taxAmount.toFixed(2)}`);
+          console.log(`   FINAL TOTAL: $${finalTotal.toFixed(2)}`);
 
           // Determine order status
           let orderStatus = 'pending';
@@ -1070,39 +1067,15 @@ wss.on('connection', (ws, _req) => {
     console.log('📝 Analyzing conversation:', conversationText.substring(0, 200) + '...');
 
     // Extract items by matching against ACTUAL menu items from database
+    // AND look up prices to calculate accurate subtotal
     let items = '';
-    let totalAmount = 0;
+    let itemsWithPrices = []; // Array of {qty, name, size, price, lineTotal}
+    let calculatedSubtotal = 0;
     let paymentMethod = null;
-
-    const foundItems = [];
 
     // Get all menu item names from restaurant database
     if (restaurant && restaurant.menu_items && restaurant.menu_items.length > 0) {
       console.log(`📋 Searching conversation for ${restaurant.menu_items.length} menu items from database...`);
-
-      // Build list of all item names with their available sizes
-      const menuItemsWithSizes = [];
-      restaurant.menu_items.forEach(menuItem => {
-        if (menuItem.name) {
-          const itemData = {
-            name: menuItem.name.toLowerCase(),
-            sizes: []
-          };
-
-          // Extract size options if available
-          if (menuItem.sizes && menuItem.sizes.length > 0) {
-            menuItem.sizes.forEach(sizeOption => {
-              if (sizeOption.size) {
-                itemData.sizes.push(sizeOption.size.toLowerCase());
-              }
-            });
-          }
-
-          menuItemsWithSizes.push(itemData);
-        }
-      });
-
-      console.log(`🔍 Searching for ${menuItemsWithSizes.length} menu items in conversation...`);
 
       // Word number to digit conversion
       const quantityMap = {
@@ -1111,28 +1084,44 @@ wss.on('connection', (ws, _req) => {
       };
 
       // Search for each menu item in the conversation
-      for (const menuItem of menuItemsWithSizes) {
-        const itemName = menuItem.name;
+      for (const menuItem of restaurant.menu_items) {
+        if (!menuItem.name) continue;
+
+        const itemName = menuItem.name.toLowerCase();
 
         // Try matching with sizes first: "one large pizza", "2 small hamburgers"
-        if (menuItem.sizes.length > 0) {
-          for (const size of menuItem.sizes) {
+        if (menuItem.sizes && menuItem.sizes.length > 0) {
+          for (const sizeOption of menuItem.sizes) {
+            const sizeName = sizeOption.size.toLowerCase();
+            const sizePrice = sizeOption.price;
+
             const sizePattern = new RegExp(
-              `(\\d+|one|a|two|three|four|five|six|seven|eight|nine|ten)\\s+${size}\\s+${itemName}s?`,
+              `(\\d+|one|a|two|three|four|five|six|seven|eight|nine|ten)\\s+${sizeName}\\s+${itemName}s?`,
               'gi'
             );
 
             const sizeMatches = conversationText.matchAll(sizePattern);
             for (const match of sizeMatches) {
               const quantity = match[1].toLowerCase();
-              const qty = quantityMap[quantity] || quantity;
-              foundItems.push(`${qty}x ${size} ${itemName}`);
-              console.log(`✅ Found menu item with size: ${qty}x ${size} ${itemName}`);
+              const qty = parseInt(quantityMap[quantity] || quantity);
+              const lineTotal = qty * sizePrice;
+
+              itemsWithPrices.push({
+                qty: qty,
+                name: menuItem.name,
+                size: sizeOption.size,
+                price: sizePrice,
+                lineTotal: lineTotal
+              });
+
+              calculatedSubtotal += lineTotal;
+              console.log(`✅ Found: ${qty}x ${sizeOption.size} ${menuItem.name} @ $${sizePrice.toFixed(2)} = $${lineTotal.toFixed(2)}`);
             }
           }
         }
 
-        // Also try matching without size: "one hamburger", "two pizzas"
+        // Also try matching without size for items with only one size
+        // Only if we haven't already found this item with a size
         const itemPattern = new RegExp(
           `(\\d+|one|a|two|three|four|five|six|seven|eight|nine|ten)\\s+${itemName}s?`,
           'gi'
@@ -1141,37 +1130,46 @@ wss.on('connection', (ws, _req) => {
         const matches = conversationText.matchAll(itemPattern);
         for (const match of matches) {
           const quantity = match[1].toLowerCase();
-          const qty = quantityMap[quantity] || quantity;
+          const qty = parseInt(quantityMap[quantity] || quantity);
 
-          // Check if we already found this with a size (avoid duplicates)
-          const alreadyFoundWithSize = foundItems.some(item =>
-            item.includes(`${qty}x`) && item.includes(itemName)
+          // Check if we already found this item with a size
+          const alreadyFoundWithSize = itemsWithPrices.some(item =>
+            item.name.toLowerCase() === itemName
           );
 
-          if (!alreadyFoundWithSize) {
-            foundItems.push(`${qty}x ${itemName}`);
-            console.log(`✅ Found menu item: ${qty}x ${itemName}`);
+          if (!alreadyFoundWithSize && menuItem.sizes && menuItem.sizes.length > 0) {
+            // Use first/default size if no size specified
+            const defaultSize = menuItem.sizes[0];
+            const lineTotal = qty * defaultSize.price;
+
+            itemsWithPrices.push({
+              qty: qty,
+              name: menuItem.name,
+              size: menuItem.sizes.length > 1 ? defaultSize.size : null, // Only show size if multiple options
+              price: defaultSize.price,
+              lineTotal: lineTotal
+            });
+
+            calculatedSubtotal += lineTotal;
+            console.log(`✅ Found: ${qty}x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}`);
           }
         }
       }
 
-      if (foundItems.length > 0) {
-        items = foundItems.join(', ');
-        console.log('🍔 Successfully extracted items from menu:', items);
+      if (itemsWithPrices.length > 0) {
+        // Format items as "1x Hamburger - $55.00" for display
+        items = itemsWithPrices.map(item => {
+          const sizePart = item.size ? ` (${item.size})` : '';
+          return `${item.qty}x ${item.name}${sizePart} - $${item.price.toFixed(2)}`;
+        }).join(', ');
+
+        console.log('🍔 Successfully extracted items with prices:', items);
+        console.log(`💰 Calculated food subtotal: $${calculatedSubtotal.toFixed(2)}`);
       } else {
         console.log('⚠️  No menu items found in conversation - may need to check conversation log');
       }
     } else {
       console.log('⚠️  No menu items available from restaurant - cannot extract items');
-    }
-
-    // Extract total amount (look for $ amounts mentioned)
-    const totalMatches = conversationText.match(/\$(\d+\.?\d*)/g);
-    if (totalMatches && totalMatches.length > 0) {
-      // Get the last mentioned price (likely the total)
-      const lastPrice = totalMatches[totalMatches.length - 1];
-      totalAmount = parseFloat(lastPrice.replace('$', ''));
-      console.log('💰 Found total:', totalAmount);
     }
 
     // Extract payment method
@@ -1191,7 +1189,7 @@ wss.on('connection', (ws, _req) => {
       customerName: extractedCustomerName,
       orderType: extractedOrderType,
       items: items || '(none found)',
-      totalAmount,
+      calculatedSubtotal: calculatedSubtotal.toFixed(2),
       paymentMethod: paymentMethod || 'N/A'
     });
 
@@ -1202,17 +1200,18 @@ wss.on('connection', (ws, _req) => {
       deliveryInstructions: deliveryInstructions || null,
       paymentMethod: paymentMethod || null,
       items: items,
-      totalAmount: totalAmount
+      itemsWithPrices: itemsWithPrices, // Detailed item data with prices
+      calculatedSubtotal: calculatedSubtotal // Accurate subtotal from database prices
     };
   }
 
   // Validate order to prevent fake/invalid orders
   function validateOrder(orderInfo) {
-    // Check 1: Total must be greater than $0
-    if (orderInfo.totalAmount <= 0) {
+    // Check 1: Subtotal must be greater than $0
+    if (orderInfo.calculatedSubtotal <= 0) {
       return {
         valid: false,
-        reason: 'Order total is $0 or negative'
+        reason: 'Order subtotal is $0 or negative'
       };
     }
 

@@ -103,8 +103,8 @@ ${specialInstructions}`;
 
 /**
  * Format order items for display
- * @param {string} items - Raw items string
- * @param {number} totalAmount - Total order amount
+ * @param {string} items - Raw items string (e.g., "1x Hamburger - $55.00, 2x Fries - $3.00")
+ * @param {number} totalAmount - Total order amount (unused, kept for compatibility)
  * @returns {string} Formatted items list
  */
 function formatOrderItems(items, totalAmount) {
@@ -112,6 +112,7 @@ function formatOrderItems(items, totalAmount) {
     return '• Order details not available';
   }
 
+  // Handle legacy ORDER_CONFIRMED format
   if (items.includes('ORDER_CONFIRMED')) {
     const lines = items.split('\n');
     let formattedItems = '';
@@ -130,12 +131,15 @@ function formatOrderItems(items, totalAmount) {
     return formattedItems || '• ' + items.replace(/ORDER_CONFIRMED.*?\n/g, '').trim();
   }
 
+  // New format: "1x Hamburger - $55.00, 2x Fries - $3.00"
+  // Split by commas or newlines and display each item
   const itemLines = items.split(/[,\n]/).filter(item => item.trim());
   let formattedItems = '';
 
   itemLines.forEach((item) => {
-    const cleanItem = item.trim().replace(/^\d+\.?\s*/, '').replace(/^[\-\*]\s*/, '');
+    const cleanItem = item.trim();
     if (cleanItem) {
+      // Don't remove quantity numbers - keep the full format
       formattedItems += `• ${cleanItem}\n`;
     }
   });
