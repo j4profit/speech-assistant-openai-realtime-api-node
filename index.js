@@ -1087,15 +1087,20 @@ wss.on('connection', (ws, _req) => {
 
             // For submit_order, add explicit instructions to use the function result
             if (functionName === 'submit_order' && result.success) {
-              responsePayload.response = {
-                instructions: `CRITICAL: You just called submit_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
+              const announcementInstructions = `CRITICAL: You just called submit_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
 
 "Your total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
 
 Example: "Your total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
 
-DO NOT skip any part of this announcement. The customer MUST hear the total, the timing in minutes, and the ready time.`
+DO NOT skip any part of this announcement. The customer MUST hear the total, the timing in minutes, and the ready time.`;
+
+              responsePayload.response = {
+                instructions: announcementInstructions
               };
+
+              console.log('🔥 INJECTING ANNOUNCEMENT INSTRUCTIONS INTO response.create:');
+              console.log(announcementInstructions);
             }
 
             openaiWs.send(JSON.stringify(responsePayload));
@@ -1387,7 +1392,7 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
       const fullConversationText = conversationLog.map(m => m.text).join(' ');
 
       // Common words to exclude (not names)
-      const excludeWords = ['the', 'a', 'an', 'for', 'to', 'from', 'with', 'at', 'in', 'on', 'is', 'are', 'was', 'were'];
+      const excludeWords = ['the', 'a', 'an', 'for', 'to', 'from', 'with', 'at', 'in', 'on', 'is', 'are', 'was', 'were', 'delivery', 'pickup', 'cash', 'credit', 'card', 'yes', 'no', 'okay', 'sure', 'thanks', 'thank', 'you'];
 
       // Pattern 1: "my name is [Name]" or "I'm [Name]" or "name's [Name]"
       const nameIsPattern = /(?:my name is|i'm|i am|this is|name is|it's|name's)\s+([a-z]+(?:\s+[a-z]+)?)/i;
