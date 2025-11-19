@@ -1069,46 +1069,100 @@ wss.on('connection', (ws, _req) => {
 
     console.log('📝 Analyzing conversation:', conversationText.substring(0, 200) + '...');
 
-    // Extract items (look for quantity + food patterns)
+    // Extract items by matching against ACTUAL menu items from database
     let items = '';
     let totalAmount = 0;
     let paymentMethod = null;
 
-    // Parse items from conversation
-    // Look for patterns like "one hamburger", "1 hamburger", "two burgers", etc.
-    // IMPORTANT: Exclude address patterns (street numbers like "7810 old harford road")
-    const itemPatterns = [
-      /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(x\s*)?([a-z\s]+(?:burger|pizza|fries|fry|sandwich|salad|drink|soda|chicken|wings|taco|burrito|wrap|sub|hoagie|steak|pasta|noodle|rice|soup|chili|nachos|quesadilla))/gi,
-    ];
-
-    // Address-related keywords to filter out (prevents "7810 Old Harford Road" from being parsed as food)
-    const addressKeywords = /\b(road|street|avenue|ave|drive|dr|boulevard|blvd|lane|ln|way|court|ct|place|pl|circle|parkway|pkwy|highway|hwy)\b/i;
-
     const foundItems = [];
-    for (const pattern of itemPatterns) {
-      const matches = conversationText.matchAll(pattern);
-      for (const match of matches) {
-        const quantity = match[1];
-        const item = (match[3] || match[2] || '').trim();
 
-        // Skip if item looks like an address
-        if (item && item.length > 2 && !addressKeywords.test(item)) {
-          // Convert word numbers to digits
-          const quantityMap = {
-            'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
-            'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
+    // Get all menu item names from restaurant database
+    if (restaurant && restaurant.menu_items && restaurant.menu_items.length > 0) {
+      console.log(`📋 Searching conversation for ${restaurant.menu_items.length} menu items from database...`);
+
+      // Build list of all item names with their available sizes
+      const menuItemsWithSizes = [];
+      restaurant.menu_items.forEach(menuItem => {
+        if (menuItem.name) {
+          const itemData = {
+            name: menuItem.name.toLowerCase(),
+            sizes: []
           };
-          const qty = quantityMap[quantity.toLowerCase()] || quantity;
-          foundItems.push(`${qty}x ${item}`);
-        } else if (item && addressKeywords.test(item)) {
-          console.log(`🚫 Skipping address-like text: "${quantity} ${item}"`);
+
+          // Extract size options if available
+          if (menuItem.sizes && menuItem.sizes.length > 0) {
+            menuItem.sizes.forEach(sizeOption => {
+              if (sizeOption.size) {
+                itemData.sizes.push(sizeOption.size.toLowerCase());
+              }
+            });
+          }
+
+          menuItemsWithSizes.push(itemData);
+        }
+      });
+
+      console.log(`🔍 Searching for ${menuItemsWithSizes.length} menu items in conversation...`);
+
+      // Word number to digit conversion
+      const quantityMap = {
+        'one': '1', 'a': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+        'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
+      };
+
+      // Search for each menu item in the conversation
+      for (const menuItem of menuItemsWithSizes) {
+        const itemName = menuItem.name;
+
+        // Try matching with sizes first: "one large pizza", "2 small hamburgers"
+        if (menuItem.sizes.length > 0) {
+          for (const size of menuItem.sizes) {
+            const sizePattern = new RegExp(
+              `(\\d+|one|a|two|three|four|five|six|seven|eight|nine|ten)\\s+${size}\\s+${itemName}s?`,
+              'gi'
+            );
+
+            const sizeMatches = conversationText.matchAll(sizePattern);
+            for (const match of sizeMatches) {
+              const quantity = match[1].toLowerCase();
+              const qty = quantityMap[quantity] || quantity;
+              foundItems.push(`${qty}x ${size} ${itemName}`);
+              console.log(`✅ Found menu item with size: ${qty}x ${size} ${itemName}`);
+            }
+          }
+        }
+
+        // Also try matching without size: "one hamburger", "two pizzas"
+        const itemPattern = new RegExp(
+          `(\\d+|one|a|two|three|four|five|six|seven|eight|nine|ten)\\s+${itemName}s?`,
+          'gi'
+        );
+
+        const matches = conversationText.matchAll(itemPattern);
+        for (const match of matches) {
+          const quantity = match[1].toLowerCase();
+          const qty = quantityMap[quantity] || quantity;
+
+          // Check if we already found this with a size (avoid duplicates)
+          const alreadyFoundWithSize = foundItems.some(item =>
+            item.includes(`${qty}x`) && item.includes(itemName)
+          );
+
+          if (!alreadyFoundWithSize) {
+            foundItems.push(`${qty}x ${itemName}`);
+            console.log(`✅ Found menu item: ${qty}x ${itemName}`);
+          }
         }
       }
-    }
 
-    if (foundItems.length > 0) {
-      items = foundItems.join(', ');
-      console.log('🍔 Found items:', items);
+      if (foundItems.length > 0) {
+        items = foundItems.join(', ');
+        console.log('🍔 Successfully extracted items from menu:', items);
+      } else {
+        console.log('⚠️  No menu items found in conversation - may need to check conversation log');
+      }
+    } else {
+      console.log('⚠️  No menu items available from restaurant - cannot extract items');
     }
 
     // Extract total amount (look for $ amounts mentioned)
