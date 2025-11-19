@@ -1076,10 +1076,13 @@ wss.on('connection', (ws, _req) => {
 
     // Parse items from conversation
     // Look for patterns like "one hamburger", "1 hamburger", "two burgers", etc.
+    // IMPORTANT: Exclude address patterns (street numbers like "7810 old harford road")
     const itemPatterns = [
-      /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(x\s*)?([a-z\s]+(?:burger|pizza|fries|fry|sandwich|salad|drink|soda|chicken|wings))/gi,
-      /(\d+)\s*([a-z\s]+)/gi // Generic number + item pattern
+      /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(x\s*)?([a-z\s]+(?:burger|pizza|fries|fry|sandwich|salad|drink|soda|chicken|wings|taco|burrito|wrap|sub|hoagie|steak|pasta|noodle|rice|soup|chili|nachos|quesadilla))/gi,
     ];
+
+    // Address-related keywords to filter out (prevents "7810 Old Harford Road" from being parsed as food)
+    const addressKeywords = /\b(road|street|avenue|ave|drive|dr|boulevard|blvd|lane|ln|way|court|ct|place|pl|circle|parkway|pkwy|highway|hwy)\b/i;
 
     const foundItems = [];
     for (const pattern of itemPatterns) {
@@ -1087,7 +1090,9 @@ wss.on('connection', (ws, _req) => {
       for (const match of matches) {
         const quantity = match[1];
         const item = (match[3] || match[2] || '').trim();
-        if (item && item.length > 2) {
+
+        // Skip if item looks like an address
+        if (item && item.length > 2 && !addressKeywords.test(item)) {
           // Convert word numbers to digits
           const quantityMap = {
             'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
@@ -1095,6 +1100,8 @@ wss.on('connection', (ws, _req) => {
           };
           const qty = quantityMap[quantity.toLowerCase()] || quantity;
           foundItems.push(`${qty}x ${item}`);
+        } else if (item && addressKeywords.test(item)) {
+          console.log(`🚫 Skipping address-like text: "${quantity} ${item}"`);
         }
       }
     }
