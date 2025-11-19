@@ -1042,28 +1042,28 @@ wss.on('connection', (ws, _req) => {
         }
       }));
 
-      // With semantic VAD, the AI will automatically respond when it's ready
-      // We only need to trigger response.create for certain functions
-      // Functions that DON'T need manual response trigger (instant data, AI responds naturally):
-      // - check_customer_address (instant pre-fetched data)
-      // - search_recent_orders (just data lookup)
-      const noResponseTriggerFunctions = ['check_customer_address', 'search_recent_orders'];
+      // CRITICAL: Always trigger response.create after function results
+      // Even with semantic VAD, we need to explicitly tell AI to respond
+      // Only skip for functions that absolutely don't need a response
+      const noResponseTriggerFunctions = []; // Empty - always trigger for now
 
       if (!noResponseTriggerFunctions.includes(functionName)) {
         // CRITICAL: Trigger AI to respond after function result
         // Without this, AI receives the result but doesn't know to respond to customer
-        // Check if response already in progress to prevent race condition
-        if (!isResponseInProgress) {
-          openaiWs.send(JSON.stringify({
-            type: 'response.create'
-          }));
-          isResponseInProgress = true;
-          console.log(`✅ Triggered response.create after function: ${functionName}`);
-        } else {
-          console.log(`⚠️  Skipping response.create after ${functionName} - response already in progress`);
-        }
+        // Wait 100ms before triggering to avoid race condition
+        setTimeout(() => {
+          if (!isResponseInProgress && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(JSON.stringify({
+              type: 'response.create'
+            }));
+            isResponseInProgress = true;
+            console.log(`✅ Triggered response.create after function: ${functionName}`);
+          } else if (isResponseInProgress) {
+            console.log(`⚠️  Skipping response.create after ${functionName} - response already in progress`);
+          }
+        }, 100);
       } else {
-        console.log(`ℹ️  Semantic VAD will handle response for ${functionName} - no manual trigger needed`);
+        console.log(`ℹ️  No response trigger needed for ${functionName}`);
       }
     }
   }
