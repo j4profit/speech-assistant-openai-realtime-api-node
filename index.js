@@ -1413,7 +1413,8 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
       const nameIsMatch = fullConversationText.match(nameIsPattern);
 
       if (nameIsMatch) {
-        const potentialName = nameIsMatch[1].toLowerCase();
+        // Strip punctuation before checking against exclude words
+        const potentialName = nameIsMatch[1].replace(/[^a-z\s]/gi, '').toLowerCase();
 
         // Exclude common words
         if (!excludeWords.includes(potentialName)) {
@@ -1462,11 +1463,14 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
             } else {
               // Regular name extraction: look for 1-2 words that aren't common words
               const words = responseText.split(/\s+/);
-              const nameWords = words.filter(word =>
-                word.length >= 1 && // Allow single-letter names
-                !excludeWords.includes(word.toLowerCase()) &&
-                /^[a-z\.]+$/i.test(word) // Letters and periods only
-              );
+              const nameWords = words.filter(word => {
+                // Strip punctuation for comparison (but keep original for display)
+                const cleanWord = word.replace(/[^a-z]/gi, '').toLowerCase();
+
+                return word.length >= 1 && // Allow single-letter names
+                  !excludeWords.includes(cleanWord) && // Check cleaned version against excludes
+                  /^[a-z\.]+$/i.test(word); // Letters and periods only
+              });
 
               if (nameWords.length > 0 && nameWords.length <= 3) {
                 extractedCustomerName = nameWords
