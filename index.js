@@ -836,8 +836,7 @@ wss.on('connection', (ws, _req) => {
         // Extract order info from conversation and tracked state
         const orderInfo = {
           ...extractOrderFromConversation(),
-          customerPhone: customerPhone,
-          specialInstructions: ''
+          customerPhone: customerPhone
         };
 
         console.log('📦 Extracted order info:', JSON.stringify(orderInfo, null, 2));
@@ -1182,47 +1181,111 @@ wss.on('connection', (ws, _req) => {
       console.log('💳 Payment method: credit card');
     }
 
+    // Extract special instructions / customizations
+    // Look for cooking instructions, toppings, modifications
+    let specialInstructions = '';
+    const instructionPatterns = [
+      // Cooking level
+      /\b(rare|medium rare|medium|medium well|well done)\b/gi,
+      // With toppings
+      /\bwith\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
+      // No toppings
+      /\bno\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
+      // Extra items
+      /\bextra\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
+      // Add items
+      /\badd\s+([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi,
+      // On the side
+      /\bon the side:?\s*([\w\s,and]+?)(?:\s+and\s+|\s*,\s*|$)/gi
+    ];
+
+    const foundInstructions = [];
+    const fullConversationText = conversationLog.map(m => m.text).join(' ');
+
+    instructionPatterns.forEach(pattern => {
+      const matches = fullConversationText.matchAll(pattern);
+      for (const match of matches) {
+        const instruction = match[0].trim();
+        // Avoid duplicates and very short matches
+        if (instruction.length > 3 && !foundInstructions.includes(instruction.toLowerCase())) {
+          foundInstructions.push(instruction);
+        }
+      }
+    });
+
+    if (foundInstructions.length > 0) {
+      specialInstructions = foundInstructions.join('; ');
+      console.log(`📝 Special instructions extracted: "${specialInstructions}"`);
+    }
+
     // Extract customer name from conversation (after AI asks "May I have your name for the order?")
     // Look for the name in the conversation - it should appear after the AI asks for it
     let extractedCustomerName = customerName; // Use tracked state if available (from validate_delivery_address)
 
     if (!extractedCustomerName) {
       // Try to extract name from conversation
-      // Look for patterns like "my name is Mike", "it's Mike", "Mike", etc.
+      // Look for patterns like "my name is Mike", "it's Mike", "name's Mike", etc.
       const fullConversationText = conversationLog.map(m => m.text).join(' ');
 
-      // Pattern 1: "my name is [Name]" or "I'm [Name]"
-      const nameIsPattern = /(?:my name is|i'm|i am|this is|name is|it's)\s+([a-z]+(?:\s+[a-z]+)?)/i;
+      // Common words to exclude (not names)
+      const excludeWords = ['the', 'a', 'an', 'for', 'to', 'from', 'with', 'at', 'in', 'on', 'is', 'are', 'was', 'were'];
+
+      // Pattern 1: "my name is [Name]" or "I'm [Name]" or "name's [Name]"
+      const nameIsPattern = /(?:my name is|i'm|i am|this is|name is|it's|name's)\s+([a-z]+(?:\s+[a-z]+)?)/i;
       const nameIsMatch = fullConversationText.match(nameIsPattern);
 
       if (nameIsMatch) {
-        // Capitalize first letter of each word
-        extractedCustomerName = nameIsMatch[1]
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
-        console.log(`📝 Extracted customer name from conversation: "${extractedCustomerName}"`);
-      } else {
-        // Pattern 2: Look for name after "name" or "order for" keywords
-        // This catches responses like "Mike" right after AI asks for name
-        const nameContextPattern = /(?:name|order for)\s*[?:.]?\s*([a-z]+(?:\s+[a-z]+)?)/i;
-        const nameContextMatch = fullConversationText.match(nameContextPattern);
+        const potentialName = nameIsMatch[1].toLowerCase();
 
-        if (nameContextMatch) {
+        // Exclude common words
+        if (!excludeWords.includes(potentialName)) {
           // Capitalize first letter of each word
-          extractedCustomerName = nameContextMatch[1]
+          extractedCustomerName = nameIsMatch[1]
             .split(' ')
             .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
             .join(' ');
-          console.log(`📝 Extracted customer name from context: "${extractedCustomerName}"`);
+          console.log(`📝 Extracted customer name from conversation: "${extractedCustomerName}"`);
+        }
+      }
+
+      // If still not found, try looking for the name after AI asks for it
+      if (!extractedCustomerName) {
+        // Find where AI asks "May I have your name"
+        const nameQuestionIndex = conversationLog.findIndex(msg =>
+          msg.text && /may i have your name|what's your name|your name/i.test(msg.text)
+        );
+
+        if (nameQuestionIndex !== -1 && nameQuestionIndex < conversationLog.length - 1) {
+          // Get the next message (customer's response)
+          const customerResponse = conversationLog[nameQuestionIndex + 1];
+
+          if (customerResponse && customerResponse.text) {
+            // Extract name from the response
+            const responseText = customerResponse.text.trim();
+
+            // Simple extraction: look for 1-2 capitalized words that aren't common words
+            const words = responseText.split(/\s+/);
+            const nameWords = words.filter(word =>
+              word.length > 1 &&
+              !excludeWords.includes(word.toLowerCase()) &&
+              /^[a-z]+$/i.test(word) // Only letters
+            );
+
+            if (nameWords.length > 0 && nameWords.length <= 2) {
+              extractedCustomerName = nameWords
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+              console.log(`📝 Extracted customer name from response after AI question: "${extractedCustomerName}"`);
+            }
+          }
         }
       }
     }
 
-    // Fallback to 'Unknown' if still not found
-    if (!extractedCustomerName) {
+    // Fallback to 'Unknown' if still not found or if extracted name is suspicious
+    if (!extractedCustomerName || extractedCustomerName.length < 2) {
       extractedCustomerName = 'Unknown';
-      console.log('⚠️  Could not extract customer name from conversation - using "Unknown"');
+      console.log('⚠️  Could not extract valid customer name from conversation - using "Unknown"');
     }
 
     const extractedOrderType = orderType || 'pickup';
@@ -1232,7 +1295,8 @@ wss.on('connection', (ws, _req) => {
       orderType: extractedOrderType,
       items: items || '(none found)',
       calculatedSubtotal: calculatedSubtotal.toFixed(2),
-      paymentMethod: paymentMethod || 'N/A'
+      paymentMethod: paymentMethod || 'N/A',
+      specialInstructions: specialInstructions || 'None'
     });
 
     return {
@@ -1243,7 +1307,8 @@ wss.on('connection', (ws, _req) => {
       paymentMethod: paymentMethod || null,
       items: items,
       itemsWithPrices: itemsWithPrices, // Detailed item data with prices
-      calculatedSubtotal: calculatedSubtotal // Accurate subtotal from database prices
+      calculatedSubtotal: calculatedSubtotal, // Accurate subtotal from database prices
+      specialInstructions: specialInstructions || '' // Cooking instructions and customizations
     };
   }
 
