@@ -1299,27 +1299,47 @@ wss.on('connection', (ws, _req) => {
             // Extract name from the response
             const responseText = customerResponse.text.trim();
 
-            // Simple extraction: look for 1-2 capitalized words that aren't common words
-            const words = responseText.split(/\s+/);
-            const nameWords = words.filter(word =>
-              word.length > 1 &&
-              !excludeWords.includes(word.toLowerCase()) &&
-              /^[a-z]+$/i.test(word) // Only letters
-            );
+            // Check for initials first (e.g., "A.S.", "J.R.", "A. S.")
+            const initialsPattern = /^[A-Z]\.?\s*[A-Z]\.?$/i;
+            if (initialsPattern.test(responseText)) {
+              // It's initials - keep as-is but ensure proper formatting
+              extractedCustomerName = responseText
+                .toUpperCase()
+                .replace(/\s+/g, '') // Remove spaces between letters
+                .split('')
+                .map((char, i, arr) => i % 2 === 0 ? char : char === '.' ? '.' : `.${char}`) // Ensure periods
+                .join('')
+                .replace(/\.+/g, '.'); // Clean up multiple periods
 
-            if (nameWords.length > 0 && nameWords.length <= 2) {
-              extractedCustomerName = nameWords
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-              console.log(`📝 Extracted customer name from response after AI question: "${extractedCustomerName}"`);
+              // Simpler: just uppercase and ensure one period between letters if not already there
+              const letters = responseText.replace(/[^a-z]/gi, '');
+              if (letters.length >= 1 && letters.length <= 3) {
+                extractedCustomerName = letters.toUpperCase().split('').join('.');
+                console.log(`📝 Extracted customer initials: "${extractedCustomerName}"`);
+              }
+            } else {
+              // Regular name extraction: look for 1-2 words that aren't common words
+              const words = responseText.split(/\s+/);
+              const nameWords = words.filter(word =>
+                word.length >= 1 && // Allow single-letter names
+                !excludeWords.includes(word.toLowerCase()) &&
+                /^[a-z\.]+$/i.test(word) // Letters and periods only
+              );
+
+              if (nameWords.length > 0 && nameWords.length <= 3) {
+                extractedCustomerName = nameWords
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ');
+                console.log(`📝 Extracted customer name from response after AI question: "${extractedCustomerName}"`);
+              }
             }
           }
         }
       }
     }
 
-    // Fallback to 'Unknown' if still not found or if extracted name is suspicious
-    if (!extractedCustomerName || extractedCustomerName.length < 2) {
+    // Fallback to 'Unknown' if still not found (don't check length - allow short names/initials)
+    if (!extractedCustomerName) {
       extractedCustomerName = 'Unknown';
       console.log('⚠️  Could not extract valid customer name from conversation - using "Unknown"');
     }
