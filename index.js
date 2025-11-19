@@ -865,20 +865,14 @@ wss.on('connection', (ws, _req) => {
 
         console.log('📦 Extracted order info:', JSON.stringify(orderInfo, null, 2));
 
-        // Validate the order
-        const validation = validateOrder(orderInfo);
-        if (!validation.valid) {
-          console.log('❌ INVALID ORDER REJECTED:', validation.reason);
-          console.log('❌ Order details:', JSON.stringify(orderInfo, null, 2));
-          result = {
-            success: false,
-            error: validation.reason,
-            message: `Order validation failed: ${validation.reason}. Please check the order details and try again.`
-          };
-          break;
-        }
+        // Note: Order validation removed per user request
+        // Orders will be created even if item extraction fails
+        // Restaurant can call customer back if order details are unclear
+        console.log('ℹ️  Order validation bypassed - order will be created');
 
-        console.log('✅ Order validation passed');
+        // REMOVED: validateOrder() check
+        // Reason: Item extraction may fail but we want the order to go through
+        // Restaurant staff can handle unclear orders by calling customer back
 
         // Process the order
         try {
