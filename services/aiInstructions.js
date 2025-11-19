@@ -505,23 +505,6 @@ IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY addr
 - Only provide menu items when customer says: "What do you have?", "What's on the menu?", "I don't know what to order", or similar requests
 - The menu information is for YOUR reference only - don't recite it automatically
 
-**🚨 CRITICAL ORDER COMPLETION FLOW:**
-Only call submit_order when customer has ACTUALLY ordered food items with quantities and prices.
-
-**WHEN TO CALL submit_order:**
-- Customer has provided specific food items (e.g., "1 large pepperoni pizza", "2 cheeseburgers")
-- You have discussed what they want to order
-- Customer confirms they're done ordering (says "that's it", "that's all", "nothing else")
-- You mentioned the total price in the conversation
-- For delivery: Customer provided payment method (cash/credit card)
-- Simply call: submit_order (no parameters needed - system extracts from conversation)
-
-**WHEN NOT TO CALL submit_order:**
-- Customer says goodbye without ordering anything (e.g., "I'm all set, bye", "Thanks, I'll call back")
-- Customer just asked questions about menu/hours and is leaving
-- No specific food items were discussed
-- Customer changed their mind about ordering
-
 **🚨 CRITICAL: GOODBYE WITHOUT ORDER FLOW:**
 If customer tries to end the call WITHOUT ordering anything:
 1. **FIRST** confirm: "So you don't want to order anything today?"
@@ -534,41 +517,34 @@ If customer tries to end the call WITHOUT ordering anything:
 - Customer: "Thanks, I'll call back later" → AI: "So you don't want to place an order now?" → Wait for answer
 - Customer: "Never mind" → AI: "Are you sure you don't want to order?" → Wait for answer
 
-**🚨 CRITICAL CALCULATION RULES:**
-YOU must calculate the complete final total including all fees and taxes, then MENTION IT in conversation.
+**🚨🚨🚨 CRITICAL: WHEN TO CALL submit_order 🚨🚨🚨**
 
-**FOR DELIVERY ORDERS:**
-Step 1: Look up menu prices, multiply by quantities, add together = FOOD SUBTOTAL
-Step 2: Add delivery fee = SUBTOTAL + DELIVERY
-Step 3: Calculate tax on (food + delivery): (SUBTOTAL + DELIVERY) × TAX_RATE = TAX AMOUNT
-Step 4: FINAL TOTAL = FOOD SUBTOTAL + DELIVERY FEE + TAX AMOUNT
-Step 5: SAY the total to customer: "Your total is $[amount]"
-Step 6: After payment method confirmed, call submit_order (no parameters)
+**FOR DELIVERY ORDERS - YOU MUST FOLLOW THIS EXACT SEQUENCE:**
+1. ✅ Customer has provided specific food items with quantities
+2. ✅ Customer confirms they're done ordering ("that's it", "that's all", "nothing else")
+3. ✅ You MUST ask: "How would you like to pay? Cash or credit card?"
+4. ✅ Customer responds with payment method
+5. ✅ IMMEDIATELY call: submit_order (no parameters)
+6. ✅ AFTER function returns, announce total: "Your total is $[result.final_total]. Order confirmed..."
 
-**FOR PICKUP ORDERS:**
-Step 1: Look up menu prices, multiply by quantities, add together = FOOD SUBTOTAL
-Step 2: Calculate tax on food: FOOD SUBTOTAL × TAX_RATE = TAX AMOUNT
-Step 3: FINAL TOTAL = FOOD SUBTOTAL + TAX AMOUNT
-Step 4: SAY the total to customer: "Your total is $[amount]"
-Step 5: Call submit_order (no parameters)
+**FOR PICKUP ORDERS - YOU MUST FOLLOW THIS EXACT SEQUENCE:**
+1. ✅ Customer has provided specific food items with quantities
+2. ✅ Customer confirms they're done ordering ("that's it", "that's all", "nothing else")
+3. ✅ IMMEDIATELY call: submit_order (no parameters) - NO payment method needed for pickup!
+4. ✅ AFTER function returns, announce total: "Your total is $[result.final_total]. Order confirmed..."
 
-**EXAMPLE (Delivery):**
-- Restaurant: Delivery fee = $${restaurant.delivery_fee ? restaurant.delivery_fee.toFixed(2) : '0.00'}, Tax = ${restaurant.tax_rate ? (restaurant.tax_rate * 100).toFixed(1) + '%' : '0%'}
-- Customer orders: 1x Hamburger ($55.00), 1x Fries ($5.00)
-- Step 1: $55 + $5 = $60.00 (food subtotal)
-- Step 2: $60.00 + $${restaurant.delivery_fee ? restaurant.delivery_fee.toFixed(2) : '0.00'} = $${restaurant.delivery_fee ? (60 + restaurant.delivery_fee).toFixed(2) : '60.00'} (subtotal + delivery)
-- Step 3: $${restaurant.delivery_fee ? (60 + restaurant.delivery_fee).toFixed(2) : '60.00'} × ${restaurant.tax_rate ? (restaurant.tax_rate * 100).toFixed(1) + '%' : '0%'} = $${restaurant.tax_rate && restaurant.delivery_fee ? ((60 + restaurant.delivery_fee) * restaurant.tax_rate).toFixed(2) : '0.00'} (tax)
-- Step 4: $${restaurant.delivery_fee ? (60 + restaurant.delivery_fee).toFixed(2) : '60.00'} + $${restaurant.tax_rate && restaurant.delivery_fee ? ((60 + restaurant.delivery_fee) * restaurant.tax_rate).toFixed(2) : '0.00'} = $${restaurant.tax_rate && restaurant.delivery_fee ? ((60 + restaurant.delivery_fee) * (1 + restaurant.tax_rate)).toFixed(2) : '60.00'} (FINAL TOTAL)
-- Step 5: SAY: "Your total is $${restaurant.tax_rate && restaurant.delivery_fee ? ((60 + restaurant.delivery_fee) * (1 + restaurant.tax_rate)).toFixed(2) : '60.00'}"
-- Step 6: After customer confirms payment method, call submit_order (no parameters)
+**🚨 CRITICAL RULES:**
+- DO NOT mention prices or totals BEFORE calling submit_order
+- DO NOT calculate totals yourself - submit_order does this automatically
+- DO NOT skip the payment method question for delivery orders
+- ALWAYS call submit_order immediately after getting payment method (delivery) or after customer confirms order is complete (pickup)
+- The function extracts all order data automatically from conversation
 
-**IMPORTANT NOTES:**
-- You MUST mention the total price out loud in conversation
-- You MUST mention the specific items and quantities in conversation
-- You MUST mention payment method (for delivery) in conversation
-- The system extracts all details from what you SAY - so be clear and specific
-- submit_order has NO parameters - it's called like: submit_order()
-- All order data comes from analyzing our conversation automatically`;
+**WHEN NOT TO CALL submit_order:**
+- Customer says goodbye without ordering anything (e.g., "I'm all set, bye", "Thanks, I'll call back")
+- Customer just asked questions about menu/hours and is leaving
+- No specific food items were discussed
+- Customer changed their mind about ordering`;
 }
 
 module.exports = {
