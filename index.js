@@ -1042,16 +1042,28 @@ wss.on('connection', (ws, _req) => {
         }
       }));
 
-      // CRITICAL: Trigger AI to respond after function result
-      // Without this, AI receives the result but doesn't know to respond to customer
-      // Check if response already in progress to prevent race condition
-      if (!isResponseInProgress) {
-        openaiWs.send(JSON.stringify({
-          type: 'response.create'
-        }));
-        isResponseInProgress = true;
+      // With semantic VAD, the AI will automatically respond when it's ready
+      // We only need to trigger response.create for certain functions
+      // Functions that DON'T need manual response trigger (instant data, AI responds naturally):
+      // - check_customer_address (instant pre-fetched data)
+      // - search_recent_orders (just data lookup)
+      const noResponseTriggerFunctions = ['check_customer_address', 'search_recent_orders'];
+
+      if (!noResponseTriggerFunctions.includes(functionName)) {
+        // CRITICAL: Trigger AI to respond after function result
+        // Without this, AI receives the result but doesn't know to respond to customer
+        // Check if response already in progress to prevent race condition
+        if (!isResponseInProgress) {
+          openaiWs.send(JSON.stringify({
+            type: 'response.create'
+          }));
+          isResponseInProgress = true;
+          console.log(`✅ Triggered response.create after function: ${functionName}`);
+        } else {
+          console.log(`⚠️  Skipping response.create after ${functionName} - response already in progress`);
+        }
       } else {
-        console.log('⚠️  Skipping response.create after function - response already in progress');
+        console.log(`ℹ️  Semantic VAD will handle response for ${functionName} - no manual trigger needed`);
       }
     }
   }
