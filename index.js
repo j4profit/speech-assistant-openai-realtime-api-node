@@ -1312,10 +1312,25 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
 
         // FALLBACK 2: Try partial word matching (e.g., "pepperoni" matches "Pepperoni Pizza")
         // This helps when customer doesn't know exact menu name
-        if ((itemsWithPrices.length === 0 || !itemsWithPrices.some(item => item.name.toLowerCase() === itemName)) && itemWords.length > 0) {
+        // ONLY run if this specific item hasn't been found yet (no exact or no-qty matches)
+        const alreadyFound = itemsWithPrices.some(item => item.name.toLowerCase() === itemName);
+
+        if (!alreadyFound && itemWords.length > 0) {
+          // Skip generic category words that appear in many items
+          const genericWords = ['pizza', 'pizzas', 'burger', 'burgers', 'sandwich', 'sandwiches', 'sub', 'subs', 'wrap', 'wraps', 'salad', 'salads', 'fries', 'drink', 'drinks', 'soda', 'sodas'];
+
+          // Only use the MOST DISTINCTIVE word (first non-generic word)
+          let distinctiveWord = null;
           for (const word of itemWords) {
-            // Look for significant words from item name in conversation
-            const partialPattern = new RegExp(`\\b${word}s?\\b`, 'gi');
+            if (!genericWords.includes(word)) {
+              distinctiveWord = word;
+              break; // Use only the first distinctive word
+            }
+          }
+
+          if (distinctiveWord) {
+            // Look for this specific distinctive word in conversation
+            const partialPattern = new RegExp(`\\b${distinctiveWord}s?\\b`, 'gi');
             const partialMatches = conversationText.match(partialPattern);
 
             if (partialMatches && partialMatches.length > 0) {
@@ -1342,8 +1357,7 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
 
                 calculatedSubtotal += lineTotal;
                 const customText = customizations ? ` (${customizations})` : '';
-                console.log(`✅ Found (partial match on "${word}"): 1x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
-                break; // Only match once per item
+                console.log(`✅ Found (partial match on "${distinctiveWord}"): 1x ${menuItem.name} @ $${defaultSize.price.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
               }
             }
           }
