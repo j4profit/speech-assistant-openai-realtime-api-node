@@ -387,13 +387,13 @@ If has_saved_address=false OR customer wants different address:
       - result.ready_time = FORMATTED TIME (e.g., "12:57 PM")
    e) 🚨 MANDATORY - YOU MUST announce ALL THREE pieces of information:
 
-      Template: "Your total is $[USE result.final_total HERE]. Order confirmed for [customer name] for delivery. Your order will arrive in approximately [USE result.total_minutes HERE] minutes, around [USE result.ready_time HERE]. Thank you!"
+      Template: "Your estimated total is $[USE result.final_total HERE]. Order confirmed for [customer name] for delivery. Your order will arrive in approximately [USE result.total_minutes HERE] minutes, around [USE result.ready_time HERE]. Thank you!"
 
       Real Example: If function returns {final_total: 120.42, total_minutes: 50, ready_time: "12:57 PM"}
-      YOU MUST SAY: "Your total is $120.42. Order confirmed for John for delivery. Your order will arrive in approximately 50 minutes, around 12:57 PM. Thank you!"
+      YOU MUST SAY: "Your estimated total is $120.42. Order confirmed for John for delivery. Your order will arrive in approximately 50 minutes, around 12:57 PM. Thank you!"
 
       ⛔ DO NOT say: "Order confirmed for John" and stop - YOU MUST INCLUDE TIMING!
-      ⛔ DO NOT skip the dollar amount - customers need to know the total!
+      ⛔ DO NOT skip the dollar amount - customers need to know the estimated total!
       ⛔ DO NOT skip the minutes and time - customers need to know when to expect delivery!
 
 4. 🚨 CRITICAL - DO NOT READ OUT ORDER DETAILS:
@@ -426,13 +426,13 @@ For pickup orders, IMMEDIATELY follow this EXACT sequence (after you have custom
    - result.ready_time = FORMATTED TIME (e.g., "12:30 PM")
 6. 🚨 MANDATORY - YOU MUST announce ALL THREE pieces of information:
 
-   Template: "Your total is $[USE result.final_total HERE]. Order confirmed for [customer name] for pickup. Your order will be ready in approximately [USE result.total_minutes HERE] minutes, around [USE result.ready_time HERE]. Thank you!"
+   Template: "Your estimated total is $[USE result.final_total HERE]. Order confirmed for [customer name] for pickup. Your order will be ready in approximately [USE result.total_minutes HERE] minutes, around [USE result.ready_time HERE]. Thank you!"
 
    Real Example: If function returns {final_total: 62.10, total_minutes: 20, ready_time: "12:30 PM"}
-   YOU MUST SAY: "Your total is $62.10. Order confirmed for Sarah for pickup. Your order will be ready in approximately 20 minutes, around 12:30 PM. Thank you!"
+   YOU MUST SAY: "Your estimated total is $62.10. Order confirmed for Sarah for pickup. Your order will be ready in approximately 20 minutes, around 12:30 PM. Thank you!"
 
    ⛔ DO NOT say: "Order confirmed for Sarah" and stop - YOU MUST INCLUDE TIMING!
-   ⛔ DO NOT skip the dollar amount - customers need to know the total!
+   ⛔ DO NOT skip the dollar amount - customers need to know the estimated total!
    ⛔ DO NOT skip the minutes and time - customers need to know when to pick up!
 
 7. System will automatically end the call - you don't need to do anything else

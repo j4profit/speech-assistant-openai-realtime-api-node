@@ -891,8 +891,8 @@ wss.on('connection', (ws, _req) => {
           const taxableAmount = subtotal + deliveryFee;
           const taxAmount = taxableAmount * taxRate;
 
-          // Calculate final total
-          const finalTotal = subtotal + deliveryFee + taxAmount;
+          // Calculate final total and round to 2 decimal places
+          const finalTotal = Math.round((subtotal + deliveryFee + taxAmount) * 100) / 100;
 
           console.log('💰 Order pricing (calculated from database menu prices):');
           console.log(`   Food subtotal: $${subtotal.toFixed(2)} (from menu prices)`);
@@ -1089,11 +1089,11 @@ wss.on('connection', (ws, _req) => {
             if (functionName === 'submit_order' && result.success) {
               const announcementInstructions = `CRITICAL: You just called submit_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
 
-"Your total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+"Your estimated total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
 
-Example: "Your total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+Example: "Your estimated total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
 
-DO NOT skip any part of this announcement. The customer MUST hear the total, the timing in minutes, and the ready time.`;
+DO NOT skip any part of this announcement. The customer MUST hear the estimated total, the timing in minutes, and the ready time.`;
 
               responsePayload.response = {
                 instructions: announcementInstructions
@@ -1431,12 +1431,18 @@ DO NOT skip any part of this announcement. The customer MUST hear the total, the
       if (!extractedCustomerName) {
         // Find where AI asks "May I have your name"
         const nameQuestionIndex = conversationLog.findIndex(msg =>
-          msg.text && /may i have your name|what's your name|your name/i.test(msg.text)
+          msg.speaker === 'ai' && msg.text && /may i have your name|what's your name|your name for the order/i.test(msg.text)
         );
 
-        if (nameQuestionIndex !== -1 && nameQuestionIndex < conversationLog.length - 1) {
-          // Get the next message (customer's response)
-          const customerResponse = conversationLog[nameQuestionIndex + 1];
+        if (nameQuestionIndex !== -1) {
+          // Find the NEXT CUSTOMER message after the name question (not just next message)
+          let customerResponse = null;
+          for (let i = nameQuestionIndex + 1; i < conversationLog.length; i++) {
+            if (conversationLog[i].speaker === 'customer' && conversationLog[i].text) {
+              customerResponse = conversationLog[i];
+              break;
+            }
+          }
 
           if (customerResponse && customerResponse.text) {
             // Extract name from the response
