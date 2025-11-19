@@ -639,13 +639,14 @@ wss.on('connection', (ws, _req) => {
           addressValidated = true;
 
           // Track order state
-          customerName = prefetchedCustomerAddress.customer_name;
+          // ⚠️ DO NOT set customerName from cached address - customer will provide name during call
+          // The cached name is just for reference (different person might be calling)
           orderType = 'delivery'; // Customer asking for address means delivery order
 
           result = {
             has_saved_address: true,
             address_id: prefetchedCustomerAddress.id,
-            customer_name: prefetchedCustomerAddress.customer_name,
+            customer_name: prefetchedCustomerAddress.customer_name, // For AI reference only
             delivery_address: prefetchedCustomerAddress.delivery_address,
             delivery_instructions: prefetchedCustomerAddress.delivery_instructions,
             distance: prefetchedCustomerAddress.distance_from_restaurant,
@@ -653,7 +654,7 @@ wss.on('connection', (ws, _req) => {
           };
 
           console.log(`✅ Using pre-loaded address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
-          console.log(`📝 Order state updated: customerName="${customerName}", orderType="${orderType}"`);
+          console.log(`📝 Order state updated: orderType="${orderType}" (customer name will be extracted from conversation)`);
         } else {
           // Still a delivery order, just no saved address
           orderType = 'delivery';
@@ -1181,8 +1182,49 @@ wss.on('connection', (ws, _req) => {
       console.log('💳 Payment method: credit card');
     }
 
-    // Use tracked state for customer name and order type
-    const extractedCustomerName = customerName || 'Unknown';
+    // Extract customer name from conversation (after AI asks "May I have your name for the order?")
+    // Look for the name in the conversation - it should appear after the AI asks for it
+    let extractedCustomerName = customerName; // Use tracked state if available (from validate_delivery_address)
+
+    if (!extractedCustomerName) {
+      // Try to extract name from conversation
+      // Look for patterns like "my name is Mike", "it's Mike", "Mike", etc.
+      const fullConversationText = conversationLog.map(m => m.text).join(' ');
+
+      // Pattern 1: "my name is [Name]" or "I'm [Name]"
+      const nameIsPattern = /(?:my name is|i'm|i am|this is|name is|it's)\s+([a-z]+(?:\s+[a-z]+)?)/i;
+      const nameIsMatch = fullConversationText.match(nameIsPattern);
+
+      if (nameIsMatch) {
+        // Capitalize first letter of each word
+        extractedCustomerName = nameIsMatch[1]
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+        console.log(`📝 Extracted customer name from conversation: "${extractedCustomerName}"`);
+      } else {
+        // Pattern 2: Look for name after "name" or "order for" keywords
+        // This catches responses like "Mike" right after AI asks for name
+        const nameContextPattern = /(?:name|order for)\s*[?:.]?\s*([a-z]+(?:\s+[a-z]+)?)/i;
+        const nameContextMatch = fullConversationText.match(nameContextPattern);
+
+        if (nameContextMatch) {
+          // Capitalize first letter of each word
+          extractedCustomerName = nameContextMatch[1]
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+          console.log(`📝 Extracted customer name from context: "${extractedCustomerName}"`);
+        }
+      }
+    }
+
+    // Fallback to 'Unknown' if still not found
+    if (!extractedCustomerName) {
+      extractedCustomerName = 'Unknown';
+      console.log('⚠️  Could not extract customer name from conversation - using "Unknown"');
+    }
+
     const extractedOrderType = orderType || 'pickup';
 
     console.log('📋 Order extraction complete:', {
