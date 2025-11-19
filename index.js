@@ -669,11 +669,12 @@ wss.on('connection', (ws, _req) => {
           result = {
             has_saved_address: true,
             address_id: prefetchedCustomerAddress.id,
-            customer_name: prefetchedCustomerAddress.customer_name, // For AI reference only
             delivery_address: prefetchedCustomerAddress.delivery_address,
             delivery_instructions: prefetchedCustomerAddress.delivery_instructions,
             distance: prefetchedCustomerAddress.distance_from_restaurant,
             times_used: prefetchedCustomerAddress.times_used
+            // NOTE: customer_name intentionally excluded - AI should NOT confirm/validate names
+            // The stored name is just for database reference, not for customer validation
           };
 
           console.log(`✅ Using pre-loaded address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
