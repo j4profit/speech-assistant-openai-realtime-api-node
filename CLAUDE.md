@@ -766,3 +766,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.7**: Added payment method collection for delivery orders with credit card call forwarding and PCI-compliant workflow
 - **v2.7.1**: Removed conversation transcript collection from WebSocket (call logging now handled by Twilio webhooks)
 - **v2.7.2**: **CRITICAL FIX** - Replaced parameterized transfer_call function with 4 parameter-free functions to work around OpenAI Realtime API limitation where AI cannot reliably provide function parameters
+- **v2.8**: **CRITICAL FIX** - Made submit_order parameter-free with conversation extraction, added automatic call timeout (3min inactivity, 10min max), fixed race condition preventing "conversation_already_has_active_response" errors

@@ -60,6 +60,15 @@ wss.on('connection', (ws, _req) => {
   let currentModel = config.openai.model; // Track which model is being used
   let modelFallbackAttempted = false; // Prevent infinite fallback loops
 
+  // Order state tracking (for parameter-free submit_order)
+  let customerName = null;
+  let orderType = null; // 'pickup' or 'delivery'
+  let conversationLog = []; // Track AI responses to extract order details
+  let lastCustomerActivityTime = Date.now(); // For call timeout
+  let callStartTime = Date.now(); // Track total call duration
+  let activityCheckInterval = null; // Interval timer for checking call timeout
+  let isResponseInProgress = false; // Track if OpenAI is generating a response (prevent race condition)
+
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
     if (callFinalized) {
@@ -77,6 +86,10 @@ wss.on('connection', (ws, _req) => {
     if (greetingTimeout) {
       clearTimeout(greetingTimeout);
       greetingTimeout = null;
+    }
+    if (activityCheckInterval) {
+      clearInterval(activityCheckInterval);
+      activityCheckInterval = null;
     }
 
     // Don't attempt Twilio hangup if we don't have a callSid yet
@@ -389,42 +402,10 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "submit_order",
-        description: "Submit a complete order to the system. After calling this, say brief confirmation to customer.",
+        description: "Submit a complete order to the system. Call this when customer confirms they're done ordering. NO PARAMETERS NEEDED - order details are extracted from conversation.",
         parameters: {
           type: "object",
-          properties: {
-            customer_name: {
-              type: "string",
-              description: "Customer's name"
-            },
-            order_type: {
-              type: "string",
-              enum: ["delivery", "pickup"],
-              description: "Order type"
-            },
-            delivery_address: {
-              type: "string",
-              description: "Full delivery address (or N/A for pickup)"
-            },
-            delivery_instructions: {
-              type: "string",
-              description: "Delivery instructions (or N/A for pickup or if none provided)"
-            },
-            payment_method: {
-              type: "string",
-              enum: ["cash", "credit card", "N/A"],
-              description: "Payment method (cash, credit card, or N/A for pickup)"
-            },
-            items: {
-              type: "string",
-              description: "Order items with quantities (e.g., '2x Burger, 1x Fries')"
-            },
-            total_amount: {
-              type: "number",
-              description: "Total order amount in dollars"
-            }
-          },
-          required: ["customer_name", "order_type", "items", "total_amount"]
+          properties: {}
         }
       }
     ];
@@ -460,13 +441,41 @@ wss.on('connection', (ws, _req) => {
                 content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
               }
             }));
-            openaiWs.send(JSON.stringify({ type: 'response.create' }));
+
+            if (!isResponseInProgress) {
+              openaiWs.send(JSON.stringify({ type: 'response.create' }));
+              isResponseInProgress = true;
+            } else {
+              console.log('⚠️  Skipping response.create - response already in progress');
+            }
 
             // Cancel backup greeting since we've sent the greeting
             if (greetingTimeout) {
               clearTimeout(greetingTimeout);
               greetingTimeout = null;
               console.log('Backup greeting canceled (session.updated greeting sent)');
+            }
+
+            // Start activity monitoring for automatic timeout
+            if (!activityCheckInterval) {
+              activityCheckInterval = setInterval(() => {
+                const now = Date.now();
+                const inactiveMs = now - lastCustomerActivityTime;
+                const totalCallMs = now - callStartTime;
+
+                // Timeout conditions
+                const maxInactivityMs = 3 * 60 * 1000; // 3 minutes of silence
+                const maxCallDurationMs = 10 * 60 * 1000; // 10 minutes total
+
+                if (inactiveMs > maxInactivityMs) {
+                  console.log(`⏰ Call timeout: ${Math.round(inactiveMs / 1000)}s of inactivity (max: ${Math.round(maxInactivityMs / 1000)}s)`);
+                  initiateHangup('inactivity_timeout');
+                } else if (totalCallMs > maxCallDurationMs) {
+                  console.log(`⏰ Call timeout: ${Math.round(totalCallMs / 1000)}s total duration (max: ${Math.round(maxCallDurationMs / 1000)}s)`);
+                  initiateHangup('max_duration_exceeded');
+                }
+              }, 10000); // Check every 10 seconds
+              console.log('✅ Activity monitoring started (3min inactivity, 10min max duration)');
             }
           }
           break;
@@ -495,6 +504,7 @@ wss.on('connection', (ws, _req) => {
 
         case 'response.done':
           console.log('Response completed');
+          isResponseInProgress = false; // Response finished, ready for next one
 
           // Capture usage data from response
           // Usage tracking removed per user request
@@ -503,6 +513,13 @@ wss.on('connection', (ws, _req) => {
         case 'response.audio_transcript.done':
           console.log('AI said:', response.transcript);
           aiResponseCount++;
+
+          // Track conversation for order extraction
+          conversationLog.push({
+            timestamp: Date.now(),
+            speaker: 'ai',
+            text: response.transcript
+          });
 
           // Mark customer as having spoken after second AI response
           // (First response is the greeting, second means customer actually spoke)
@@ -618,7 +635,12 @@ wss.on('connection', (ws, _req) => {
           // Store the address ID for later use in order creation
           deliveryAddressId = prefetchedCustomerAddress.id;
           validatedDeliveryAddress = prefetchedCustomerAddress.delivery_address;
+          deliveryInstructions = prefetchedCustomerAddress.delivery_instructions;
           addressValidated = true;
+
+          // Track order state
+          customerName = prefetchedCustomerAddress.customer_name;
+          orderType = 'delivery'; // Customer asking for address means delivery order
 
           result = {
             has_saved_address: true,
@@ -631,7 +653,10 @@ wss.on('connection', (ws, _req) => {
           };
 
           console.log(`✅ Using pre-loaded address (ID: ${deliveryAddressId}): ${validatedDeliveryAddress}`);
+          console.log(`📝 Order state updated: customerName="${customerName}", orderType="${orderType}"`);
         } else {
+          // Still a delivery order, just no saved address
+          orderType = 'delivery';
           result = {
             has_saved_address: false,
             message: 'No saved delivery address found'
@@ -651,6 +676,13 @@ wss.on('connection', (ws, _req) => {
         if (validationResult.valid) {
           addressValidated = true;
           validatedDeliveryAddress = parsedArgs.address;
+
+          // Track order state
+          orderType = 'delivery';
+          if (parsedArgs.customer_name) {
+            customerName = parsedArgs.customer_name;
+            console.log(`📝 Customer name set from address validation: "${customerName}"`);
+          }
 
           // Store the address ID if this address was saved to cache
           if (validationResult.address_id) {
@@ -798,22 +830,16 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'submit_order':
-        console.log('📦 submit_order called with parameters:', JSON.stringify(parsedArgs, null, 2));
+        console.log('📦 submit_order called (parameter-free)');
 
-        // Build order info from function parameters
+        // Extract order info from conversation and tracked state
         const orderInfo = {
-          customerName: parsedArgs.customer_name || 'Unknown',
+          ...extractOrderFromConversation(),
           customerPhone: customerPhone,
-          orderType: parsedArgs.order_type || 'pickup',
-          deliveryAddress: parsedArgs.delivery_address || 'N/A',
-          deliveryInstructions: parsedArgs.delivery_instructions === 'N/A' ? null : parsedArgs.delivery_instructions,
-          paymentMethod: parsedArgs.payment_method === 'N/A' ? null : parsedArgs.payment_method,
-          items: parsedArgs.items || '',
-          totalAmount: parsedArgs.total_amount || 0,
           specialInstructions: ''
         };
 
-        console.log('📦 Built order info:', JSON.stringify(orderInfo, null, 2));
+        console.log('📦 Extracted order info:', JSON.stringify(orderInfo, null, 2));
 
         // Validate the order
         const validation = validateOrder(orderInfo);
@@ -1021,10 +1047,102 @@ wss.on('connection', (ws, _req) => {
 
       // CRITICAL: Trigger AI to respond after function result
       // Without this, AI receives the result but doesn't know to respond to customer
-      openaiWs.send(JSON.stringify({
-        type: 'response.create'
-      }));
+      // Check if response already in progress to prevent race condition
+      if (!isResponseInProgress) {
+        openaiWs.send(JSON.stringify({
+          type: 'response.create'
+        }));
+        isResponseInProgress = true;
+      } else {
+        console.log('⚠️  Skipping response.create after function - response already in progress');
+      }
     }
+  }
+
+  // Extract order details from conversation log
+  function extractOrderFromConversation() {
+    console.log('🔍 Extracting order details from conversation...');
+
+    // Get recent conversation (last 10 messages)
+    const recentMessages = conversationLog.slice(-10);
+    const conversationText = recentMessages.map(m => m.text).join(' ').toLowerCase();
+
+    console.log('📝 Analyzing conversation:', conversationText.substring(0, 200) + '...');
+
+    // Extract items (look for quantity + food patterns)
+    let items = '';
+    let totalAmount = 0;
+    let paymentMethod = null;
+
+    // Parse items from conversation
+    // Look for patterns like "one hamburger", "1 hamburger", "two burgers", etc.
+    const itemPatterns = [
+      /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(x\s*)?([a-z\s]+(?:burger|pizza|fries|fry|sandwich|salad|drink|soda|chicken|wings))/gi,
+      /(\d+)\s*([a-z\s]+)/gi // Generic number + item pattern
+    ];
+
+    const foundItems = [];
+    for (const pattern of itemPatterns) {
+      const matches = conversationText.matchAll(pattern);
+      for (const match of matches) {
+        const quantity = match[1];
+        const item = (match[3] || match[2] || '').trim();
+        if (item && item.length > 2) {
+          // Convert word numbers to digits
+          const quantityMap = {
+            'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+            'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
+          };
+          const qty = quantityMap[quantity.toLowerCase()] || quantity;
+          foundItems.push(`${qty}x ${item}`);
+        }
+      }
+    }
+
+    if (foundItems.length > 0) {
+      items = foundItems.join(', ');
+      console.log('🍔 Found items:', items);
+    }
+
+    // Extract total amount (look for $ amounts mentioned)
+    const totalMatches = conversationText.match(/\$(\d+\.?\d*)/g);
+    if (totalMatches && totalMatches.length > 0) {
+      // Get the last mentioned price (likely the total)
+      const lastPrice = totalMatches[totalMatches.length - 1];
+      totalAmount = parseFloat(lastPrice.replace('$', ''));
+      console.log('💰 Found total:', totalAmount);
+    }
+
+    // Extract payment method
+    if (conversationText.includes('cash')) {
+      paymentMethod = 'cash';
+      console.log('💵 Payment method: cash');
+    } else if (conversationText.includes('credit card') || conversationText.includes('card')) {
+      paymentMethod = 'credit card';
+      console.log('💳 Payment method: credit card');
+    }
+
+    // Use tracked state for customer name and order type
+    const extractedCustomerName = customerName || 'Unknown';
+    const extractedOrderType = orderType || 'pickup';
+
+    console.log('📋 Order extraction complete:', {
+      customerName: extractedCustomerName,
+      orderType: extractedOrderType,
+      items: items || '(none found)',
+      totalAmount,
+      paymentMethod: paymentMethod || 'N/A'
+    });
+
+    return {
+      customerName: extractedCustomerName,
+      orderType: extractedOrderType,
+      deliveryAddress: validatedDeliveryAddress || 'N/A',
+      deliveryInstructions: deliveryInstructions || null,
+      paymentMethod: paymentMethod || null,
+      items: items,
+      totalAmount: totalAmount
+    };
   }
 
   // Validate order to prevent fake/invalid orders
@@ -1282,13 +1400,22 @@ wss.on('connection', (ws, _req) => {
                   content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
                 }
               }));
-              openaiWs.send(JSON.stringify({ type: 'response.create' }));
+
+              if (!isResponseInProgress) {
+                openaiWs.send(JSON.stringify({ type: 'response.create' }));
+                isResponseInProgress = true;
+              } else {
+                console.log('⚠️  Skipping backup greeting response.create - response already in progress');
+              }
             }
           }, 3000); // 3 seconds - enough time for session.updated to arrive
           break;
 
         case 'media':
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            // Update activity timestamp for timeout tracking
+            lastCustomerActivityTime = Date.now();
+
             let audioPayload = msg.media.payload;
             const inputBuffer = Buffer.from(audioPayload, 'base64');
 
@@ -1348,6 +1475,12 @@ wss.on('connection', (ws, _req) => {
     if (greetingTimeout) {
       clearTimeout(greetingTimeout);
       greetingTimeout = null;
+    }
+
+    // Clear activity check interval
+    if (activityCheckInterval) {
+      clearInterval(activityCheckInterval);
+      activityCheckInterval = null;
     }
 
     // Note: Call logging is handled by Twilio webhooks, not here

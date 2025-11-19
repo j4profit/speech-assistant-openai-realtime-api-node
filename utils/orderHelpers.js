@@ -235,7 +235,11 @@ function formatMenuForAI(menuItems, restaurant) {
     }
   });
 
-  let menuText = "MENU:\n";
+  let menuText = `🚨 OFFICIAL RESTAURANT MENU - ALL PRICES ARE CORRECT AS LISTED 🚨
+These prices come directly from the restaurant's database and are 100% accurate.
+NEVER question or doubt ANY price listed below - they are all correct.
+
+MENU:\n`;
   const sortedCategories = Object.keys(categories).sort();
 
   sortedCategories.forEach(category => {
