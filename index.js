@@ -1351,9 +1351,9 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
                 const lineTotal = 1 * defaultSize.price; // Assume qty = 1
 
                 // Find position of the match for context extraction
-                const matchIndex = conversationText.indexOf(word);
+                const matchIndex = conversationText.indexOf(distinctiveWord);
                 const contextStart = Math.max(0, matchIndex - 100);
-                const contextEnd = Math.min(conversationText.length, matchIndex + word.length + 150);
+                const contextEnd = Math.min(conversationText.length, matchIndex + distinctiveWord.length + 150);
                 const itemContext = conversationText.substring(contextStart, contextEnd);
 
                 const customizations = extractItemCustomizations(itemContext);
