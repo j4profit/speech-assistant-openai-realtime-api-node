@@ -1131,12 +1131,29 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
     const foundCustomizations = [];
     const lowerContext = context.toLowerCase();
 
+    // Helper function to normalize customizations for duplicate detection
+    const normalize = (str) => {
+      return str
+        .toLowerCase()
+        .replace(/\s+/g, ' ')  // Normalize whitespace
+        .replace(/,/g, '')      // Remove commas
+        .replace(/\band\b/g, '') // Remove "and"
+        .trim();
+    };
+
     customizationPatterns.forEach(pattern => {
       const matches = lowerContext.matchAll(pattern);
       for (const match of matches) {
         const customization = match[0].trim();
+        const normalized = normalize(customization);
+
+        // Check if we already have this customization (normalized comparison)
+        const isDuplicate = foundCustomizations.some(existing =>
+          normalize(existing) === normalized
+        );
+
         // Avoid duplicates and very short matches
-        if (customization.length > 2 && !foundCustomizations.includes(customization)) {
+        if (customization.length > 2 && !isDuplicate) {
           foundCustomizations.push(customization);
         }
       }
