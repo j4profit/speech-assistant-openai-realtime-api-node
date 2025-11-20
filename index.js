@@ -992,9 +992,7 @@ wss.on('connection', (ws, _req) => {
                   };
                 } else {
                   console.error('❌ Credit card payment transfer failed:', transferResult.error);
-                  hangupTimer = setTimeout(async () => {
-                    await initiateHangup('order_completed_transfer_failed');
-                  }, 5000);
+                  // Let AI handle goodbye naturally - no forced hangup timer
                   result = {
                     success: true,
                     order_id: order.id,
@@ -1008,10 +1006,8 @@ wss.on('connection', (ws, _req) => {
                   };
                 }
               } else {
-                console.log('💳 Credit card order created but call forwarding not configured - normal hangup');
-                hangupTimer = setTimeout(async () => {
-                  await initiateHangup('order_completed');
-                }, 5000);
+                console.log('💳 Credit card order created - AI will announce and end call naturally');
+                // Let AI handle goodbye naturally - no forced hangup timer
                 result = {
                   success: true,
                   order_id: order.id,
@@ -1025,10 +1021,9 @@ wss.on('connection', (ws, _req) => {
                 };
               }
             } else {
-              // Cash order or no payment method - normal hangup
-              hangupTimer = setTimeout(async () => {
-                await initiateHangup('order_completed');
-              }, 5000);
+              // Cash order - AI will announce order details and thank customer naturally
+              console.log('💵 Cash order created - AI will announce and end call naturally');
+              // Let AI handle goodbye naturally - no forced hangup timer
               result = {
                 success: true,
                 order_id: order.id,
