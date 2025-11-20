@@ -623,6 +623,16 @@ wss.on('connection', (ws, _req) => {
           // Usage tracking removed per user request
           break;
 
+        case 'response.created':
+          console.log('📣 Response started generating');
+          break;
+
+        case 'response.output_item.added':
+          if (response.item?.type === 'function_call') {
+            console.log(`📣 AI decided to call function: ${response.item.name}`);
+          }
+          break;
+
         case 'response.audio_transcript.done':
           console.log('AI said:', response.transcript);
           aiResponseCount++;
@@ -743,6 +753,18 @@ wss.on('connection', (ws, _req) => {
             }
             await handleFunctionCall(bufferedFunctionCall);
             bufferedFunctionCall = null;
+          } else {
+            // No buffered function call - check if AI needs prompting
+            // Wait 1 second to see if AI auto-responds, otherwise prompt it
+            setTimeout(() => {
+              if (!isResponseInProgress && customerHasSpoken) {
+                console.log('⚠️  No response after 1s - manually triggering response.create');
+                if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                  openaiWs.send(JSON.stringify({ type: 'response.create' }));
+                  isResponseInProgress = true;
+                }
+              }
+            }, 1000);
           }
           break;
 
@@ -1190,32 +1212,35 @@ wss.on('connection', (ws, _req) => {
                 const menuName = menuItem.name.toLowerCase();
                 let score = 0;
 
-                // Common spelling variations
+                // Common spelling variations (apply TO menu name to create variants to check)
                 const variations = [
-                  menuName.replace('gh', 'g'),     // margherita -> margarita
-                  menuName.replace('ph', 'f'),      // phone -> fone
-                  menuName.replace('qu', 'k'),      // queso -> keso
-                  menuName.replace('ue', 'u')       // barbeque -> barbecue
+                  menuName.replace(/gh/g, 'g'),     // margherita -> margarita
+                  menuName.replace(/ph/g, 'f'),      // phone -> fone
+                  menuName.replace(/qu/g, 'k'),      // queso -> keso
+                  menuName.replace(/ue/g, 'u')       // barbeque -> barbecue
                 ];
 
-                // Check for variation match (highest score)
+                // Check for variation match (highest priority)
                 for (const variant of variations) {
-                  if (itemText.includes(variant) && variant !== menuName) {
-                    score = variant.length * 2; // Prioritize longer, more specific variations
-                    console.log(`🔍 Variation match: "${variant}" in "${menuName}" - score: ${score}`);
+                  if (variant !== menuName && itemText.includes(variant)) {
+                    // Give very high score for spelling variations
+                    score = 100 + variant.length;
+                    console.log(`✅ SPELLING VARIATION MATCH: customer said "${variant}" matches menu "${menuName}" - score: ${score}`);
                     break;
                   }
                 }
 
-                // Check main words (ignore small generic words)
-                const menuWords = menuName.split(' ').filter(w => w.length > 3);
-                for (const word of menuWords) {
-                  if (itemText.includes(word)) {
-                    // Longer words = more specific = higher score
-                    const wordScore = word.length;
-                    if (wordScore > score) {
-                      score = wordScore;
-                      console.log(`🔍 Word match: "${word}" in "${menuName}" - score: ${score}`);
+                // Check main words only if no spelling variation found (ignore small generic words)
+                if (score === 0) {
+                  const menuWords = menuName.split(' ').filter(w => w.length > 3);
+                  for (const word of menuWords) {
+                    if (itemText.includes(word)) {
+                      // Longer words = more specific = higher score (but lower than spelling variations)
+                      const wordScore = word.length;
+                      if (wordScore > score) {
+                        score = wordScore;
+                        console.log(`🔍 Word match: "${word}" in "${menuName}" - score: ${score}`);
+                      }
                     }
                   }
                 }
