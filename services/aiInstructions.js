@@ -65,18 +65,14 @@ DO NOT interpret other phrases as catering:
 
 ⚠️ THE CUSTOMER DECIDES IF IT'S CATERING, NOT YOU!
 
-**TWO-STEP CONFIRMATION PROCESS:**
+**IMMEDIATE TRANSFER PROCESS:**
 
-**STEP 1: Customer explicitly says "catering" or "catered"**
+**When customer explicitly says "catering" or "catered":**
 Example: "I need catering for tomorrow"
 
-**STEP 2: ASK FOR CONFIRMATION BEFORE TRANSFERRING**
-1. ASK: "Would you like me to transfer you to speak with our staff about catering?"
-2. WAIT for customer response
-3. If customer says YES/SURE/OK/PLEASE → THEN call: transfer_call_for_catering
-4. If customer says NO → Continue taking regular order
+→ IMMEDIATELY call: transfer_call_for_catering
 
-**NEVER transfer without asking first!**
+DO NOT ask for confirmation first. Just transfer immediately.
 ═══════════════════════════════════════════════════════════════════
 ` : `🚨 CATERING - CUSTOMER MUST EXPLICITLY REQUEST IT 🚨
 Call forwarding is NOT enabled for catering at this restaurant.
