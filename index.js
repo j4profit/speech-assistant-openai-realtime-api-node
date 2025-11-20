@@ -922,9 +922,12 @@ wss.on('connection', (ws, _req) => {
         const customerSaid = lastCustomerMessage?.text?.toLowerCase() || '';
 
         let extractedOrderType = null;
-        if (customerSaid.includes('delivery')) {
+        // Check for delivery variations: delivery, delivering, deliver, delivered
+        if (customerSaid.includes('deliver')) {
           extractedOrderType = 'delivery';
-        } else if (customerSaid.includes('pickup') || customerSaid.includes('pick up') || customerSaid.includes('take out') || customerSaid.includes('takeout')) {
+        } else if (customerSaid.includes('pickup') || customerSaid.includes('pick up') || customerSaid.includes('pick-up') ||
+                   customerSaid.includes('take out') || customerSaid.includes('takeout') || customerSaid.includes('carry out') ||
+                   customerSaid.includes('carryout') || customerSaid.includes('to go')) {
           extractedOrderType = 'pickup';
         }
 
@@ -1032,12 +1035,42 @@ wss.on('connection', (ws, _req) => {
 
         if (restaurant && restaurant.menu_items) {
           console.log('🔍 Checking against menu items:', restaurant.menu_items.map(m => m.name));
+
+          // Try exact match first
           for (const menuItem of restaurant.menu_items) {
             const menuName = menuItem.name.toLowerCase();
             if (itemText.includes(menuName)) {
               item_name = menuItem.name; // Use the proper capitalization from menu
-              console.log('✅ Matched menu item:', item_name);
+              console.log('✅ Matched menu item (exact):', item_name);
               break;
+            }
+          }
+
+          // If no exact match, try fuzzy matching for common misspellings
+          if (!item_name) {
+            for (const menuItem of restaurant.menu_items) {
+              const menuName = menuItem.name.toLowerCase();
+
+              // Common spelling variations
+              const variations = [
+                menuName.replace('gh', 'g'),     // margherita -> margarita
+                menuName.replace('ph', 'f'),      // phone -> fone
+                menuName.replace('qu', 'k'),      // queso -> keso
+                menuName.replace('ue', 'u')       // barbeque -> barbecue
+              ];
+
+              // Check main words (ignore small words like "the", "with", etc.)
+              const menuWords = menuName.split(' ').filter(w => w.length > 3);
+
+              for (const word of menuWords) {
+                if (itemText.includes(word) || variations.some(v => itemText.includes(v))) {
+                  item_name = menuItem.name;
+                  console.log('✅ Matched menu item (fuzzy):', item_name, '- matched word:', word);
+                  break;
+                }
+              }
+
+              if (item_name) break;
             }
           }
         } else {
