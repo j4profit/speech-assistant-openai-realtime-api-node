@@ -64,6 +64,7 @@ wss.on('connection', (ws, _req) => {
   let customerName = null;
   let orderType = null; // 'pickup' or 'delivery'
   let conversationLog = []; // Track AI responses to extract order details
+  let pendingCustomerTranscript = null; // Store latest customer transcript BEFORE it's added to conversationLog (fixes race condition)
   let lastCustomerActivityTime = Date.now(); // For call timeout
   let callStartTime = Date.now(); // Track total call duration
   let activityCheckInterval = null; // Interval timer for checking call timeout
@@ -655,6 +656,9 @@ wss.on('connection', (ws, _req) => {
           const customerText = response.transcript || '';
           console.log('👤 Customer said:', customerText);
 
+          // Store in pending transcript immediately (for function calls that execute before this event)
+          pendingCustomerTranscript = customerText;
+
           // Track customer speech in conversation log
           conversationLog.push({
             timestamp: Date.now(),
@@ -690,6 +694,21 @@ wss.on('connection', (ws, _req) => {
     }
   }
 
+  // Helper function to get last customer message (checks pending transcript first to fix race condition)
+  function getLastCustomerMessage() {
+    // Check pending transcript first (available immediately when function is called)
+    if (pendingCustomerTranscript) {
+      console.log('✅ Using pending customer transcript:', pendingCustomerTranscript);
+      return pendingCustomerTranscript;
+    }
+
+    // Fallback to conversation log
+    const lastMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+    const text = lastMessage?.text || '';
+    console.log('⚠️  Using conversation log (pending transcript not available):', text);
+    return text;
+  }
+
   // Handle function calls from AI
   async function handleFunctionCall(item) {
     const functionName = item.name;
@@ -704,6 +723,14 @@ wss.on('connection', (ws, _req) => {
     console.log(`Function called: ${functionName}`, parsedArgs);
 
     let result = {};
+
+    // Clear pending transcript after function finishes (it will be in conversationLog by then)
+    const clearPendingTranscript = () => {
+      if (pendingCustomerTranscript) {
+        console.log('🧹 Clearing pending transcript after function execution');
+        pendingCustomerTranscript = null;
+      }
+    };
 
     switch (functionName) {
       case 'search_recent_orders':
@@ -918,8 +945,7 @@ wss.on('connection', (ws, _req) => {
 
       case 'set_order_type':
         // Extract order type from last customer message (parameter-free approach)
-        const lastCustomerMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
-        const customerSaid = lastCustomerMessage?.text?.toLowerCase() || '';
+        const customerSaid = getLastCustomerMessage().toLowerCase();
 
         let extractedOrderType = null;
         // Check for delivery variations: delivery, delivering, deliver, delivered
@@ -934,6 +960,7 @@ wss.on('connection', (ws, _req) => {
         console.log('📋 set_order_type called - extracted from last message:', extractedOrderType);
         orderType = extractedOrderType;
         stateManager.updateCallData(callSid, { order_type: extractedOrderType });
+        clearPendingTranscript();
         result = {
           success: true,
           order_type: extractedOrderType,
@@ -944,8 +971,7 @@ wss.on('connection', (ws, _req) => {
 
       case 'set_customer_name':
         // Extract customer name from last message (parameter-free approach)
-        const lastNameMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
-        const nameText = lastNameMessage?.text?.trim() || '';
+        const nameText = getLastCustomerMessage().trim();
 
         // Clean up common filler words but keep the actual name
         let extractedName = nameText
@@ -963,6 +989,7 @@ wss.on('connection', (ws, _req) => {
         console.log('👤 set_customer_name called - extracted from last message:', extractedName);
         customerName = extractedName || 'Unknown';
         stateManager.updateCallData(callSid, { customer_name: customerName });
+        clearPendingTranscript();
 
         // Return success with next step instructions based on order type
         if (orderType === 'delivery') {
@@ -989,8 +1016,7 @@ wss.on('connection', (ws, _req) => {
 
       case 'set_delivery_instructions':
         // Extract delivery instructions from last message (parameter-free approach)
-        const lastInstructionsMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
-        const instructionsText = lastInstructionsMessage?.text?.trim() || '';
+        const instructionsText = getLastCustomerMessage().trim();
 
         console.log('📝 set_delivery_instructions called - extracted from last message:', instructionsText);
         stateManager.updateCallData(callSid, {
@@ -999,6 +1025,7 @@ wss.on('connection', (ws, _req) => {
         });
         // Also update the global variable for backward compatibility
         deliveryInstructions = instructionsText;
+        clearPendingTranscript();
         result = {
           success: true,
           instructions: instructionsText,
@@ -1008,8 +1035,7 @@ wss.on('connection', (ws, _req) => {
 
       case 'add_order_item':
         // Extract item details from last message (parameter-free approach)
-        const lastItemMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
-        const itemText = lastItemMessage?.text?.toLowerCase() || '';
+        const itemText = getLastCustomerMessage().toLowerCase();
 
         console.log('🍕 add_order_item called - parsing from last message:', itemText);
 
@@ -1141,6 +1167,7 @@ wss.on('connection', (ws, _req) => {
 
         console.log('✅ Item extracted:', newItem);
 
+        clearPendingTranscript();
         result = {
           success: true,
           item_added: newItem,
@@ -1150,8 +1177,7 @@ wss.on('connection', (ws, _req) => {
 
       case 'set_payment_method':
         // Extract payment method from last message (parameter-free approach)
-        const lastPaymentMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
-        const paymentText = lastPaymentMessage?.text?.toLowerCase() || '';
+        const paymentText = getLastCustomerMessage().toLowerCase();
 
         let extractedPayment = null;
         if (paymentText.includes('cash')) {
@@ -1162,6 +1188,7 @@ wss.on('connection', (ws, _req) => {
 
         console.log('💳 set_payment_method called - extracted from last message:', extractedPayment);
         stateManager.updateCallData(callSid, { payment_method: extractedPayment });
+        clearPendingTranscript();
         result = {
           success: true,
           payment_method: extractedPayment,
