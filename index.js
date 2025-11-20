@@ -404,8 +404,97 @@ wss.on('connection', (ws, _req) => {
       },
       {
         type: "function",
-        name: "submit_order",
-        description: "Submit a complete order to the system. Call this when customer confirms they're done ordering. NO PARAMETERS NEEDED - order details are extracted from conversation.",
+        name: "set_order_type",
+        description: "Store whether this is a pickup or delivery order. Call IMMEDIATELY when customer says 'pickup' or 'delivery'.",
+        parameters: {
+          type: "object",
+          properties: {
+            order_type: {
+              type: "string",
+              enum: ["pickup", "delivery"],
+              description: "The order type customer requested"
+            }
+          },
+          required: ["order_type"]
+        }
+      },
+      {
+        type: "function",
+        name: "set_customer_name",
+        description: "Store customer's name. Call IMMEDIATELY after customer provides their name.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Customer's name as they said it (e.g., 'Mike', 'Sarah Johnson')"
+            }
+          },
+          required: ["name"]
+        }
+      },
+      {
+        type: "function",
+        name: "add_order_item",
+        description: "Add a food item to the order. Call this EACH TIME customer mentions a food item.",
+        parameters: {
+          type: "object",
+          properties: {
+            item_name: {
+              type: "string",
+              description: "Name of the food item (e.g., 'pizza', 'cheeseburger', 'fries')"
+            },
+            size: {
+              type: "string",
+              description: "Size if mentioned (e.g., 'large', 'medium', 'small')"
+            },
+            quantity: {
+              type: "number",
+              description: "Quantity ordered (default: 1)"
+            },
+            customizations: {
+              type: "string",
+              description: "Any customizations mentioned (e.g., 'no pickles', 'extra cheese', 'well done')"
+            }
+          },
+          required: ["item_name", "quantity"]
+        }
+      },
+      {
+        type: "function",
+        name: "set_delivery_instructions",
+        description: "Store delivery instructions for delivery orders. Call when customer provides delivery instructions.",
+        parameters: {
+          type: "object",
+          properties: {
+            instructions: {
+              type: "string",
+              description: "Delivery instructions (e.g., 'Leave at front door', 'Ring doorbell', 'Side entrance')"
+            }
+          },
+          required: ["instructions"]
+        }
+      },
+      {
+        type: "function",
+        name: "set_payment_method",
+        description: "Record payment method for delivery orders. Call when customer says 'cash' or 'credit card'.",
+        parameters: {
+          type: "object",
+          properties: {
+            method: {
+              type: "string",
+              enum: ["cash", "credit card"],
+              description: "Payment method customer chose"
+            }
+          },
+          required: ["method"]
+        }
+      },
+      {
+        type: "function",
+        name: "finalize_order",
+        description: "Create order from all collected data. Call this when customer confirms they're done ordering and you have all required information.",
         parameters: {
           type: "object",
           properties: {}
@@ -854,6 +943,18 @@ wss.on('connection', (ws, _req) => {
         }
         break;
 
+      case 'set_order_type':
+        console.log('📋 set_order_type called:', parsedArgs.order_type);
+        orderType = parsedArgs.order_type;
+        stateManager.updateCallData(callSid, { order_type: parsedArgs.order_type });
+        result = {
+          success: true,
+          order_type: parsedArgs.order_type,
+          next_action: 'ask_for_name',
+          message: `Order type set to ${parsedArgs.order_type}. Now ask for customer name.`
+        };
+        break;
+
       case 'set_customer_name':
         console.log('👤 set_customer_name called:', parsedArgs.name);
         customerName = parsedArgs.name;
@@ -880,6 +981,21 @@ wss.on('connection', (ws, _req) => {
             stored_name: parsedArgs.name
           };
         }
+        break;
+
+      case 'set_delivery_instructions':
+        console.log('📝 set_delivery_instructions called:', parsedArgs.instructions);
+        stateManager.updateCallData(callSid, {
+          deliveryInstructions: parsedArgs.instructions,
+          deliveryAddress: validatedDeliveryAddress
+        });
+        // Also update the global variable for backward compatibility
+        deliveryInstructions = parsedArgs.instructions;
+        result = {
+          success: true,
+          instructions: parsedArgs.instructions,
+          message: 'Delivery instructions stored.'
+        };
         break;
 
       case 'add_order_item':
@@ -1232,6 +1348,22 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
 
               console.log('🔥 INJECTING ANNOUNCEMENT INSTRUCTIONS INTO response.create:');
               console.log(announcementInstructions);
+            }
+
+            // For set_order_type, add explicit instructions to ask for name
+            if (functionName === 'set_order_type') {
+              const askNameInstructions = `CRITICAL: You just stored the order type "${result.order_type}".
+
+You MUST NOW IMMEDIATELY ask the customer: "May I have your name for the order?"
+
+DO NOT wait. DO NOT do anything else. Ask for their name RIGHT NOW.`;
+
+              responsePayload.response = {
+                instructions: askNameInstructions
+              };
+
+              console.log('🔥 INJECTING ASK NAME INSTRUCTIONS for set_order_type:');
+              console.log(askNameInstructions);
             }
 
             // For set_customer_name (delivery orders), add explicit instructions to proceed
