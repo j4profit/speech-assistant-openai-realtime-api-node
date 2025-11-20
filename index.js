@@ -525,12 +525,17 @@ wss.on('connection', (ws, _req) => {
           // Session is ready - send greeting immediately
           console.log('✅ OpenAI session ready - sending greeting');
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            // Build explicit greeting based on delivery availability
+            const greetingText = restaurant.delivery_enabled
+              ? `Say EXACTLY: "Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?"`
+              : `Say EXACTLY: "Hello! Thank you for calling ${restaurant.name}. What would you like for pickup?"`;
+
             openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
               item: {
                 type: 'message',
                 role: 'user',
-                content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
+                content: [{ type: 'input_text', text: greetingText }]
               }
             }));
 
@@ -1454,12 +1459,18 @@ DO NOT say anything. DO NOT acknowledge the payment method. Just call finalize_o
           greetingTimeout = setTimeout(() => {
             if (!customerHasSpoken && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
               console.log('⚠️  Backup greeting triggered (session.updated greeting did not fire)');
+
+              // Build explicit greeting based on delivery availability
+              const backupGreetingText = restaurant.delivery_enabled
+                ? `Say EXACTLY: "Hello! Thank you for calling ${restaurant.name}. Is this for pickup or delivery?"`
+                : `Say EXACTLY: "Hello! Thank you for calling ${restaurant.name}. What would you like for pickup?"`;
+
               openaiWs.send(JSON.stringify({
                 type: 'conversation.item.create',
                 item: {
                   type: 'message',
                   role: 'user',
-                  content: [{ type: 'input_text', text: 'Greet the customer and ask how you can help them' }]
+                  content: [{ type: 'input_text', text: backupGreetingText }]
                 }
               }));
 
