@@ -854,36 +854,163 @@ wss.on('connection', (ws, _req) => {
         }
         break;
 
-      case 'submit_order':
-        console.log('📦 submit_order called (parameter-free)');
+      case 'set_customer_name':
+        console.log('👤 set_customer_name called:', parsedArgs.name);
+        customerName = parsedArgs.name;
+        stateManager.updateCallData(callSid, { customer_name: parsedArgs.name });
 
-        // Extract order info from conversation and tracked state
-        const orderInfo = {
-          ...extractOrderFromConversation(),
-          customerPhone: customerPhone
+        // Return success with next step instructions based on order type
+        if (orderType === 'delivery') {
+          result = {
+            success: true,
+            stored_name: parsedArgs.name,
+            next_action: 'check_customer_address',
+            message: 'Name stored. Now checking for saved delivery address...'
+          };
+        } else if (orderType === 'pickup') {
+          result = {
+            success: true,
+            stored_name: parsedArgs.name,
+            next_action: 'ask_for_order',
+            message: 'Name stored. Now ask customer what they want to order.'
+          };
+        } else {
+          result = {
+            success: true,
+            stored_name: parsedArgs.name
+          };
+        }
+        break;
+
+      case 'add_order_item':
+        console.log('🍕 add_order_item called:', parsedArgs);
+        const callData = stateManager.getCallData(callSid) || {};
+        const currentItems = callData.order_items || [];
+
+        // Create new item object
+        const newItem = {
+          item_name: parsedArgs.item_name,
+          size: parsedArgs.size || null,
+          quantity: parsedArgs.quantity || 1,
+          customizations: parsedArgs.customizations || null
         };
 
-        console.log('📦 Extracted order info:', JSON.stringify(orderInfo, null, 2));
+        currentItems.push(newItem);
+        stateManager.updateCallData(callSid, { order_items: currentItems });
 
-        // Note: Order validation removed per user request
-        // Orders will be created even if item extraction fails
-        // Restaurant can call customer back if order details are unclear
-        console.log('ℹ️  Order validation bypassed - order will be created');
+        result = {
+          success: true,
+          item_added: newItem,
+          total_items: currentItems.length
+        };
+        break;
 
-        // REMOVED: validateOrder() check
-        // Reason: Item extraction may fail but we want the order to go through
-        // Restaurant staff can handle unclear orders by calling customer back
+      case 'set_payment_method':
+        console.log('💳 set_payment_method called:', parsedArgs.method);
+        stateManager.updateCallData(callSid, { payment_method: parsedArgs.method });
+        result = {
+          success: true,
+          payment_method: parsedArgs.method,
+          next_action: 'finalize_order',
+          message: 'Payment method recorded. Now call finalize_order immediately.'
+        };
+        break;
+
+      case 'finalize_order':
+        console.log('✅ finalize_order called - creating order from collected data');
+
+        // Get all collected data from state
+        const orderCallData = stateManager.getCallData(callSid) || {};
+        const collectedItems = orderCallData.order_items || [];
+        const collectedName = orderCallData.customer_name || customerName || 'Unknown';
+        const collectedPaymentMethod = orderCallData.payment_method || null;
+
+        console.log('📦 Collected order data:', {
+          name: collectedName,
+          items: collectedItems,
+          payment: collectedPaymentMethod,
+          orderType: orderType
+        });
 
         // Process the order
         try {
           orderProcessed = true;
 
-          const isDelivery = orderInfo.orderType === 'delivery';
-          const isCreditCard = orderInfo.paymentMethod && orderInfo.paymentMethod.toLowerCase() === 'credit card';
+          const isDelivery = orderType === 'delivery';
+          const isCreditCard = collectedPaymentMethod && collectedPaymentMethod.toLowerCase() === 'credit card';
 
-          // Calculate pricing using DATABASE PRICES (not AI's estimate)
+          // Calculate pricing from collected structured items
+          let subtotal = 0;
+          let itemsWithPrices = [];
+          let itemsText = '';
+
+          for (const collectedItem of collectedItems) {
+            // Find matching menu item in database
+            const menuItem = restaurant.menu_items?.find(item =>
+              item.name.toLowerCase().includes(collectedItem.item_name.toLowerCase()) ||
+              collectedItem.item_name.toLowerCase().includes(item.name.toLowerCase())
+            );
+
+            if (menuItem) {
+              let itemPrice = 0;
+              let sizeText = '';
+
+              // Get price based on size
+              if (collectedItem.size && menuItem.sizes && menuItem.sizes.length > 0) {
+                const sizeOption = menuItem.sizes.find(s =>
+                  s.size.toLowerCase() === collectedItem.size.toLowerCase()
+                );
+                if (sizeOption) {
+                  itemPrice = sizeOption.price;
+                  sizeText = sizeOption.size;
+                } else {
+                  // Use first size as default if specified size not found
+                  itemPrice = menuItem.sizes[0].price;
+                  sizeText = menuItem.sizes[0].size;
+                }
+              } else if (menuItem.sizes && menuItem.sizes.length > 0) {
+                // No size specified, use first/default size
+                itemPrice = menuItem.sizes[0].price;
+                sizeText = menuItem.sizes.length > 1 ? menuItem.sizes[0].size : '';
+              }
+
+              const lineTotal = itemPrice * collectedItem.quantity;
+              subtotal += lineTotal;
+
+              itemsWithPrices.push({
+                qty: collectedItem.quantity,
+                name: menuItem.name,
+                size: sizeText || null,
+                price: itemPrice,
+                lineTotal: lineTotal,
+                customizations: collectedItem.customizations
+              });
+
+              const customText = collectedItem.customizations ? ` (${collectedItem.customizations})` : '';
+              const sizePrefix = sizeText ? `${sizeText} ` : '';
+              itemsText += `${collectedItem.quantity}x ${sizePrefix}${menuItem.name}${customText}, `;
+
+              console.log(`✅ Matched: ${collectedItem.quantity}x ${sizePrefix}${menuItem.name} @ $${itemPrice.toFixed(2)} = $${lineTotal.toFixed(2)}${customText}`);
+            } else {
+              console.log(`⚠️  Could not find menu item for: ${collectedItem.item_name}`);
+              // Add item anyway with $0 price so restaurant sees the order
+              itemsWithPrices.push({
+                qty: collectedItem.quantity,
+                name: collectedItem.item_name,
+                size: collectedItem.size || null,
+                price: 0,
+                lineTotal: 0,
+                customizations: collectedItem.customizations
+              });
+              const customText = collectedItem.customizations ? ` (${collectedItem.customizations})` : '';
+              itemsText += `${collectedItem.quantity}x ${collectedItem.item_name}${customText} (price unknown), `;
+            }
+          }
+
+          // Remove trailing comma and space
+          itemsText = itemsText.replace(/, $/, '');
+
           const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
-          const subtotal = orderInfo.calculatedSubtotal; // From database menu prices
           const deliveryFee = isDelivery ? (restaurant.delivery_fee || 0) : 0;
           const taxRate = restaurant.tax_rate || 0;
 
@@ -907,17 +1034,26 @@ wss.on('connection', (ws, _req) => {
             orderStatus = 'credit_card';
           }
 
+          // Get delivery info if delivery order
+          let deliveryAddress = '';
+          let deliveryInstructions = '';
+          if (isDelivery && deliveryAddressId) {
+            const addressData = stateManager.getCallData(callSid);
+            deliveryAddress = addressData?.deliveryAddress || validatedDeliveryAddress || '';
+            deliveryInstructions = addressData?.deliveryInstructions || '';
+          }
+
           // Create order ticket
           const ticket = createOrderTicket({
-            customerName: orderInfo.customerName,
-            customerPhone: orderInfo.customerPhone,
-            orderType: orderInfo.orderType,
-            deliveryAddress: orderInfo.deliveryAddress,
-            deliveryInstructions: orderInfo.deliveryInstructions,
-            paymentMethod: orderInfo.paymentMethod,
-            items: orderInfo.items,
-            itemsWithPrices: orderInfo.itemsWithPrices, // Detailed item data with customizations
-            specialInstructions: orderInfo.specialInstructions,
+            customerName: collectedName,
+            customerPhone: customerPhone,
+            orderType: orderType,
+            deliveryAddress: deliveryAddress,
+            deliveryInstructions: deliveryInstructions,
+            paymentMethod: collectedPaymentMethod,
+            items: itemsText,
+            itemsWithPrices: itemsWithPrices,
+            specialInstructions: '',
             subtotal: subtotal,
             deliveryFee: deliveryFee,
             taxRate: restaurant.tax_rate || 0,
@@ -930,16 +1066,16 @@ wss.on('connection', (ws, _req) => {
           // Create order in database
           const orderData = {
             restaurant_id: restaurant.id,
-            customer_name: orderInfo.customerName,
-            customer_phone: orderInfo.customerPhone,
-            order_type: orderInfo.orderType,
-            delivery_address: orderInfo.deliveryAddress,
-            delivery_instructions: orderInfo.deliveryInstructions,
+            customer_name: collectedName,
+            customer_phone: customerPhone,
+            order_type: orderType,
+            delivery_address: deliveryAddress,
+            delivery_instructions: deliveryInstructions,
             delivery_address_id: isDelivery ? deliveryAddressId : null,
-            payment_method: orderInfo.paymentMethod || null,
+            payment_method: collectedPaymentMethod || null,
             order_details: ticket,
             total_amount: finalTotal,
-            special_instructions: orderInfo.specialInstructions || '',
+            special_instructions: '',
             call_sid: callSid,
             ready_time: readyTimeInfo.readyTimeString,
             estimated_ready_at: readyTimeInfo.readyTime,
@@ -949,8 +1085,8 @@ wss.on('connection', (ws, _req) => {
           console.log('Creating order with delivery_address_id:', deliveryAddressId);
 
           // Update delivery instructions if needed
-          if (isDelivery && deliveryAddressId && orderInfo.deliveryInstructions) {
-            await database.updateDeliveryInstructions(deliveryAddressId, orderInfo.deliveryInstructions);
+          if (isDelivery && deliveryAddressId && deliveryInstructions) {
+            await database.updateDeliveryInstructions(deliveryAddressId, deliveryInstructions);
           }
 
           const order = await database.createOrder(orderData);
@@ -987,8 +1123,8 @@ wss.on('connection', (ws, _req) => {
                     total_minutes: readyTimeInfo.totalMinutes,
                     subtotal: subtotal,
                     final_total: finalTotal,
-                    order_type: orderInfo.orderType,
-                    customer_name: orderInfo.customerName
+                    order_type: orderType,
+                    customer_name: collectedName
                   };
                 } else {
                   console.error('❌ Credit card payment transfer failed:', transferResult.error);
@@ -1001,8 +1137,8 @@ wss.on('connection', (ws, _req) => {
                     total_minutes: readyTimeInfo.totalMinutes,
                     subtotal: subtotal,
                     final_total: finalTotal,
-                    order_type: orderInfo.orderType,
-                    customer_name: orderInfo.customerName
+                    order_type: orderType,
+                    customer_name: collectedName
                   };
                 }
               } else {
@@ -1016,8 +1152,8 @@ wss.on('connection', (ws, _req) => {
                   total_minutes: readyTimeInfo.totalMinutes,
                   subtotal: subtotal,
                   final_total: finalTotal,
-                  order_type: orderInfo.orderType,
-                  customer_name: orderInfo.customerName
+                  order_type: orderType,
+                  customer_name: collectedName
                 };
               }
             } else {
@@ -1032,8 +1168,8 @@ wss.on('connection', (ws, _req) => {
                 total_minutes: readyTimeInfo.totalMinutes,
                 subtotal: subtotal,
                 final_total: finalTotal,
-                order_type: orderInfo.orderType,
-                customer_name: orderInfo.customerName
+                order_type: orderType,
+                customer_name: collectedName
               };
             }
           } else {
@@ -1080,9 +1216,9 @@ wss.on('connection', (ws, _req) => {
               type: 'response.create'
             };
 
-            // For submit_order, add explicit instructions to use the function result
-            if (functionName === 'submit_order' && result.success) {
-              const announcementInstructions = `CRITICAL: You just called submit_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
+            // For finalize_order, add explicit instructions to use the function result
+            if (functionName === 'finalize_order' && result.success) {
+              const announcementInstructions = `CRITICAL: You just called finalize_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
 
 "Your estimated total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
 
@@ -1096,6 +1232,38 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
 
               console.log('🔥 INJECTING ANNOUNCEMENT INSTRUCTIONS INTO response.create:');
               console.log(announcementInstructions);
+            }
+
+            // For set_customer_name (delivery orders), add explicit instructions to proceed
+            if (functionName === 'set_customer_name' && result.next_action === 'check_customer_address') {
+              const nextStepInstructions = `CRITICAL: You just stored the customer's name "${result.stored_name}". This is a DELIVERY order.
+
+You MUST NOW IMMEDIATELY call the function: check_customer_address
+
+DO NOT wait for the customer to say anything. DO NOT ask any questions. Call check_customer_address RIGHT NOW.`;
+
+              responsePayload.response = {
+                instructions: nextStepInstructions
+              };
+
+              console.log('🔥 INJECTING NEXT STEP INSTRUCTIONS for set_customer_name (delivery):');
+              console.log(nextStepInstructions);
+            }
+
+            // For set_payment_method, add explicit instructions to call finalize_order
+            if (functionName === 'set_payment_method' && result.next_action === 'finalize_order') {
+              const finalizeInstructions = `CRITICAL: You just stored the payment method "${result.payment_method}".
+
+You MUST NOW IMMEDIATELY call the function: finalize_order
+
+DO NOT say anything. DO NOT acknowledge the payment method. Just call finalize_order RIGHT NOW with NO parameters.`;
+
+              responsePayload.response = {
+                instructions: finalizeInstructions
+              };
+
+              console.log('🔥 INJECTING FINALIZE INSTRUCTIONS for set_payment_method:');
+              console.log(finalizeInstructions);
             }
 
             openaiWs.send(JSON.stringify(responsePayload));
