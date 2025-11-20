@@ -65,6 +65,9 @@ wss.on('connection', (ws, _req) => {
   let orderType = null; // 'pickup' or 'delivery'
   let conversationLog = []; // Track AI responses to extract order details
   let pendingCustomerTranscript = null; // Store latest customer transcript BEFORE it's added to conversationLog (fixes race condition)
+  let customerJustSpoke = false; // Track if customer speech just finished (for buffering function calls)
+  let bufferedFunctionCall = null; // Buffer function call that arrives before transcript
+  let transcriptBufferTimeout = null; // Timeout for waiting for transcript
   let lastCustomerActivityTime = Date.now(); // For call timeout
   let callStartTime = Date.now(); // Track total call duration
   let activityCheckInterval = null; // Interval timer for checking call timeout
@@ -684,16 +687,36 @@ wss.on('connection', (ws, _req) => {
 
         case 'conversation.item.created':
           if (response.item?.type === 'function_call') {
-            await handleFunctionCall(response.item);
+            // Check if customer just spoke (function call racing with transcript)
+            if (customerJustSpoke && !pendingCustomerTranscript) {
+              console.log('⏸️  Buffering function call - waiting for transcript...');
+              bufferedFunctionCall = response.item;
+
+              // Set timeout to execute function even if transcript doesn't arrive
+              if (transcriptBufferTimeout) clearTimeout(transcriptBufferTimeout);
+              transcriptBufferTimeout = setTimeout(async () => {
+                console.log('⏰ Transcript timeout - executing buffered function without transcript');
+                if (bufferedFunctionCall) {
+                  await handleFunctionCall(bufferedFunctionCall);
+                  bufferedFunctionCall = null;
+                }
+              }, 2500); // Wait 2.5 seconds for transcript
+            } else {
+              // No race condition, execute immediately
+              await handleFunctionCall(response.item);
+            }
           }
           break;
 
         case 'input_audio_buffer.speech_started':
           console.log('🎤 Customer started speaking');
+          customerJustSpoke = false; // Reset flag when new speech starts
           break;
 
         case 'input_audio_buffer.speech_stopped':
           console.log('🎤 Customer stopped speaking');
+          customerJustSpoke = true; // Set flag - expect transcript soon
+          pendingCustomerTranscript = null; // Clear old transcript
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
@@ -702,6 +725,7 @@ wss.on('connection', (ws, _req) => {
 
           // Store in pending transcript immediately (for function calls that execute before this event)
           pendingCustomerTranscript = customerText;
+          customerJustSpoke = false; // Clear flag - transcript has arrived
 
           // Track customer speech in conversation log
           conversationLog.push({
@@ -709,6 +733,17 @@ wss.on('connection', (ws, _req) => {
             speaker: 'customer',
             text: customerText
           });
+
+          // Execute buffered function call now that transcript is available
+          if (bufferedFunctionCall) {
+            console.log('✅ Transcript arrived - executing buffered function call');
+            if (transcriptBufferTimeout) {
+              clearTimeout(transcriptBufferTimeout);
+              transcriptBufferTimeout = null;
+            }
+            await handleFunctionCall(bufferedFunctionCall);
+            bufferedFunctionCall = null;
+          }
           break;
 
         case 'error':
@@ -1066,9 +1101,12 @@ wss.on('connection', (ws, _req) => {
             message: 'Name stored. Now ask customer what they want to order.'
           };
         } else {
+          // Order type unknown - ask again
           result = {
             success: true,
-            stored_name: customerName
+            stored_name: customerName,
+            next_action: 'ask_order_type',
+            message: 'Name stored. Now ask: "Will this be for pickup or delivery?"'
           };
         }
         break;
