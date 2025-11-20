@@ -102,39 +102,63 @@ The `aiInstructions.js` service generates dynamic prompts for OpenAI Realtime AP
 1. **Never ask for phone numbers** - Caller ID is automatically captured
 2. **Address validation flow** - Max 2 retry attempts for delivery addresses
 3. **Message intent detection** - Natural language understanding for customer messages
-4. **Concise responses** - 1-2 sentences maximum (except ORDER_CONFIRMED format)
+4. **Concise responses** - 1-2 sentences maximum
 5. **Restaurant-specific customizations** - Uses `restaurant.additional_ai_instructions` field
+6. **Structured data collection** (v2.9.0+) - AI provides order data as function parameters, not conversation extraction
 
-**AI Function Tools**:
+**AI Function Tools (Order Collection - v2.9.0+)**:
+- `set_customer_name(name)` - Store customer name immediately after they provide it
+- `add_order_item(item_name, size?, quantity, customizations?)` - Add each menu item as customer mentions it
+- `set_payment_method(method)` - Record payment choice for delivery orders (v2.7+)
+- `finalize_order()` - Create order from all collected structured data
+
+**AI Function Tools (Order Management)**:
 - `search_recent_orders` - Automatically uses caller ID (no params needed)
-- `check_customer_address` - Check if customer has saved delivery address (v2.3+)
-- `validate_delivery_address` - Validates delivery feasibility
 - `cancel_order` - Cancels pending orders
 - `update_order` - Modifies pending orders
-- `process_payment_method` - Records payment choice (cash/credit card) for delivery orders (v2.7+)
-- `transfer_call` - Transfers call to staff for configured reasons (v2.4+)
+
+**AI Function Tools (Delivery)**:
+- `check_customer_address` - Check if customer has saved delivery address (v2.3+)
+- `validate_delivery_address` - Validates delivery feasibility
+
+**AI Function Tools (Staff Communication)**:
+- `transfer_call_for_catering` - Transfer catering calls (v2.7.2+)
+- `transfer_call_for_manager` - Transfer manager requests (v2.7.2+)
+- `transfer_call_for_complaint` - Transfer complaint calls (v2.7.2+)
+- `transfer_call_for_credit_card` - Transfer credit card payment calls (v2.7+)
 - `create_customer_message` - Saves messages for staff
 
-### Order Confirmation Format
+### Order Creation Flow (v2.9.0+)
 
-When AI confirms an order, it generates a structured transcript with `ORDER_CONFIRMED:` prefix:
-```
-ORDER_CONFIRMED:
-Customer Name: John Doe
-Order Type: delivery
-Delivery Address: 123 Main St, Baltimore, MD 21201
-Delivery Instructions: Leave at front door
-Payment Method: credit card
-Items: 2x Cheeseburger, 1x Fries
-Total: $25.50
-```
+**Structured Data Collection Approach:**
 
-This triggers `processOrderFromTranscript()` which:
-1. Parses order details
-2. Calculates tax and delivery fees (using `restaurant.tax_rate` and `restaurant.delivery_fee`)
-3. Creates order in database via `createOrder()` Edge Function
-4. Prints formatted order ticket to console
-5. Gracefully ends call after 3 seconds
+The system collects order data incrementally through AI function calls with parameters:
+
+**Flow Example (Delivery Order):**
+1. Customer says name → AI calls `set_customer_name(name="John Doe")`
+2. Customer orders "large pizza" → AI calls `add_order_item(item_name="pizza", size="large", quantity=1)`
+3. Customer adds "2 cheeseburgers with no pickles" → AI calls `add_order_item(item_name="cheeseburger", quantity=2, customizations="no pickles")`
+4. Customer says "cash" → AI calls `set_payment_method(method="cash")`
+5. AI calls `finalize_order()` which:
+   - Retrieves all collected data from `stateManager`
+   - Matches items against restaurant menu database for pricing
+   - Calculates tax and delivery fees (using `restaurant.tax_rate` and `restaurant.delivery_fee`)
+   - Creates order in database via `createOrder()` Edge Function
+   - Returns `{final_total, total_minutes, ready_time}` to AI
+   - AI announces: "Your estimated total is $X. Order confirmed for [name]. Your order will arrive in approximately X minutes, around X PM."
+
+**Key Benefits:**
+- ✅ Real-time data validation (e.g., AI knows immediately if item was stored successfully)
+- ✅ No regex parsing or conversation extraction needed
+- ✅ AI provides structured parameters using natural language understanding
+- ✅ State tracked incrementally in `stateManager.getCallData(callSid)`
+- ✅ Eliminates issues like extracting "Welcome" as customer name or missing early food items
+
+**Deprecated (v2.8 and earlier):**
+- `ORDER_CONFIRMED:` transcript format
+- `processOrderFromTranscript()` function
+- `extractOrderFromConversation()` function
+- All regex-based parsing functions
 
 ### Restaurant-Specific Features (V2.1)
 
@@ -767,3 +791,4 @@ Implementation: `services/audioProcessor.js`
 - **v2.7.1**: Removed conversation transcript collection from WebSocket (call logging now handled by Twilio webhooks)
 - **v2.7.2**: **CRITICAL FIX** - Replaced parameterized transfer_call function with 4 parameter-free functions to work around OpenAI Realtime API limitation where AI cannot reliably provide function parameters
 - **v2.8**: **CRITICAL FIX** - Made submit_order parameter-free with conversation extraction, added automatic call timeout (3min inactivity, 10min max), fixed race condition preventing "conversation_already_has_active_response" errors
+- **v2.9.0**: **MAJOR REFACTOR (Option A)** - Replaced regex-based order extraction with AI-powered structured data collection. Removed 650+ lines of brittle parsing code. New functions: set_customer_name, add_order_item, set_payment_method, finalize_order. AI now provides structured parameters instead of conversation parsing. Fixes name extraction bugs, missing items, and leverages true NLU capabilities of OpenAI Realtime API.
