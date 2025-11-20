@@ -1166,8 +1166,9 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
   function extractOrderFromConversation() {
     console.log('🔍 Extracting order details from conversation...');
 
-    // Get recent conversation (last 10 messages)
-    const recentMessages = conversationLog.slice(-10);
+    // Get recent conversation (last 40 messages to capture full order conversation)
+    // Increased from 10 to 40 to ensure we capture food orders that happen early in conversation
+    const recentMessages = conversationLog.slice(-40);
     const conversationText = recentMessages.map(m => m.text).join(' ').toLowerCase();
 
     console.log('📝 Analyzing conversation:', conversationText.substring(0, 200) + '...');
@@ -1418,7 +1419,7 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
       const fullConversationText = conversationLog.map(m => m.text).join(' ');
 
       // Common words to exclude (not names)
-      const excludeWords = ['the', 'a', 'an', 'for', 'to', 'from', 'with', 'at', 'in', 'on', 'is', 'are', 'was', 'were', 'delivery', 'pickup', 'cash', 'credit', 'card', 'yes', 'no', 'okay', 'sure', 'thanks', 'thank', 'you'];
+      const excludeWords = ['the', 'a', 'an', 'for', 'to', 'from', 'with', 'at', 'in', 'on', 'is', 'are', 'was', 'were', 'delivery', 'pickup', 'cash', 'credit', 'card', 'yes', 'no', 'okay', 'sure', 'thanks', 'thank', 'you', 'welcome', 'youre', 'your', 'please', 'hello', 'hi', 'good', 'morning', 'afternoon', 'evening', 'bye', 'goodbye', 'great', 'perfect'];
 
       // Pattern 1: "my name is [Name]" or "I'm [Name]" or "name's [Name]"
       const nameIsPattern = /(?:my name is|i'm|i am|this is|name is|it's|name's)\s+([a-z]+(?:\s+[a-z]+)?)/i;
