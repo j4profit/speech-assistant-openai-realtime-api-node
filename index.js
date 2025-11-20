@@ -1046,10 +1046,14 @@ wss.on('connection', (ws, _req) => {
             }
           }
 
-          // If no exact match, try fuzzy matching for common misspellings
+          // If no exact match, try fuzzy matching with scoring
           if (!item_name) {
+            let bestMatch = null;
+            let bestScore = 0;
+
             for (const menuItem of restaurant.menu_items) {
               const menuName = menuItem.name.toLowerCase();
+              let score = 0;
 
               // Common spelling variations
               const variations = [
@@ -1059,18 +1063,38 @@ wss.on('connection', (ws, _req) => {
                 menuName.replace('ue', 'u')       // barbeque -> barbecue
               ];
 
-              // Check main words (ignore small words like "the", "with", etc.)
-              const menuWords = menuName.split(' ').filter(w => w.length > 3);
-
-              for (const word of menuWords) {
-                if (itemText.includes(word) || variations.some(v => itemText.includes(v))) {
-                  item_name = menuItem.name;
-                  console.log('✅ Matched menu item (fuzzy):', item_name, '- matched word:', word);
+              // Check for variation match (highest score)
+              for (const variant of variations) {
+                if (itemText.includes(variant) && variant !== menuName) {
+                  score = variant.length * 2; // Prioritize longer, more specific variations
+                  console.log(`🔍 Variation match: "${variant}" in "${menuName}" - score: ${score}`);
                   break;
                 }
               }
 
-              if (item_name) break;
+              // Check main words (ignore small generic words)
+              const menuWords = menuName.split(' ').filter(w => w.length > 3);
+              for (const word of menuWords) {
+                if (itemText.includes(word)) {
+                  // Longer words = more specific = higher score
+                  const wordScore = word.length;
+                  if (wordScore > score) {
+                    score = wordScore;
+                    console.log(`🔍 Word match: "${word}" in "${menuName}" - score: ${score}`);
+                  }
+                }
+              }
+
+              // Keep track of best match
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = menuItem.name;
+              }
+            }
+
+            if (bestMatch) {
+              item_name = bestMatch;
+              console.log('✅ Matched menu item (fuzzy): ', item_name, '- best score:', bestScore);
             }
           }
         } else {
