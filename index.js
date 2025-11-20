@@ -405,90 +405,46 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "set_order_type",
-        description: "Store whether this is a pickup or delivery order. Call IMMEDIATELY when customer says 'pickup' or 'delivery'.",
+        description: "Store whether this is a pickup or delivery order. Call IMMEDIATELY when customer says 'pickup' or 'delivery'. The system will extract the order type from the customer's last message automatically.",
         parameters: {
           type: "object",
-          properties: {
-            order_type: {
-              type: "string",
-              enum: ["pickup", "delivery"],
-              description: "The order type customer requested"
-            }
-          },
-          required: ["order_type"]
+          properties: {}
         }
       },
       {
         type: "function",
         name: "set_customer_name",
-        description: "Store customer's name. Call IMMEDIATELY after customer provides their name.",
+        description: "Store customer's name. Call IMMEDIATELY after customer provides their name. The system will extract the name from the customer's last message automatically.",
         parameters: {
           type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description: "Customer's name as they said it (e.g., 'Mike', 'Sarah Johnson')"
-            }
-          },
-          required: ["name"]
+          properties: {}
         }
       },
       {
         type: "function",
         name: "add_order_item",
-        description: "Add a food item to the order. Call this EACH TIME customer mentions a food item.",
+        description: "Add a food item to the order. Call this EACH TIME customer mentions a food item. The system will extract item name, quantity, size, and customizations from the customer's last message automatically.",
         parameters: {
           type: "object",
-          properties: {
-            item_name: {
-              type: "string",
-              description: "Name of the food item (e.g., 'pizza', 'cheeseburger', 'fries')"
-            },
-            size: {
-              type: "string",
-              description: "Size if mentioned (e.g., 'large', 'medium', 'small')"
-            },
-            quantity: {
-              type: "number",
-              description: "Quantity ordered (default: 1)"
-            },
-            customizations: {
-              type: "string",
-              description: "Any customizations mentioned (e.g., 'no pickles', 'extra cheese', 'well done')"
-            }
-          },
-          required: ["item_name", "quantity"]
+          properties: {}
         }
       },
       {
         type: "function",
         name: "set_delivery_instructions",
-        description: "Store delivery instructions for delivery orders. Call when customer provides delivery instructions.",
+        description: "Store delivery instructions for delivery orders. Call when customer provides delivery instructions. The system will extract instructions from the customer's last message automatically.",
         parameters: {
           type: "object",
-          properties: {
-            instructions: {
-              type: "string",
-              description: "Delivery instructions (e.g., 'Leave at front door', 'Ring doorbell', 'Side entrance')"
-            }
-          },
-          required: ["instructions"]
+          properties: {}
         }
       },
       {
         type: "function",
         name: "set_payment_method",
-        description: "Record payment method for delivery orders. Call when customer says 'cash' or 'credit card'.",
+        description: "Record payment method for delivery orders. Call when customer says 'cash' or 'credit card'. The system will extract payment method from the customer's last message automatically.",
         parameters: {
           type: "object",
-          properties: {
-            method: {
-              type: "string",
-              enum: ["cash", "credit card"],
-              description: "Payment method customer chose"
-            }
-          },
-          required: ["method"]
+          properties: {}
         }
       },
       {
@@ -949,75 +905,164 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_order_type':
-        console.log('📋 set_order_type called:', parsedArgs.order_type);
-        orderType = parsedArgs.order_type;
-        stateManager.updateCallData(callSid, { order_type: parsedArgs.order_type });
+        // Extract order type from last customer message (parameter-free approach)
+        const lastCustomerMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+        const customerSaid = lastCustomerMessage?.text?.toLowerCase() || '';
+
+        let extractedOrderType = null;
+        if (customerSaid.includes('delivery')) {
+          extractedOrderType = 'delivery';
+        } else if (customerSaid.includes('pickup') || customerSaid.includes('pick up') || customerSaid.includes('take out') || customerSaid.includes('takeout')) {
+          extractedOrderType = 'pickup';
+        }
+
+        console.log('📋 set_order_type called - extracted from last message:', extractedOrderType);
+        orderType = extractedOrderType;
+        stateManager.updateCallData(callSid, { order_type: extractedOrderType });
         result = {
           success: true,
-          order_type: parsedArgs.order_type,
+          order_type: extractedOrderType,
           next_action: 'ask_for_name',
-          message: `Order type set to ${parsedArgs.order_type}. Now ask for customer name.`
+          message: `Order type set to ${extractedOrderType}. Now ask for customer name.`
         };
         break;
 
       case 'set_customer_name':
-        console.log('👤 set_customer_name called:', parsedArgs.name);
-        customerName = parsedArgs.name;
-        stateManager.updateCallData(callSid, { customer_name: parsedArgs.name });
+        // Extract customer name from last message (parameter-free approach)
+        const lastNameMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+        const nameText = lastNameMessage?.text?.trim() || '';
+
+        // Clean up common filler words but keep the actual name
+        let extractedName = nameText
+          .replace(/^(my name is|i'm|i am|it's|it is|this is)\s+/i, '')
+          .replace(/\s+(please|thank you|thanks)$/i, '')
+          .trim();
+
+        // Capitalize first letter of each word
+        if (extractedName) {
+          extractedName = extractedName.split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+        }
+
+        console.log('👤 set_customer_name called - extracted from last message:', extractedName);
+        customerName = extractedName || 'Unknown';
+        stateManager.updateCallData(callSid, { customer_name: customerName });
 
         // Return success with next step instructions based on order type
         if (orderType === 'delivery') {
           result = {
             success: true,
-            stored_name: parsedArgs.name,
+            stored_name: customerName,
             next_action: 'check_customer_address',
             message: 'Name stored. Now checking for saved delivery address...'
           };
         } else if (orderType === 'pickup') {
           result = {
             success: true,
-            stored_name: parsedArgs.name,
+            stored_name: customerName,
             next_action: 'ask_for_order',
             message: 'Name stored. Now ask customer what they want to order.'
           };
         } else {
           result = {
             success: true,
-            stored_name: parsedArgs.name
+            stored_name: customerName
           };
         }
         break;
 
       case 'set_delivery_instructions':
-        console.log('📝 set_delivery_instructions called:', parsedArgs.instructions);
+        // Extract delivery instructions from last message (parameter-free approach)
+        const lastInstructionsMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+        const instructionsText = lastInstructionsMessage?.text?.trim() || '';
+
+        console.log('📝 set_delivery_instructions called - extracted from last message:', instructionsText);
         stateManager.updateCallData(callSid, {
-          deliveryInstructions: parsedArgs.instructions,
+          deliveryInstructions: instructionsText,
           deliveryAddress: validatedDeliveryAddress
         });
         // Also update the global variable for backward compatibility
-        deliveryInstructions = parsedArgs.instructions;
+        deliveryInstructions = instructionsText;
         result = {
           success: true,
-          instructions: parsedArgs.instructions,
+          instructions: instructionsText,
           message: 'Delivery instructions stored.'
         };
         break;
 
       case 'add_order_item':
-        console.log('🍕 add_order_item called:', parsedArgs);
-        const callData = stateManager.getCallData(callSid) || {};
-        const currentItems = callData.order_items || [];
+        // Extract item details from last message (parameter-free approach)
+        const lastItemMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+        const itemText = lastItemMessage?.text?.toLowerCase() || '';
+
+        console.log('🍕 add_order_item called - parsing from last message:', itemText);
+
+        // Extract quantity (look for numbers or words like "two", "three")
+        let quantity = 1;
+        const quantityMatch = itemText.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)/);
+        if (quantityMatch) {
+          const quantityMap = { 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10 };
+          quantity = quantityMap[quantityMatch[1]] || parseInt(quantityMatch[1]) || 1;
+        }
+
+        // Extract size (large, medium, small)
+        let size = null;
+        if (itemText.includes('large') || itemText.includes('big')) size = 'large';
+        else if (itemText.includes('medium')) size = 'medium';
+        else if (itemText.includes('small')) size = 'small';
+
+        // Extract item name by matching against menu items
+        let item_name = null;
+        if (restaurant && restaurant.menu_items) {
+          for (const menuItem of restaurant.menu_items) {
+            const menuName = menuItem.name.toLowerCase();
+            if (itemText.includes(menuName)) {
+              item_name = menuItem.name; // Use the proper capitalization from menu
+              break;
+            }
+          }
+        }
+
+        // If no exact match, try to extract main food word
+        if (!item_name) {
+          // Common food words
+          const foodWords = ['pizza', 'burger', 'cheeseburger', 'hamburger', 'fries', 'wings', 'salad', 'sandwich', 'wrap', 'sub', 'hoagie', 'taco', 'burrito', 'quesadilla'];
+          for (const food of foodWords) {
+            if (itemText.includes(food)) {
+              item_name = food.charAt(0).toUpperCase() + food.slice(1);
+              break;
+            }
+          }
+        }
+
+        // Extract customizations (look for "with", "no", "without", "extra")
+        let customizations = null;
+        const withMatch = itemText.match(/with\s+([^,\.]+)/);
+        const noMatch = itemText.match(/no\s+([^,\.]+)/);
+        const extraMatch = itemText.match(/extra\s+([^,\.]+)/);
+
+        const custParts = [];
+        if (withMatch) custParts.push('with ' + withMatch[1]);
+        if (noMatch) custParts.push('no ' + noMatch[1]);
+        if (extraMatch) custParts.push('extra ' + extraMatch[1]);
+        if (custParts.length > 0) customizations = custParts.join(', ');
+
+        const itemCallData = stateManager.getCallData(callSid) || {};
+        const currentItems = itemCallData.order_items || [];
 
         // Create new item object
         const newItem = {
-          item_name: parsedArgs.item_name,
-          size: parsedArgs.size || null,
-          quantity: parsedArgs.quantity || 1,
-          customizations: parsedArgs.customizations || null
+          item_name: item_name,
+          size: size,
+          quantity: quantity,
+          customizations: customizations
         };
 
         currentItems.push(newItem);
         stateManager.updateCallData(callSid, { order_items: currentItems });
+
+        console.log('✅ Item extracted:', newItem);
 
         result = {
           success: true,
@@ -1027,11 +1072,22 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_payment_method':
-        console.log('💳 set_payment_method called:', parsedArgs.method);
-        stateManager.updateCallData(callSid, { payment_method: parsedArgs.method });
+        // Extract payment method from last message (parameter-free approach)
+        const lastPaymentMessage = conversationLog.filter(m => m.speaker === 'customer').slice(-1)[0];
+        const paymentText = lastPaymentMessage?.text?.toLowerCase() || '';
+
+        let extractedPayment = null;
+        if (paymentText.includes('cash')) {
+          extractedPayment = 'cash';
+        } else if (paymentText.includes('credit') || paymentText.includes('card')) {
+          extractedPayment = 'credit card';
+        }
+
+        console.log('💳 set_payment_method called - extracted from last message:', extractedPayment);
+        stateManager.updateCallData(callSid, { payment_method: extractedPayment });
         result = {
           success: true,
-          payment_method: parsedArgs.method,
+          payment_method: extractedPayment,
           next_action: 'finalize_order',
           message: 'Payment method recorded. Now call finalize_order immediately.'
         };
