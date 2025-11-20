@@ -1397,11 +1397,17 @@ wss.on('connection', (ws, _req) => {
             if (functionName === 'finalize_order' && result.success) {
               const announcementInstructions = `CRITICAL: You just called finalize_order and received this result: ${JSON.stringify(result)}. You MUST now announce to the customer using this EXACT format:
 
-"Your estimated total is $${result.final_total}. Order confirmed for [customer name] for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+"Your estimated total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you for your order! Goodbye!"
 
-Example: "Your estimated total is $${result.final_total}. Order confirmed for ${result.customer_name || 'the customer'} for ${result.order_type || 'delivery'}. Your order will ${result.order_type === 'pickup' ? 'be ready' : 'arrive'} in approximately ${result.total_minutes} minutes, around ${result.ready_time}. Thank you!"
+DO NOT skip any part of this announcement. The customer MUST hear:
+1. The estimated total ($${result.final_total})
+2. The customer name
+3. The order type (${result.order_type || 'delivery'})
+4. The timing in minutes (${result.total_minutes} minutes)
+5. The ready time (${result.ready_time})
+6. "Thank you for your order! Goodbye!"
 
-DO NOT skip any part of this announcement. The customer MUST hear the estimated total, the timing in minutes, and the ready time.`;
+After saying goodbye, the call will automatically end.`;
 
               responsePayload.response = {
                 instructions: announcementInstructions
@@ -1409,6 +1415,17 @@ DO NOT skip any part of this announcement. The customer MUST hear the estimated 
 
               console.log('🔥 INJECTING ANNOUNCEMENT INSTRUCTIONS INTO response.create:');
               console.log(announcementInstructions);
+
+              // Schedule graceful hangup after 3 seconds to allow AI to finish speaking
+              setTimeout(async () => {
+                const callData = stateManager.getCallData(callSid);
+                await twilioService.hangup(callSid, {
+                  method: 'graceful',
+                  restaurant: callData?.restaurant || restaurant,
+                  reason: 'order_completed'
+                });
+                console.log('📞 Graceful hangup initiated after order completion');
+              }, 3000);
             }
 
             // For set_order_type, add explicit instructions to ask for name
@@ -1431,9 +1448,11 @@ DO NOT wait. DO NOT do anything else. Ask for their name RIGHT NOW.`;
             if (functionName === 'set_customer_name' && result.next_action === 'check_customer_address') {
               const nextStepInstructions = `CRITICAL: You just stored the customer's name "${result.stored_name}". This is a DELIVERY order.
 
-You MUST NOW IMMEDIATELY call the function: check_customer_address
+You MUST NOW do these steps in order:
+1. FIRST: Say to the customer: "Great, ${result.stored_name}. Let me check if we have your address on file."
+2. THEN IMMEDIATELY call the function: check_customer_address
 
-DO NOT wait for the customer to say anything. DO NOT ask any questions. Call check_customer_address RIGHT NOW.`;
+DO NOT skip step 1. The customer needs to know you're checking the system.`;
 
               responsePayload.response = {
                 instructions: nextStepInstructions
@@ -1441,6 +1460,30 @@ DO NOT wait for the customer to say anything. DO NOT ask any questions. Call che
 
               console.log('🔥 INJECTING NEXT STEP INSTRUCTIONS for set_customer_name (delivery):');
               console.log(nextStepInstructions);
+            }
+
+            // For add_order_item, add instructions to ask for more items
+            if (functionName === 'add_order_item' && result.success) {
+              const orderTypeData = stateManager.getCallData(callSid) || {};
+              const isDeliveryOrder = orderTypeData.order_type === 'delivery';
+
+              const addItemInstructions = `CRITICAL: You just added an item to the order. Total items: ${result.total_items}.
+
+You MUST NOW ask the customer: "Anything else?"
+
+Then LISTEN to their response:
+- If they say "no", "that's it", "that's all", "I'm done", or similar → They are DONE ordering
+  ${isDeliveryOrder ? '→ Ask: "How would you like to pay? Cash or credit card?"' : '→ IMMEDIATELY call: finalize_order'}
+- If they mention another food item → IMMEDIATELY call add_order_item again
+
+DO NOT freeze. DO NOT wait. Respond naturally to their answer.`;
+
+              responsePayload.response = {
+                instructions: addItemInstructions
+              };
+
+              console.log('🔥 INJECTING ADD ITEM INSTRUCTIONS:');
+              console.log(addItemInstructions);
             }
 
             // For set_payment_method, add explicit instructions to call finalize_order
