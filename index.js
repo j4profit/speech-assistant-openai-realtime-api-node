@@ -418,46 +418,90 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "set_order_type",
-        description: "Store whether this is a pickup or delivery order. Call IMMEDIATELY when customer says 'pickup' or 'delivery'. The system will extract the order type from the customer's last message automatically.",
+        description: "Store whether this is a pickup or delivery order. Call IMMEDIATELY when customer says 'pickup' or 'delivery'.",
         parameters: {
           type: "object",
-          properties: {}
+          properties: {
+            order_type: {
+              type: "string",
+              enum: ["pickup", "delivery"],
+              description: "The type of order: 'pickup' or 'delivery'"
+            }
+          },
+          required: ["order_type"]
         }
       },
       {
         type: "function",
         name: "set_customer_name",
-        description: "Store customer's name. Call IMMEDIATELY after customer provides their name. The system will extract the name from the customer's last message automatically.",
+        description: "Store customer's name. Call IMMEDIATELY after customer provides their name.",
         parameters: {
           type: "object",
-          properties: {}
+          properties: {
+            name: {
+              type: "string",
+              description: "The customer's name"
+            }
+          },
+          required: ["name"]
         }
       },
       {
         type: "function",
         name: "add_order_item",
-        description: "Add a food item to the order. Call this EACH TIME customer mentions a food item. The system will extract item name, quantity, size, and customizations from the customer's last message automatically.",
+        description: "Add a food item to the order. Call this EACH TIME customer mentions a food item.",
         parameters: {
           type: "object",
-          properties: {}
+          properties: {
+            item_name: {
+              type: "string",
+              description: "The name of the food item (e.g., 'pizza', 'cheeseburger')"
+            },
+            quantity: {
+              type: "integer",
+              description: "How many of this item (default: 1)"
+            },
+            size: {
+              type: "string",
+              description: "Size if applicable (e.g., 'small', 'medium', 'large')"
+            },
+            customizations: {
+              type: "string",
+              description: "Any special requests or modifications (e.g., 'no pickles', 'extra cheese')"
+            }
+          },
+          required: ["item_name"]
         }
       },
       {
         type: "function",
         name: "set_delivery_instructions",
-        description: "Store delivery instructions for delivery orders. Call when customer provides delivery instructions. The system will extract instructions from the customer's last message automatically.",
+        description: "Store delivery instructions for delivery orders. Call when customer provides delivery instructions.",
         parameters: {
           type: "object",
-          properties: {}
+          properties: {
+            instructions: {
+              type: "string",
+              description: "Delivery instructions (e.g., 'front door', 'ring bell', 'leave on porch')"
+            }
+          },
+          required: ["instructions"]
         }
       },
       {
         type: "function",
         name: "set_payment_method",
-        description: "Record payment method for delivery orders. Call when customer says 'cash' or 'credit card'. The system will extract payment method from the customer's last message automatically.",
+        description: "Record payment method for delivery orders. Call when customer says 'cash' or 'credit card'.",
         parameters: {
           type: "object",
-          properties: {}
+          properties: {
+            payment_method: {
+              type: "string",
+              enum: ["cash", "credit card"],
+              description: "The payment method: 'cash' or 'credit card'"
+            }
+          },
+          required: ["payment_method"]
         }
       },
       {
@@ -944,20 +988,27 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_order_type':
-        // Extract order type from last customer message (parameter-free approach)
-        const customerSaid = getLastCustomerMessage().toLowerCase();
+        // Try to use parameter first, fallback to extraction if not provided
+        let extractedOrderType = parsedArgs.order_type || null;
 
-        let extractedOrderType = null;
-        // Check for delivery variations: delivery, delivering, deliver, delivered
-        if (customerSaid.includes('deliver')) {
-          extractedOrderType = 'delivery';
-        } else if (customerSaid.includes('pickup') || customerSaid.includes('pick up') || customerSaid.includes('pick-up') ||
-                   customerSaid.includes('take out') || customerSaid.includes('takeout') || customerSaid.includes('carry out') ||
-                   customerSaid.includes('carryout') || customerSaid.includes('to go')) {
-          extractedOrderType = 'pickup';
+        // Fallback: Extract order type from last customer message if parameter not provided
+        if (!extractedOrderType) {
+          console.log('⚠️  No order_type parameter provided, extracting from conversation...');
+          const customerSaid = getLastCustomerMessage().toLowerCase();
+
+          // Check for delivery variations: delivery, delivering, deliver, delivered
+          if (customerSaid.includes('deliver')) {
+            extractedOrderType = 'delivery';
+          } else if (customerSaid.includes('pickup') || customerSaid.includes('pick up') || customerSaid.includes('pick-up') ||
+                     customerSaid.includes('take out') || customerSaid.includes('takeout') || customerSaid.includes('carry out') ||
+                     customerSaid.includes('carryout') || customerSaid.includes('to go')) {
+            extractedOrderType = 'pickup';
+          }
+        } else {
+          console.log('✅ Using order_type from parameter:', extractedOrderType);
         }
 
-        console.log('📋 set_order_type called - extracted from last message:', extractedOrderType);
+        console.log('📋 set_order_type result:', extractedOrderType);
         orderType = extractedOrderType;
         stateManager.updateCallData(callSid, { order_type: extractedOrderType });
         clearPendingTranscript();
@@ -970,14 +1021,22 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_customer_name':
-        // Extract customer name from last message (parameter-free approach)
-        const nameText = getLastCustomerMessage().trim();
+        // Try to use parameter first, fallback to extraction if not provided
+        let extractedName = parsedArgs.name || null;
 
-        // Clean up common filler words but keep the actual name
-        let extractedName = nameText
-          .replace(/^(my name is|i'm|i am|it's|it is|this is)\s+/i, '')
-          .replace(/\s+(please|thank you|thanks)$/i, '')
-          .trim();
+        // Fallback: Extract customer name from last message if parameter not provided
+        if (!extractedName) {
+          console.log('⚠️  No name parameter provided, extracting from conversation...');
+          const nameText = getLastCustomerMessage().trim();
+
+          // Clean up common filler words but keep the actual name
+          extractedName = nameText
+            .replace(/^(my name is|i'm|i am|it's|it is|this is)\s+/i, '')
+            .replace(/\s+(please|thank you|thanks)$/i, '')
+            .trim();
+        } else {
+          console.log('✅ Using name from parameter:', extractedName);
+        }
 
         // Capitalize first letter of each word
         if (extractedName) {
@@ -986,7 +1045,7 @@ wss.on('connection', (ws, _req) => {
             .join(' ');
         }
 
-        console.log('👤 set_customer_name called - extracted from last message:', extractedName);
+        console.log('👤 set_customer_name result:', extractedName);
         customerName = extractedName || 'Unknown';
         stateManager.updateCallData(callSid, { customer_name: customerName });
         clearPendingTranscript();
@@ -1015,10 +1074,18 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_delivery_instructions':
-        // Extract delivery instructions from last message (parameter-free approach)
-        const instructionsText = getLastCustomerMessage().trim();
+        // Try to use parameter first, fallback to extraction if not provided
+        let instructionsText = parsedArgs.instructions || null;
 
-        console.log('📝 set_delivery_instructions called - extracted from last message:', instructionsText);
+        // Fallback: Extract delivery instructions from last message if parameter not provided
+        if (!instructionsText) {
+          console.log('⚠️  No instructions parameter provided, extracting from conversation...');
+          instructionsText = getLastCustomerMessage().trim();
+        } else {
+          console.log('✅ Using instructions from parameter:', instructionsText);
+        }
+
+        console.log('📝 set_delivery_instructions result:', instructionsText);
         stateManager.updateCallData(callSid, {
           deliveryInstructions: instructionsText,
           deliveryAddress: validatedDeliveryAddress
@@ -1034,122 +1101,128 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'add_order_item':
-        // Extract item details from last message (parameter-free approach)
-        const itemText = getLastCustomerMessage().toLowerCase();
+        // Try to use parameters first, fallback to extraction if not provided
+        let item_name = parsedArgs.item_name || null;
+        let quantity = parsedArgs.quantity || 1;
+        let size = parsedArgs.size || null;
+        let customizations = parsedArgs.customizations || null;
 
-        console.log('🍕 add_order_item called - parsing from last message:', itemText);
+        // Fallback: Extract item details from last message if parameters not provided
+        if (!item_name) {
+          console.log('⚠️  No item parameters provided, extracting from conversation...');
+          const itemText = getLastCustomerMessage().toLowerCase();
 
-        // Extract quantity (look for numbers or words like "two", "three")
-        let quantity = 1;
-        const quantityMatch = itemText.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)/);
-        if (quantityMatch) {
-          const quantityMap = { 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10 };
-          quantity = quantityMap[quantityMatch[1]] || parseInt(quantityMatch[1]) || 1;
-        }
+          console.log('🍕 add_order_item called - parsing from last message:', itemText);
 
-        // Extract size (large, medium, small)
-        let size = null;
-        if (itemText.includes('large') || itemText.includes('big')) size = 'large';
-        else if (itemText.includes('medium')) size = 'medium';
-        else if (itemText.includes('small')) size = 'small';
-
-        // Extract item name by matching against menu items
-        let item_name = null;
-        console.log('🔍 Matching item from text:', itemText);
-        console.log('🔍 Restaurant menu available:', !!restaurant?.menu_items);
-        console.log('🔍 Menu items count:', restaurant?.menu_items?.length || 0);
-
-        if (restaurant && restaurant.menu_items) {
-          console.log('🔍 Checking against menu items:', restaurant.menu_items.map(m => m.name));
-
-          // Try exact match first
-          for (const menuItem of restaurant.menu_items) {
-            const menuName = menuItem.name.toLowerCase();
-            if (itemText.includes(menuName)) {
-              item_name = menuItem.name; // Use the proper capitalization from menu
-              console.log('✅ Matched menu item (exact):', item_name);
-              break;
-            }
+          // Extract quantity (look for numbers or words like "two", "three")
+          const quantityMatch = itemText.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)/);
+          if (quantityMatch) {
+            const quantityMap = { 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10 };
+            quantity = quantityMap[quantityMatch[1]] || parseInt(quantityMatch[1]) || 1;
           }
 
-          // If no exact match, try fuzzy matching with scoring
-          if (!item_name) {
-            let bestMatch = null;
-            let bestScore = 0;
+          // Extract size (large, medium, small)
+          if (itemText.includes('large') || itemText.includes('big')) size = 'large';
+          else if (itemText.includes('medium')) size = 'medium';
+          else if (itemText.includes('small')) size = 'small';
 
+          console.log('🔍 Matching item from text:', itemText);
+          console.log('🔍 Restaurant menu available:', !!restaurant?.menu_items);
+          console.log('🔍 Menu items count:', restaurant?.menu_items?.length || 0);
+
+          if (restaurant && restaurant.menu_items) {
+            console.log('🔍 Checking against menu items:', restaurant.menu_items.map(m => m.name));
+
+            // Try exact match first
             for (const menuItem of restaurant.menu_items) {
               const menuName = menuItem.name.toLowerCase();
-              let score = 0;
-
-              // Common spelling variations
-              const variations = [
-                menuName.replace('gh', 'g'),     // margherita -> margarita
-                menuName.replace('ph', 'f'),      // phone -> fone
-                menuName.replace('qu', 'k'),      // queso -> keso
-                menuName.replace('ue', 'u')       // barbeque -> barbecue
-              ];
-
-              // Check for variation match (highest score)
-              for (const variant of variations) {
-                if (itemText.includes(variant) && variant !== menuName) {
-                  score = variant.length * 2; // Prioritize longer, more specific variations
-                  console.log(`🔍 Variation match: "${variant}" in "${menuName}" - score: ${score}`);
-                  break;
-                }
+              if (itemText.includes(menuName)) {
+                item_name = menuItem.name; // Use the proper capitalization from menu
+                console.log('✅ Matched menu item (exact):', item_name);
+                break;
               }
+            }
 
-              // Check main words (ignore small generic words)
-              const menuWords = menuName.split(' ').filter(w => w.length > 3);
-              for (const word of menuWords) {
-                if (itemText.includes(word)) {
-                  // Longer words = more specific = higher score
-                  const wordScore = word.length;
-                  if (wordScore > score) {
-                    score = wordScore;
-                    console.log(`🔍 Word match: "${word}" in "${menuName}" - score: ${score}`);
+            // If no exact match, try fuzzy matching with scoring
+            if (!item_name) {
+              let bestMatch = null;
+              let bestScore = 0;
+
+              for (const menuItem of restaurant.menu_items) {
+                const menuName = menuItem.name.toLowerCase();
+                let score = 0;
+
+                // Common spelling variations
+                const variations = [
+                  menuName.replace('gh', 'g'),     // margherita -> margarita
+                  menuName.replace('ph', 'f'),      // phone -> fone
+                  menuName.replace('qu', 'k'),      // queso -> keso
+                  menuName.replace('ue', 'u')       // barbeque -> barbecue
+                ];
+
+                // Check for variation match (highest score)
+                for (const variant of variations) {
+                  if (itemText.includes(variant) && variant !== menuName) {
+                    score = variant.length * 2; // Prioritize longer, more specific variations
+                    console.log(`🔍 Variation match: "${variant}" in "${menuName}" - score: ${score}`);
+                    break;
                   }
                 }
+
+                // Check main words (ignore small generic words)
+                const menuWords = menuName.split(' ').filter(w => w.length > 3);
+                for (const word of menuWords) {
+                  if (itemText.includes(word)) {
+                    // Longer words = more specific = higher score
+                    const wordScore = word.length;
+                    if (wordScore > score) {
+                      score = wordScore;
+                      console.log(`🔍 Word match: "${word}" in "${menuName}" - score: ${score}`);
+                    }
+                  }
+                }
+
+                // Keep track of best match
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestMatch = menuItem.name;
+                }
               }
 
-              // Keep track of best match
-              if (score > bestScore) {
-                bestScore = score;
-                bestMatch = menuItem.name;
+              if (bestMatch) {
+                item_name = bestMatch;
+                console.log('✅ Matched menu item (fuzzy): ', item_name, '- best score:', bestScore);
               }
             }
+          } else {
+            console.warn('⚠️  No menu items available for matching!');
+          }
 
-            if (bestMatch) {
-              item_name = bestMatch;
-              console.log('✅ Matched menu item (fuzzy): ', item_name, '- best score:', bestScore);
+          // If no exact match, try to extract main food word
+          if (!item_name) {
+            // Common food words
+            const foodWords = ['pizza', 'burger', 'cheeseburger', 'hamburger', 'fries', 'wings', 'salad', 'sandwich', 'wrap', 'sub', 'hoagie', 'taco', 'burrito', 'quesadilla'];
+            for (const food of foodWords) {
+              if (itemText.includes(food)) {
+                item_name = food.charAt(0).toUpperCase() + food.slice(1);
+                break;
+              }
             }
           }
+
+          // Extract customizations (look for "with", "no", "without", "extra")
+          const withMatch = itemText.match(/with\s+([^,\.]+)/);
+          const noMatch = itemText.match(/no\s+([^,\.]+)/);
+          const extraMatch = itemText.match(/extra\s+([^,\.]+)/);
+
+          const custParts = [];
+          if (withMatch) custParts.push('with ' + withMatch[1]);
+          if (noMatch) custParts.push('no ' + noMatch[1]);
+          if (extraMatch) custParts.push('extra ' + extraMatch[1]);
+          if (custParts.length > 0) customizations = custParts.join(', ');
         } else {
-          console.warn('⚠️  No menu items available for matching!');
+          console.log('✅ Using item parameters:', { item_name, quantity, size, customizations });
         }
-
-        // If no exact match, try to extract main food word
-        if (!item_name) {
-          // Common food words
-          const foodWords = ['pizza', 'burger', 'cheeseburger', 'hamburger', 'fries', 'wings', 'salad', 'sandwich', 'wrap', 'sub', 'hoagie', 'taco', 'burrito', 'quesadilla'];
-          for (const food of foodWords) {
-            if (itemText.includes(food)) {
-              item_name = food.charAt(0).toUpperCase() + food.slice(1);
-              break;
-            }
-          }
-        }
-
-        // Extract customizations (look for "with", "no", "without", "extra")
-        let customizations = null;
-        const withMatch = itemText.match(/with\s+([^,\.]+)/);
-        const noMatch = itemText.match(/no\s+([^,\.]+)/);
-        const extraMatch = itemText.match(/extra\s+([^,\.]+)/);
-
-        const custParts = [];
-        if (withMatch) custParts.push('with ' + withMatch[1]);
-        if (noMatch) custParts.push('no ' + noMatch[1]);
-        if (extraMatch) custParts.push('extra ' + extraMatch[1]);
-        if (custParts.length > 0) customizations = custParts.join(', ');
 
         const itemCallData = stateManager.getCallData(callSid) || {};
         const currentItems = itemCallData.order_items || [];
@@ -1176,17 +1249,24 @@ wss.on('connection', (ws, _req) => {
         break;
 
       case 'set_payment_method':
-        // Extract payment method from last message (parameter-free approach)
-        const paymentText = getLastCustomerMessage().toLowerCase();
+        // Try to use parameter first, fallback to extraction if not provided
+        let extractedPayment = parsedArgs.payment_method || null;
 
-        let extractedPayment = null;
-        if (paymentText.includes('cash')) {
-          extractedPayment = 'cash';
-        } else if (paymentText.includes('credit') || paymentText.includes('card')) {
-          extractedPayment = 'credit card';
+        // Fallback: Extract payment method from last message if parameter not provided
+        if (!extractedPayment) {
+          console.log('⚠️  No payment_method parameter provided, extracting from conversation...');
+          const paymentText = getLastCustomerMessage().toLowerCase();
+
+          if (paymentText.includes('cash')) {
+            extractedPayment = 'cash';
+          } else if (paymentText.includes('credit') || paymentText.includes('card')) {
+            extractedPayment = 'credit card';
+          }
+        } else {
+          console.log('✅ Using payment_method from parameter:', extractedPayment);
         }
 
-        console.log('💳 set_payment_method called - extracted from last message:', extractedPayment);
+        console.log('💳 set_payment_method result:', extractedPayment);
         stateManager.updateCallData(callSid, { payment_method: extractedPayment });
         clearPendingTranscript();
         result = {
