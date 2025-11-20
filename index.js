@@ -160,8 +160,20 @@ wss.on('connection', (ws, _req) => {
       name: restaurant.name,
       phone: restaurant.phone_number,
       delivery_enabled: restaurant.delivery_enabled,
-      ai_voice: restaurant.ai_voice || 'coral (default)'
+      ai_voice: restaurant.ai_voice || 'coral (default)',
+      menu_items_count: restaurant.menu_items?.length || 0
     });
+
+    // DEBUG: Log menu items structure
+    if (restaurant.menu_items && restaurant.menu_items.length > 0) {
+      console.log('📋 Menu items loaded:', restaurant.menu_items.length, 'items');
+      console.log('📋 Sample menu items:', restaurant.menu_items.slice(0, 3).map(item => ({
+        name: item.name,
+        sizes: item.sizes?.length || 0
+      })));
+    } else {
+      console.warn('⚠️  WARNING: No menu items found for restaurant:', restaurant.name);
+    }
 
     customerPhone = fromNumber;
     callSid = callId;
@@ -1014,14 +1026,22 @@ wss.on('connection', (ws, _req) => {
 
         // Extract item name by matching against menu items
         let item_name = null;
+        console.log('🔍 Matching item from text:', itemText);
+        console.log('🔍 Restaurant menu available:', !!restaurant?.menu_items);
+        console.log('🔍 Menu items count:', restaurant?.menu_items?.length || 0);
+
         if (restaurant && restaurant.menu_items) {
+          console.log('🔍 Checking against menu items:', restaurant.menu_items.map(m => m.name));
           for (const menuItem of restaurant.menu_items) {
             const menuName = menuItem.name.toLowerCase();
             if (itemText.includes(menuName)) {
               item_name = menuItem.name; // Use the proper capitalization from menu
+              console.log('✅ Matched menu item:', item_name);
               break;
             }
           }
+        } else {
+          console.warn('⚠️  No menu items available for matching!');
         }
 
         // If no exact match, try to extract main food word
