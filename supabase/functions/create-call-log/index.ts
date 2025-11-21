@@ -1,104 +1,212 @@
-// Supabase Edge Function: create-call-log
-// Handles UPSERT of call logs (prevents duplicates using call_sid as unique key)
-// Supports hybrid logging: WebSocket + Twilio webhook
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
+};
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders
+    });
   }
 
   try {
-    const callData = await req.json()
-    console.log('Received call data:', JSON.stringify(callData, null, 2))
+    const callData = await req.json();
 
-    // Validate required fields
+    // Validate core data
     if (!callData.call_sid) {
-      return new Response(
-        JSON.stringify({ error: 'Missing required field: call_sid' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseKey)
-
-    // UPSERT: Insert or update based on call_sid (unique constraint)
-    const { data, error } = await supabase
-      .from('call_logs')
-      .upsert(
-        {
-          call_sid: callData.call_sid,
-          restaurant_id: callData.restaurant_id,
-          from_number: callData.from_number,
-          to_number: callData.to_number,
-          call_status: callData.call_status,
-          call_direction: callData.call_direction,
-          caller_country: callData.caller_country,
-          caller_state: callData.caller_state,
-          caller_city: callData.caller_city,
-          caller_zip: callData.caller_zip,
-          to_country: callData.to_country,
-          to_state: callData.to_state,
-          to_city: callData.to_city,
-          to_zip: callData.to_zip,
-          call_started_at: callData.call_started_at,
-          call_ended_at: callData.call_ended_at,
-          call_duration: callData.call_duration,
-          conversation_transcript: callData.conversation_transcript,
-          twilio_data: callData.twilio_data,
-          order_id: callData.order_id,
-          updated_at: new Date().toISOString()
+      return new Response(JSON.stringify({
+        error: "Missing call_sid"
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
         },
-        {
-          onConflict: 'call_sid', // Use call_sid as unique key
-          ignoreDuplicates: false  // Update if exists
-        }
-      )
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Database error:', error)
-      return new Response(
-        JSON.stringify({ error: error.message, details: error }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+        status: 400
+      });
     }
 
-    // Determine if this was an insert or update
-    const action = callData.conversation_transcript ? 'insert_or_update_with_transcript' : 'update_from_webhook'
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
 
-    console.log(`Call log ${action}:`, data.id)
+    // Try restaurant lookup by phone if restaurant_id is missing
+    let restaurant_id = callData.restaurant_id || null;
+    if (!restaurant_id && callData.to_number) {
+      const { data: restaurant } = await supabase
+        .from("restaurants")
+        .select("id")
+        .eq("phone_number", callData.to_number)
+        .maybeSingle();
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        data: data,
-        action: action,
-        call_sid: callData.call_sid
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      if (restaurant) restaurant_id = restaurant.id;
+    }
+
+    // Prepare log record
+    const callLogData = {
+      call_sid: callData.call_sid,
+      restaurant_id,
+      from_number: callData.from_number || null,
+      to_number: callData.to_number || null,
+      call_status: callData.call_status || null,
+      call_direction: callData.call_direction || null,
+      caller_country: callData.caller_country || null,
+      caller_state: callData.caller_state || null,
+      caller_city: callData.caller_city || null,
+      caller_zip: callData.caller_zip || null,
+      to_country: callData.to_country || null,
+      to_state: callData.to_state || null,
+      to_city: callData.to_city || null,
+      to_zip: callData.to_zip || null,
+      call_duration: callData.call_duration || null,
+      call_started_at: callData.call_started_at || null,
+      call_ended_at: callData.call_ended_at || null,
+      twilio_data: callData.twilio_data || null,
+      conversation_transcript: callData.conversation_transcript || null,
+      order_id: callData.order_id || null
+    };
+
+    // UPSERT: Insert or update based on call_sid
+    // This prevents duplicates from WebSocket + Twilio webhook
+    const { data: callLog, error: callLogError } = await supabase
+      .from("call_logs")
+      .upsert([callLogData], {
+        onConflict: 'call_sid',
+        ignoreDuplicates: false  // Update if exists
+      })
+      .select()
+      .single();
+
+    if (callLogError) {
+      console.error("Database error (call_logs):", callLogError);
+      return new Response(JSON.stringify({
+        error: callLogError.message
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        },
+        status: 500
+      });
+    }
+
+    // Only bill for completed calls (and only if not already billed)
+    let updatedCallLog = callLog;
+    let balanceError = null;
+
+    // Check if billing already processed to avoid double-billing
+    const shouldBill = callLog.restaurant_id &&
+                      callLog.call_duration &&
+                      callLog.call_duration > 0 &&
+                      callLog.call_status === "completed" &&
+                      (!callLog.billing_status || callLog.billing_status === 'pending');
+
+    if (shouldBill) {
+      const billed_minutes = Math.ceil(callLog.call_duration / 60);
+
+      // Fetch balance row
+      const { data: balanceRow, error: fetchError } = await supabase
+        .from("restaurant_balances")
+        .select("id, total_used_minutes, current_balance_minutes")
+        .eq("restaurant_id", callLog.restaurant_id)
+        .maybeSingle();
+
+      if (!fetchError && balanceRow) {
+        // Capture balance BEFORE deduction
+        const balance_before = balanceRow.current_balance_minutes;
+        const new_total_used = balanceRow.total_used_minutes + billed_minutes;
+
+        // Update restaurant's usage
+        const { error: updateError } = await supabase
+          .from("restaurant_balances")
+          .update({
+            total_used_minutes: new_total_used,
+            last_updated: new Date().toISOString()
+          })
+          .eq("id", balanceRow.id);
+
+        if (!updateError) {
+          // Fetch updated balance to get current_balance_minutes AFTER deduction
+          const { data: updatedBalance } = await supabase
+            .from("restaurant_balances")
+            .select("current_balance_minutes")
+            .eq("id", balanceRow.id)
+            .single();
+
+          // Update log with billing and complete balance transaction record
+          const { data: updatedLog } = await supabase
+            .from("call_logs")
+            .update({
+              billing_status: "billed",
+              billing_processed_at: new Date().toISOString(),
+              minutes_billed: billed_minutes,
+              balance_before_call: balance_before,
+              balance_after_call: updatedBalance?.current_balance_minutes || null
+            })
+            .eq("id", callLog.id)
+            .select()
+            .single();
+
+          updatedCallLog = updatedLog || callLog;
+        } else {
+          balanceError = updateError.message;
+          await supabase
+            .from("call_logs")
+            .update({
+              billing_status: "failed",
+              billing_processed_at: new Date().toISOString()
+            })
+            .eq("id", callLog.id);
+        }
+      } else {
+        balanceError = fetchError?.message || "Restaurant balance not found";
+        await supabase
+          .from("call_logs")
+          .update({
+            billing_status: "failed",
+            billing_processed_at: new Date().toISOString()
+          })
+          .eq("id", callLog.id);
       }
-    )
+    } else if (callLog.call_status === "completed" && !callLog.billing_status) {
+      // Mark as skipped if completed but doesn't meet billing criteria
+      await supabase
+        .from("call_logs")
+        .update({
+          billing_status: "skipped",
+          billing_processed_at: new Date().toISOString()
+        })
+        .eq("id", callLog.id);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      call_log: updatedCallLog,
+      balance_error: balanceError,
+      action: callData.source || 'upsert'  // Track source (websocket vs webhook)
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: balanceError ? 207 : 200
+    });
 
   } catch (error) {
-    console.error('Error in create-call-log function:', error)
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    console.error("Edge function error:", error);
+    return new Response(JSON.stringify({
+      error: error instanceof Error ? error.message : "Unknown error"
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 500
+    });
   }
-})
+});
