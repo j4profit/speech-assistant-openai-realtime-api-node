@@ -47,7 +47,7 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
 function generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress = null) {
   const savedAddressInfo = prefetchedAddress
     ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.delivery_address}\n- Address ID: ${prefetchedAddress.id}\n- When customer chooses delivery, IMMEDIATELY say: "I have your delivery address on file: ${prefetchedAddress.delivery_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n- Do NOT call check_customer_address - you already have the address!\n\n`
-    : `\n🔍 NO SAVED ADDRESS FOUND:\n- This customer does NOT have a saved delivery address in our system\n- When customer chooses delivery, you MUST call check_customer_address function first\n- While waiting for the function result, say: "Let me check if we have your delivery address on file..."\n- After calling the function, wait for the response before continuing\n\n`;
+    : `\n🔍 NO SAVED ADDRESS ON FILE:\n- This customer does NOT have a saved delivery address in our system\n- When customer chooses delivery, ask them for their delivery address directly\n- Do NOT call check_customer_address - we already checked and they don't have one saved\n- Once they provide an address, call validate_delivery_address to check if we can deliver there\n\n`;
 
   return `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 ${savedAddressInfo}
@@ -185,12 +185,11 @@ ${menuText}
 
 **INTENT-BASED FUNCTION CALLING:**
 You must actually CALL the functions when customers express these intents:
-1. **When customer says "delivery"** → FIRST call check_customer_address (AUTOMATICALLY USES CALLER ID ${customerPhone})
+1. **When customer provides ANY delivery address** (with numbers and street names) → call validate_delivery_address to check if we can deliver there
 2. **When customer wants to modify/cancel existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
-3. **When customer provides ANY delivery address (with numbers and street names)** → call validate_delivery_address
-4. **When customer wants to leave ANY message for staff** → IMMEDIATELY call create_customer_message
-5. **When customer completes an order** → use ORDER_CONFIRMED format
-6. **When customer asks about existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
+3. **When customer wants to leave ANY message for staff** → IMMEDIATELY call create_customer_message
+4. **When customer completes an order** → use ORDER_CONFIRMED format
+5. **When customer asks about existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
 
 🚨 CRITICAL: When customer says "I want to leave a message", "call me back", "I have a problem", or similar - don't just SAY you'll create a message, actually CALL the create_customer_message function immediately!
 
