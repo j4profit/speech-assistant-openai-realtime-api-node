@@ -506,39 +506,84 @@ wss.on('connection', (ws, _req) => {
       case 'transfer_call_for_manager':
       case 'transfer_call_for_complaint':
       case 'transfer_call_for_credit_card':
-        // Map function name to database reason string (must match call_forwarding_reasons array values)
-        const functionToReason = {
-          'transfer_call_for_catering': 'Forward calls for catering orders',
-          'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
-          'transfer_call_for_complaint': 'Forward calls for issues or complaints',
-          'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
-        };
-
-        const reason = functionToReason[functionName];
-        console.log(`🔄 Transfer request: ${functionName} (reason: ${reason})`);
-
-        // Check if call forwarding is enabled and configured
-        if (restaurant.call_forwarding_enabled &&
-            restaurant.call_forwarding_number &&
-            restaurant.call_forwarding_reasons?.includes(reason)) {
-
-          console.log(`✅ Transferring call to ${restaurant.call_forwarding_number}`);
-
-          // Transfer the call
-          await twilio.transferCall(callSid, restaurant.call_forwarding_number, reason);
-
-          result = {
-            transferred: true,
-            message: 'Call transferred to restaurant staff'
+        {
+          // Map function names to database reason strings
+          const functionToReason = {
+            'transfer_call_for_catering': 'Forward calls for catering orders',
+            'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
+            'transfer_call_for_complaint': 'Forward calls for issues or complaints',
+            'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
           };
-        } else {
-          // Forwarding not enabled - tell AI to create customer message instead
-          console.log(`⚠️ Call forwarding not available for: ${reason}`);
-          result = {
-            transferred: false,
-            should_create_message: true,
-            message: 'Call forwarding not enabled. Please create a customer message instead.'
+
+          const reason = functionToReason[functionName];
+          console.log(`🔀 Transfer call request: ${functionName} → ${reason}`);
+
+          // Check if call forwarding is enabled
+          if (!restaurant.call_forwarding_enabled) {
+            console.log('❌ Call forwarding not enabled for this restaurant');
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Check if this specific reason is in the forwarding reasons array
+          const forwardingReasons = restaurant.call_forwarding_reasons || [];
+          const shouldForward = forwardingReasons.includes(reason);
+
+          if (!shouldForward) {
+            console.log(`❌ Reason "${reason}" not in forwarding reasons: ${forwardingReasons.join(', ')}`);
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Check if forwarding number is configured
+          if (!restaurant.call_forwarding_number) {
+            console.error('❌ Call forwarding enabled but no number configured');
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+            break;
+          }
+
+          // Perform the transfer
+          console.log(`✅ Transferring call to ${restaurant.call_forwarding_number} - Reason: ${reason}`);
+          const transferMessages = {
+            'transfer_call_for_catering': 'Transferring you to our catering specialist',
+            'transfer_call_for_manager': 'Transferring you to the manager',
+            'transfer_call_for_complaint': 'Transferring you to our staff to help with your concern',
+            'transfer_call_for_credit_card': 'Transferring you to process your payment'
           };
+
+          const transferResult = await twilio.transferCall(
+            callSid,
+            restaurant.call_forwarding_number,
+            transferMessages[functionName]
+          );
+
+          if (transferResult.success) {
+            console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
+            result = {
+              success: true,
+              transferred_to: restaurant.call_forwarding_number,
+              message: "Transferring you now. Please hold."
+            };
+          } else {
+            console.error('❌ Transfer failed:', transferResult.error);
+            result = {
+              success: false,
+              should_create_message: true,
+              message: "I've saved your request. The restaurant will call you back to help with this."
+            };
+          }
         }
         break;
     }
