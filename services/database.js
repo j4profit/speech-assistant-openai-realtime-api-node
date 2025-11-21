@@ -371,6 +371,46 @@ async function validateDeliveryAddress(address, restaurant) {
 }
 
 /**
+ * Get customer's saved delivery address
+ * @param {string} customerPhone - Customer's phone number
+ * @param {string} restaurantId - Restaurant ID
+ * @returns {Promise<Object|null>} Saved address data or null if not found
+ */
+async function getCustomerAddress(customerPhone, restaurantId) {
+  try {
+    const response = await fetch(`${config.supabase.url}/functions/v1/get-customer-address`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.supabase.anonKey}`
+      },
+      body: JSON.stringify({
+        customer_phone: customerPhone,
+        restaurant_id: restaurantId
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`get-customer-address Edge Function failed with status ${response.status}`);
+      return null;
+    }
+
+    const result = await response.json();
+
+    if (result.error) {
+      console.error('get-customer-address error:', result.error);
+      return null;
+    }
+
+    return result.data; // Returns { address_id, full_address, delivery_instructions, ... } or null
+
+  } catch (error) {
+    console.error('Error calling get-customer-address Edge Function:', error);
+    return null;
+  }
+}
+
+/**
  * Create a new order
  * @param {Object} orderData - Order information
  * @returns {Promise<Object|null>} Created order or null on error
@@ -445,6 +485,7 @@ module.exports = {
   cancelOrder,
   updateOrder,
   validateDeliveryAddress,
+  getCustomerAddress,
   createOrder,
   createCustomerMessage
 };

@@ -244,14 +244,28 @@ wss.on('connection', (ws, _req) => {
       },
       {
         type: "function",
+        name: "check_customer_address",
+        description: "ONLY for DELIVERY orders: Check if customer has a saved delivery address on file. Call this BEFORE asking for delivery address. NEVER call this for pickup orders.",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      },
+      {
+        type: "function",
         name: "validate_delivery_address",
-        description: "Validate delivery address for feasibility",
+        description: "Validate delivery address for feasibility. Include customer_name if known.",
         parameters: {
           type: "object",
           properties: {
             address: {
               type: "string",
               description: "Complete delivery address provided by customer"
+            },
+            customer_name: {
+              type: "string",
+              description: "Customer's name (used for saving address for future orders)"
             }
           },
           required: ["address"]
@@ -450,6 +464,25 @@ wss.on('connection', (ws, _req) => {
               force_pickup: true
             };
           }
+        }
+        break;
+
+      case 'check_customer_address':
+        const savedAddress = await database.getCustomerAddress(customerPhone, restaurant.id);
+        if (savedAddress) {
+          console.log('✅ Found saved delivery address:', savedAddress.full_address);
+          result = {
+            has_saved_address: true,
+            address: savedAddress.full_address,
+            delivery_instructions: savedAddress.delivery_instructions,
+            address_id: savedAddress.address_id
+          };
+        } else {
+          console.log('⚠️ No saved delivery address found');
+          result = {
+            has_saved_address: false,
+            message: 'No saved address found. Please ask customer for their delivery address.'
+          };
         }
         break;
 
