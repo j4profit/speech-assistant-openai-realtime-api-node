@@ -186,6 +186,9 @@ async function transferCall(callSid, transferNumber, reason = 'transfer') {
 
     const transferUrl = `${config.server.baseUrl}/transfer-twiml?call_sid=${callSid}&transfer_number=${encodeURIComponent(transferNumber)}&reason=${encodeURIComponent(reason)}`;
 
+    // Wait 2.5 seconds to allow AI to finish announcing the transfer to the customer
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
     await twilioClient.calls(callSid).update({
       url: transferUrl,
       method: 'POST'
