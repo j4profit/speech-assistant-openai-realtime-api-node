@@ -212,9 +212,7 @@ wss.on('connection', (ws, _req) => {
           input_audio_transcription: {
             model: 'whisper-1'
           },
-          turn_detection: {
-            type: 'semantic_vad'
-          },
+          turn_detection: null,
           temperature: 0.6,
           max_response_output_tokens: 400,
           tools: tools,
@@ -410,6 +408,11 @@ wss.on('connection', (ws, _req) => {
             clearTimeout(greetingTimeout);
             greetingTimeout = null;
             customerHasSpoken = true;
+          }
+
+          // Trigger AI response after customer speaks (manual turn detection)
+          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+            openaiWs.send(JSON.stringify({ type: 'response.create' }));
           }
           break;
 
