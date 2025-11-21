@@ -266,7 +266,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "validate_delivery_address",
-        description: "Validate delivery address for feasibility. Include customer_name if known.",
+        description: "🚨 DELIVERY ORDERS ONLY - NEVER use for pickup orders! Validate delivery address for feasibility. Only call this when customer has explicitly chosen DELIVERY (not pickup).",
         parameters: {
           type: "object",
           properties: {
