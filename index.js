@@ -186,6 +186,7 @@ wss.on('connection', (ws, _req) => {
       console.log('Connected to OpenAI Realtime API');
 
       const instructions = generateAIInstructions(restaurant, customerPhone, menuText);
+      const tools = getAITools();
 
       const sessionUpdate = {
         type: 'session.update',
@@ -203,9 +204,13 @@ wss.on('connection', (ws, _req) => {
           },
           temperature: 0.6,
           max_response_output_tokens: 400,
-          tools: getAITools()
+          tools: tools,
+          tool_choice: 'auto'
         }
       };
+
+      console.log(`✅ Session configured with ${tools.length} function tools and tool_choice: 'auto'`);
+      console.log('📋 Available tools:', tools.map(t => t.name).join(', '));
 
       openaiWs.send(JSON.stringify(sessionUpdate));
     });
