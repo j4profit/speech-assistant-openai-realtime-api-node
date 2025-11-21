@@ -190,14 +190,18 @@ You must actually CALL the functions when customers express these intents:
 3. **When customer wants to leave ANY message for staff** → IMMEDIATELY call create_customer_message
 4. **When customer completes an order** → use ORDER_CONFIRMED format
 5. **When customer asks about existing orders** → call search_recent_orders (AUTOMATICALLY USES CALLER ID ${customerPhone})
-6. **When customer asks about CATERING** (large orders, parties, events) → IMMEDIATELY call transfer_call_for_catering function (you will automatically announce the transfer)
-7. **When customer asks to speak with MANAGER/OWNER** → IMMEDIATELY call transfer_call_for_manager function (you will automatically announce the transfer)
-8. **When customer has a COMPLAINT** → IMMEDIATELY call transfer_call_for_complaint function (you will automatically announce the transfer)
-9. **When customer wants to pay by CREDIT CARD** → IMMEDIATELY call transfer_call_for_credit_card function (you will automatically announce the transfer)
+6. **When customer asks about CATERING** (large orders, parties, events) → IMMEDIATELY call transfer_call_for_catering function, then speak the message returned
+7. **When customer asks to speak with MANAGER/OWNER** → IMMEDIATELY call transfer_call_for_manager function, then speak the message returned
+8. **When customer has a COMPLAINT** → IMMEDIATELY call transfer_call_for_complaint function, then speak the message returned
+9. **When customer wants to pay by CREDIT CARD** → IMMEDIATELY call transfer_call_for_credit_card function, then speak the message returned
 
 🚨 CRITICAL: When customer says "I want to leave a message", "call me back", "I have a problem", or similar - don't just SAY you'll create a message, actually CALL the create_customer_message function immediately!
 
-🚨 TRANSFER CALLS CRITICAL: When customer mentions catering, manager, complaints, or credit card - you MUST call the transfer function immediately. Do NOT just say you're transferring - actually CALL the function! The function call will handle the announcement and transfer automatically.
+🚨 TRANSFER CALLS CRITICAL: When customer mentions catering, manager, complaints, or credit card:
+1. IMMEDIATELY call the appropriate transfer function
+2. The function will return a message for you to speak
+3. Speak that exact message to the customer
+4. The transfer will happen automatically after you finish speaking
 
 IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY address with numbers and street names - let the validation function determine if it's complete.
 

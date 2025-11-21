@@ -554,36 +554,38 @@ wss.on('connection', (ws, _req) => {
             break;
           }
 
-          // Perform the transfer
-          console.log(`✅ Transferring call to ${restaurant.call_forwarding_number} - Reason: ${reason}`);
+          // Return message for AI to speak, then transfer after delay
+          console.log(`✅ Preparing transfer to ${restaurant.call_forwarding_number} - Reason: ${reason}`);
+
           const transferMessages = {
-            'transfer_call_for_catering': 'Transferring you to our catering specialist',
-            'transfer_call_for_manager': 'Transferring you to the manager',
-            'transfer_call_for_complaint': 'Transferring you to our staff to help with your concern',
-            'transfer_call_for_credit_card': 'Transferring you to process your payment'
+            'transfer_call_for_catering': 'Let me transfer you to our catering specialist. Please hold.',
+            'transfer_call_for_manager': 'Let me transfer you to the manager. Please hold.',
+            'transfer_call_for_complaint': 'Let me transfer you to someone who can help. Please hold.',
+            'transfer_call_for_credit_card': 'Let me transfer you to process your payment. Please hold.'
           };
 
-          const transferResult = await twilioService.transferCall(
-            callSid,
-            restaurant.call_forwarding_number,
-            transferMessages[functionName]
-          );
+          // Return result immediately so AI can speak the message
+          result = {
+            success: true,
+            transferred_to: restaurant.call_forwarding_number,
+            message: transferMessages[functionName]
+          };
 
-          if (transferResult.success) {
-            console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
-            result = {
-              success: true,
-              transferred_to: restaurant.call_forwarding_number,
-              message: "Transferring you now. Please hold."
-            };
-          } else {
-            console.error('❌ Transfer failed:', transferResult.error);
-            result = {
-              success: false,
-              should_create_message: true,
-              message: "I've saved your request. The restaurant will call you back to help with this."
-            };
-          }
+          // Execute transfer after delay (non-blocking)
+          setTimeout(async () => {
+            console.log(`⏳ Executing delayed transfer to ${restaurant.call_forwarding_number}...`);
+            const transferResult = await twilioService.transferCall(
+              callSid,
+              restaurant.call_forwarding_number,
+              transferMessages[functionName]
+            );
+
+            if (transferResult.success) {
+              console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
+            } else {
+              console.error('❌ Transfer failed:', transferResult.error);
+            }
+          }, 3000);
         }
         break;
     }
