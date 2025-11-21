@@ -224,10 +224,21 @@ function formatMenuForAI(menuItems, restaurant) {
       categories[categoryName] = [];
     }
 
+    // Handle both flat price and sizes array formats
+    let priceDisplay;
+    if (item.sizes && Array.isArray(item.sizes) && item.sizes.length > 0) {
+      // Format sizes with prices
+      priceDisplay = item.sizes.map(s => `${s.size}: $${s.price}`).join(', ');
+    } else if (item.price !== undefined) {
+      priceDisplay = `$${item.price}`;
+    } else {
+      priceDisplay = 'Price varies';
+    }
+
     categories[categoryName].push({
       name: item.name,
       description: item.description,
-      price: item.price,
+      priceDisplay: priceDisplay,
       id: item.id
     });
   });
@@ -240,7 +251,7 @@ function formatMenuForAI(menuItems, restaurant) {
     categories[category]
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach(item => {
-        menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.price}\n`;
+        menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
       });
   });
 

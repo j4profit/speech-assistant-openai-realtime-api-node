@@ -202,6 +202,10 @@ wss.on('connection', (ws, _req) => {
       const instructions = generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress);
       const tools = getAITools();
 
+      // Debug: Log instruction size and menu content
+      console.log('📝 AI Instructions length:', instructions.length, 'characters');
+      console.log('📋 Menu text being sent to AI:\n', menuText);
+
       const sessionUpdate = {
         type: 'session.update',
         session: {
