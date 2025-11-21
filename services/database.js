@@ -51,13 +51,15 @@ async function getRestaurantByPhone(phoneNumber) {
 }
 
 /**
- * Create a call log entry
+ * Create or update a call log entry (UPSERT based on call_sid)
+ * Supports hybrid logging: WebSocket creates initial log with transcript,
+ * Twilio webhook can update later with final call status/duration
  * @param {Object} callData - Call information to log
- * @returns {Promise<Object|null>} Created call log or null on error
+ * @returns {Promise<Object|null>} Created/updated call log or null on error
  */
-async function createCallLog(callData) {
+async function upsertCallLog(callData) {
   try {
-    console.log('Calling create-call-log Edge Function with data:', JSON.stringify(callData, null, 2));
+    console.log('Calling create-call-log Edge Function (UPSERT) with data:', JSON.stringify(callData, null, 2));
 
     const response = await fetch(`${config.supabase.url}/functions/v1/create-call-log`, {
       method: 'POST',
@@ -84,7 +86,7 @@ async function createCallLog(callData) {
       return null;
     }
 
-    console.log('Call log created:', result.data?.id);
+    console.log('Call log upserted:', result.data?.id, '(action:', result.action || 'unknown', ')');
     return result.data;
 
   } catch (error) {
@@ -92,6 +94,9 @@ async function createCallLog(callData) {
     return null;
   }
 }
+
+// Backward compatibility alias
+const createCallLog = upsertCallLog;
 
 /**
  * Search for recent orders by phone number
@@ -481,6 +486,7 @@ async function createCustomerMessage(messageData) {
 module.exports = {
   getRestaurantByPhone,
   createCallLog,
+  upsertCallLog,
   searchRecentOrders,
   cancelOrder,
   updateOrder,

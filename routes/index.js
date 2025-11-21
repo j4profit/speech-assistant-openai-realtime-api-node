@@ -95,6 +95,58 @@ router.post('/voice', (req, res) => {
 });
 
 /**
+ * Twilio status callback webhook - receives call completion status
+ * This handles the Twilio-side call logging (updates existing call log created by WebSocket)
+ */
+router.post('/call-status', async (req, res) => {
+  console.log('📞 Twilio status callback received:', req.body);
+
+  // Respond immediately to Twilio
+  res.status(200).send('OK');
+
+  // Process status callback asynchronously
+  setImmediate(async () => {
+    try {
+      const { CallSid, CallStatus, CallDuration, From, To } = req.body;
+
+      // Only process completed calls
+      if (CallStatus !== 'completed') {
+        console.log(`Call ${CallSid} status: ${CallStatus} (not completed, skipping log update)`);
+        return;
+      }
+
+      console.log(`📊 Updating call log for completed call: ${CallSid}, duration: ${CallDuration}s`);
+
+      // Prepare update data from Twilio webhook
+      const callData = {
+        call_sid: CallSid,
+        from_number: From,
+        to_number: To,
+        call_status: CallStatus,
+        call_duration: parseInt(CallDuration, 10),
+        call_ended_at: new Date().toISOString(),
+        twilio_data: req.body,
+        source: 'twilio_webhook'
+      };
+
+      // UPSERT: This will update existing record if WebSocket already created it,
+      // or create new record if WebSocket failed to log
+      const { upsertCallLog } = require('../services/database');
+      const result = await upsertCallLog(callData);
+
+      if (result) {
+        console.log(`✅ Call log updated from Twilio webhook: ${CallSid}`);
+      } else {
+        console.error(`❌ Failed to update call log from Twilio webhook: ${CallSid}`);
+      }
+
+    } catch (error) {
+      console.error('Error processing Twilio status callback:', error);
+    }
+  });
+});
+
+/**
  * Health check endpoint with detailed status
  */
 router.get('/health', (_req, res) => {

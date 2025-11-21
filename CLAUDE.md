@@ -78,7 +78,7 @@ The `stateManager` service (services/stateManager.js) manages call state using a
 
 All database operations go through **Supabase Edge Functions** (services/database.js):
 - `getRestaurantByPhone()` - Lookup restaurant by phone number
-- `createCallLog()` - Log completed calls with transcripts
+- `createCallLog()` / `upsertCallLog()` - Log completed calls with transcripts (UPSERT based on call_sid)
 - `searchRecentOrders()` - Find customer's recent orders by phone
 - `cancelOrder()` - Cancel pending orders
 - `updateOrder()` - Modify pending orders
@@ -87,6 +87,14 @@ All database operations go through **Supabase Edge Functions** (services/databas
 - `createCustomerMessage()` - Save customer messages/complaints
 
 **Important**: The system makes HTTP POST requests to Supabase Edge Functions at `${SUPABASE_URL}/functions/v1/{function-name}`.
+
+**Hybrid Call Logging (v2.9.18+)**:
+The system uses a hybrid approach to ensure call logs are never lost:
+1. **WebSocket logs first** (index.js:794) - Creates call log with full conversation transcript when call ends
+2. **Twilio webhook updates** (routes/index.js:/call-status) - Updates call log with official Twilio call duration/status
+3. **UPSERT prevents duplicates** - Uses `call_sid` as unique key; second write updates instead of creating duplicate
+4. **Configure Twilio**: Set Status Callback URL to `${BASE_URL}/call-status` in Twilio phone number settings
+5. **Benefits**: Transcript preserved even if webhook fails; accurate Twilio duration even if WebSocket drops early
 
 ### AI Instructions System
 
