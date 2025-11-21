@@ -1,0 +1,217 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.call_logs (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  call_sid character varying NOT NULL UNIQUE,
+  restaurant_id uuid,
+  from_number character varying NOT NULL,
+  to_number character varying NOT NULL,
+  call_status character varying,
+  call_direction character varying,
+  caller_country character varying,
+  caller_state character varying,
+  caller_city character varying,
+  caller_zip character varying,
+  to_country character varying,
+  to_state character varying,
+  to_city character varying,
+  to_zip character varying,
+  call_duration integer,
+  call_started_at timestamp with time zone,
+  call_ended_at timestamp with time zone,
+  twilio_data jsonb,
+  conversation_transcript text,
+  order_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  billing_status text DEFAULT 'pending'::text CHECK (billing_status = ANY (ARRAY['pending'::text, 'billed'::text, 'failed'::text, 'skipped'::text])),
+  billing_processed_at timestamp with time zone,
+  minutes_billed numeric,
+  billing_amount_cents integer,
+  usage_transaction_id uuid,
+  CONSTRAINT call_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT call_logs_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
+  CONSTRAINT call_logs_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
+  CONSTRAINT call_logs_usage_transaction_id_fkey FOREIGN KEY (usage_transaction_id) REFERENCES public.usage_transactions(id)
+);
+
+CREATE TABLE public.customer_delivery_addresses (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid NOT NULL,
+  customer_phone character varying NOT NULL,
+  customer_name character varying NOT NULL,
+  delivery_address text NOT NULL,
+  formatted_address text,
+  is_valid boolean NOT NULL DEFAULT false,
+  latitude numeric,
+  longitude numeric,
+  distance_from_restaurant numeric,
+  validation_reason text,
+  delivery_instructions text,
+  last_used_at timestamp with time zone DEFAULT now(),
+  times_used integer DEFAULT 1,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customer_delivery_addresses_pkey PRIMARY KEY (id),
+  CONSTRAINT customer_delivery_addresses_restaurant_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id) ON DELETE CASCADE,
+  CONSTRAINT customer_delivery_addresses_unique UNIQUE (restaurant_id, customer_phone)
+);
+
+CREATE TABLE public.customer_messages (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid,
+  customer_phone character varying NOT NULL,
+  customer_name character varying,
+  message_type character varying DEFAULT 'general'::character varying,
+  subject character varying,
+  message_content text NOT NULL,
+  call_sid character varying,
+  order_reference character varying,
+  priority character varying DEFAULT 'normal'::character varying,
+  status character varying DEFAULT 'new'::character varying,
+  staff_response text,
+  responded_by character varying,
+  responded_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customer_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT customer_messages_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.menu_categories (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid,
+  name character varying NOT NULL,
+  display_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT menu_categories_pkey PRIMARY KEY (id),
+  CONSTRAINT menu_categories_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.menu_items (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid,
+  category character varying NOT NULL,
+  name character varying NOT NULL,
+  description text,
+  price numeric NOT NULL,
+  available boolean DEFAULT true,
+  size character varying DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT menu_items_pkey PRIMARY KEY (id),
+  CONSTRAINT menu_items_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.orders (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid,
+  customer_phone character varying,
+  customer_name character varying,
+  total_amount numeric DEFAULT 0,
+  status character varying DEFAULT 'pending'::character varying,
+  order_details text,
+  special_instructions text,
+  pickup_time timestamp with time zone,
+  call_sid character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  order_type character varying DEFAULT 'pickup'::character varying,
+  delivery_address text,
+  ready_time character varying,
+  estimated_ready_at timestamp without time zone,
+  printed boolean DEFAULT false,
+  printed_at timestamp with time zone,
+  delivery_instructions text,
+  CONSTRAINT orders_pkey PRIMARY KEY (id),
+  CONSTRAINT orders_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.restaurant_balances (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid NOT NULL UNIQUE,
+  current_balance_seconds integer DEFAULT 0,
+  total_purchased_seconds integer DEFAULT 0,
+  last_updated timestamp with time zone DEFAULT now(),
+  low_balance_alert_sent boolean DEFAULT false,
+  auto_recharge_enabled boolean DEFAULT false,
+  auto_recharge_threshold_seconds integer DEFAULT 3000,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  current_balance_minutes numeric DEFAULT round(((current_balance_seconds)::numeric / (60)::numeric), 2),
+  CONSTRAINT restaurant_balances_pkey PRIMARY KEY (id),
+  CONSTRAINT restaurant_balances_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.restaurants (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name character varying NOT NULL,
+  phone_number character varying NOT NULL UNIQUE,
+  description text,
+  address text,
+  hours text,
+  timezone character varying DEFAULT 'America/New_York'::character varying,
+  active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  delivery_enabled boolean DEFAULT false,
+  delivery_radius numeric DEFAULT 5.0,
+  delivery_hours character varying,
+  preparation_time integer DEFAULT 20,
+  delivery_time integer DEFAULT 15,
+  latitude numeric,
+  longitude numeric,
+  owner_user_id uuid,
+  additional_ai_instructions text,
+  tax_rate numeric DEFAULT 0,
+  delivery_fee numeric DEFAULT 0,
+  ai_voice character varying DEFAULT 'coral'::character varying CHECK (ai_voice::text = ANY (ARRAY['alloy'::character varying::text, 'ash'::character varying::text, 'ballad'::character varying::text, 'coral'::character varying::text, 'echo'::character varying::text, 'sage'::character varying::text, 'shimmer'::character varying::text, 'verse'::character varying::text])),
+  specials text,
+  printer_enabled boolean DEFAULT false,
+  printer_auto_print boolean DEFAULT false,
+  printer_name text,
+  CONSTRAINT restaurants_pkey PRIMARY KEY (id),
+  CONSTRAINT restaurants_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.support_tickets (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid NOT NULL,
+  subject character varying NOT NULL DEFAULT 'No Subject'::character varying,
+  message text NOT NULL DEFAULT ''::text,
+  category character varying DEFAULT 'general'::character varying CHECK (category::text = ANY (ARRAY['general'::character varying, 'technical'::character varying, 'billing'::character varying, 'feature_request'::character varying]::text[])),
+  priority character varying DEFAULT 'normal'::character varying CHECK (priority::text = ANY (ARRAY['low'::character varying, 'normal'::character varying, 'high'::character varying, 'urgent'::character varying]::text[])),
+  status character varying DEFAULT 'open'::character varying CHECK (status::text = ANY (ARRAY['open'::character varying, 'in_progress'::character varying, 'resolved'::character varying, 'closed'::character varying]::text[])),
+  restaurant_name character varying,
+  restaurant_phone character varying,
+  admin_response text,
+  admin_name character varying,
+  admin_responded_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT support_tickets_pkey PRIMARY KEY (id),
+  CONSTRAINT support_tickets_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+);
+
+CREATE TABLE public.usage_transactions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  restaurant_id uuid NOT NULL,
+  call_log_id uuid,
+  transaction_type text NOT NULL CHECK (transaction_type = ANY (ARRAY['purchase'::text, 'usage'::text, 'refund'::text, 'adjustment'::text])),
+  seconds_change integer NOT NULL,
+  minutes_billed numeric,
+  balance_before_seconds integer NOT NULL,
+  balance_after_seconds integer NOT NULL,
+  call_duration_seconds integer,
+  call_sid text,
+  stripe_payment_intent_id text,
+  stripe_product_id text,
+  package_name text,
+  amount_paid_cents integer,
+  description text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT usage_transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT usage_transactions_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
+  CONSTRAINT usage_transactions_call_log_id_fkey FOREIGN KEY (call_log_id) REFERENCES public.call_logs(id)
+);

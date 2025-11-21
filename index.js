@@ -162,7 +162,7 @@ wss.on('connection', (ws, _req) => {
     try {
       prefetchedCustomerAddress = await database.getCustomerAddress(customerPhone, restaurant.id);
       if (prefetchedCustomerAddress) {
-        console.log('✅ Pre-fetched customer address:', prefetchedCustomerAddress.full_address);
+        console.log('✅ Pre-fetched customer address:', prefetchedCustomerAddress.delivery_address);
       } else {
         console.log('ℹ️ No saved customer address found during pre-fetch');
       }
@@ -484,12 +484,12 @@ wss.on('connection', (ws, _req) => {
       case 'check_customer_address':
         const savedAddress = await database.getCustomerAddress(customerPhone, restaurant.id);
         if (savedAddress) {
-          console.log('✅ Found saved delivery address:', savedAddress.full_address);
+          console.log('✅ Found saved delivery address:', savedAddress.delivery_address);
           result = {
             has_saved_address: true,
-            address: savedAddress.full_address,
+            address: savedAddress.delivery_address,
             delivery_instructions: savedAddress.delivery_instructions,
-            address_id: savedAddress.address_id
+            address_id: savedAddress.id
           };
         } else {
           console.log('⚠️ No saved delivery address found');

@@ -407,7 +407,7 @@ async function getCustomerAddress(customerPhone, restaurantId) {
       return null;
     }
 
-    return result.data; // Returns { address_id, full_address, delivery_instructions, ... } or null
+    return result.data; // Returns { id, delivery_address, delivery_instructions, is_valid, ... } or null
 
   } catch (error) {
     console.error('Error calling get-customer-address Edge Function:', error);

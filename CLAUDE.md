@@ -279,3 +279,4 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 - **v1.0.0**: Original monolithic implementation (2,742 lines in single file)
 - **v2.0.0**: Refactored modular architecture
 - **v2.1**: Added restaurant-specific AI voices, hours, taxes, and delivery fees
+- DO NOT EVER USE SERVER_VAD only use semantic_vad
