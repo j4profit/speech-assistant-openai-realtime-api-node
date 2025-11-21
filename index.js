@@ -563,7 +563,7 @@ wss.on('connection', (ws, _req) => {
             'transfer_call_for_credit_card': 'Transferring you to process your payment'
           };
 
-          const transferResult = await twilio.transferCall(
+          const transferResult = await twilioService.transferCall(
             callSid,
             restaurant.call_forwarding_number,
             transferMessages[functionName]
