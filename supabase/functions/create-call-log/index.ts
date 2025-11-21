@@ -48,7 +48,8 @@ serve(async (req) => {
     }
 
     // Prepare log record
-    const callLogData = {
+    // IMPORTANT: Only include fields that are actually provided to avoid overwriting with null
+    const callLogData: any = {
       call_sid: callData.call_sid,
       restaurant_id,
       from_number: callData.from_number || null,
@@ -63,13 +64,22 @@ serve(async (req) => {
       to_state: callData.to_state || null,
       to_city: callData.to_city || null,
       to_zip: callData.to_zip || null,
-      call_duration: callData.call_duration || null,
       call_started_at: callData.call_started_at || null,
       call_ended_at: callData.call_ended_at || null,
       twilio_data: callData.twilio_data || null,
-      conversation_transcript: callData.conversation_transcript || null,
       order_id: callData.order_id || null
     };
+
+    // Only set call_duration if provided (from Twilio webhook)
+    if (callData.call_duration) {
+      callLogData.call_duration = callData.call_duration;
+    }
+
+    // Only set conversation_transcript if provided (from WebSocket)
+    // This prevents Twilio webhook from overwriting transcript with null
+    if (callData.conversation_transcript) {
+      callLogData.conversation_transcript = callData.conversation_transcript;
+    }
 
     // UPSERT: Insert or update based on call_sid
     // This prevents duplicates from WebSocket + Twilio webhook
