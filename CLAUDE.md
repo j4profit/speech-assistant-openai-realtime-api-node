@@ -123,6 +123,7 @@ Customer Name: John Doe
 Order Type: delivery
 Delivery Address: 123 Main St, Baltimore, MD 21201
 Items: 2x Cheeseburger, 1x Fries
+Payment Method: cash
 Total: $25.50
 ```
 

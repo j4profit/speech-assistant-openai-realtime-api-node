@@ -209,8 +209,19 @@ IMPORTANT: ALWAYS call validate_delivery_address when customer provides ANY addr
 
 **🚨 CRITICAL ORDER COMPLETION FLOW:**
 When customer completes their order (says "that's it", "that's all", "nothing else", etc.):
-1. **IMMEDIATELY** generate the ORDER_CONFIRMED format (REQUIRED - DO NOT SKIP)
-2. Proceed directly to order processing without asking anything else`;
+1. ${restaurant.delivery_enabled ? '**ASK FOR PAYMENT METHOD**: "How would you like to pay - cash or credit card?"' : '**For pickup orders**: Ask "How would you like to pay - cash or credit card?"'}
+2. After getting payment method, **IMMEDIATELY** generate the ORDER_CONFIRMED format (REQUIRED - DO NOT SKIP):
+
+ORDER_CONFIRMED:
+Customer Name: [name]
+Order Type: [pickup or delivery]
+Delivery Address: [address or N/A for pickup]
+Items: [itemized list]
+Payment Method: [cash or credit card]
+Total: $[subtotal before tax/fees]
+
+3. After generating ORDER_CONFIRMED format, briefly thank them and tell them the ready time
+4. The system will automatically hang up - you don't need to say goodbye`;
 }
 
 module.exports = {

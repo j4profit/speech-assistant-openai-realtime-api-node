@@ -19,7 +19,8 @@ function createOrderTicket(orderInfo) {
     taxAmount,
     totalAmount,
     readyTime,
-    restaurantName
+    restaurantName,
+    paymentMethod
   } = orderInfo;
 
   const timestamp = new Date().toLocaleString('en-US', {
@@ -68,7 +69,16 @@ PRICING BREAKDOWN:
   }
 
   ticket += `
-• TOTAL: $${(totalAmount || 0).toFixed(2)}
+• TOTAL: $${(totalAmount || 0).toFixed(2)}`;
+
+  if (paymentMethod) {
+    ticket += `
+
+PAYMENT METHOD:
+• ${paymentMethod.toUpperCase()}`;
+  }
+
+  ticket += `
 
 TIMING:
 • Order should be ready: ${readyTime}`;

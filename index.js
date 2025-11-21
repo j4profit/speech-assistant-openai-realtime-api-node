@@ -625,6 +625,7 @@ wss.on('connection', (ws, _req) => {
         order_details: orderInfo.items,
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
+        payment_method: orderInfo.paymentMethod,
         call_sid: callSid,
         ready_time: readyTimeInfo.readyTimeString,
         estimated_ready_at: readyTimeInfo.readyTime,
@@ -673,7 +674,8 @@ wss.on('connection', (ws, _req) => {
         deliveryAddress: 'N/A',
         items: '',
         totalAmount: 0,
-        specialInstructions: ''
+        specialInstructions: '',
+        paymentMethod: null
       };
 
       for (const line of lines) {
@@ -686,6 +688,14 @@ wss.on('connection', (ws, _req) => {
           orderInfo.deliveryAddress = addr && addr !== 'N/A' ? addr : 'N/A';
         } else if (line.includes('Items:')) {
           orderInfo.items = line.split(':')[1]?.trim() || '';
+        } else if (line.includes('Payment Method:')) {
+          const payment = line.split(':')[1]?.trim().toLowerCase();
+          // Normalize to 'cash' or 'credit card'
+          if (payment && payment.includes('credit')) {
+            orderInfo.paymentMethod = 'credit card';
+          } else if (payment && payment.includes('cash')) {
+            orderInfo.paymentMethod = 'cash';
+          }
         } else if (line.includes('Total:')) {
           const totalMatch = line.match(/\$?(\d+\.?\d*)/);
           orderInfo.totalAmount = totalMatch ? parseFloat(totalMatch[1]) : 0;
