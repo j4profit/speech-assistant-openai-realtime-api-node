@@ -210,10 +210,7 @@ wss.on('connection', (ws, _req) => {
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
           turn_detection: {
-            type: 'server_vad',
-            threshold: config.voice.vadThreshold,
-            prefix_padding_ms: 200,
-            silence_duration_ms: config.voice.silenceDurationMs
+            type: 'semantic'
           },
           temperature: 0.6,
           max_response_output_tokens: 400,
