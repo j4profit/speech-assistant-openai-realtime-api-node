@@ -563,6 +563,9 @@ wss.on('connection', (ws, _req) => {
             'transfer_call_for_credit_card': 'Transferring you to process your payment'
           };
 
+          // Wait 2 seconds to allow AI to finish announcing the transfer
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
           const transferResult = await twilioService.transferCall(
             callSid,
             restaurant.call_forwarding_number,
