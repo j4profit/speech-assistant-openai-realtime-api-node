@@ -25,6 +25,22 @@ router.post('/hangup-twiml', (req, res) => {
 });
 
 /**
+ * Transfer TwiML endpoint for call forwarding
+ */
+router.post('/transfer-twiml', (req, res) => {
+  const transferNumber = req.query.transfer_number;
+  const reason = req.query.reason || 'transfer';
+  const callSid = req.query.call_sid || req.body.CallSid;
+
+  console.log(`📞 Generating transfer TwiML for call ${callSid} to ${transferNumber} (${reason})`);
+
+  const twiml = twilioService.generateTransferTwiML(transferNumber);
+
+  res.type('text/xml');
+  res.send(twiml);
+});
+
+/**
  * Incoming call webhook - responds with WebSocket stream TwiML
  */
 router.post('/voice', (req, res) => {

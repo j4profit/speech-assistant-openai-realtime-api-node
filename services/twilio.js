@@ -155,6 +155,76 @@ async function hangup(callSid, options = {}) {
 }
 
 /**
+ * Transfer a call to another number
+ * @param {string} callSid - Twilio call SID
+ * @param {string} transferNumber - Phone number to transfer to (E.164 format)
+ * @param {string} reason - Reason for transfer (for logging)
+ * @returns {Promise<Object>} Transfer result
+ */
+async function transferCall(callSid, transferNumber, reason = 'transfer') {
+  if (!callSid || !twilioClient) {
+    console.error('transferCall() called without callSid or Twilio not configured');
+    return { success: false, error: 'Missing callSid or Twilio not configured' };
+  }
+
+  if (!transferNumber) {
+    console.error('transferCall() called without transferNumber');
+    return { success: false, error: 'Missing transfer number' };
+  }
+
+  console.log(`📞 Transferring call ${callSid} to ${transferNumber} (reason: ${reason})`);
+
+  try {
+    // Use Twilio's Dial verb to transfer the call
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">Please hold while we transfer your call.</Say>
+    <Dial>${transferNumber}</Dial>
+    <Say voice="${config.voice.model}">The transfer could not be completed. Please try again later.</Say>
+    <Hangup/>
+</Response>`;
+
+    const transferUrl = `${config.server.baseUrl}/transfer-twiml?call_sid=${callSid}&transfer_number=${encodeURIComponent(transferNumber)}&reason=${encodeURIComponent(reason)}`;
+
+    await twilioClient.calls(callSid).update({
+      url: transferUrl,
+      method: 'POST'
+    });
+
+    console.log(`✅ Call ${callSid} transfer initiated to ${transferNumber}`);
+    return {
+      success: true,
+      transfer_number: transferNumber,
+      reason,
+      call_sid: callSid
+    };
+
+  } catch (error) {
+    console.error(`❌ Transfer failed for call ${callSid}:`, error);
+    return {
+      success: false,
+      error: error.message,
+      call_sid: callSid
+    };
+  }
+}
+
+/**
+ * Generate TwiML for call transfer
+ * @param {string} transferNumber - Phone number to transfer to
+ * @returns {string} TwiML XML
+ */
+function generateTransferTwiML(transferNumber) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="${config.voice.model}">Please hold while we transfer your call.</Say>
+    <Dial>${escapeXML(transferNumber)}</Dial>
+    <Say voice="${config.voice.model}">The transfer could not be completed. Please try again later.</Say>
+    <Hangup/>
+</Response>`;
+}
+
+/**
  * Check if Twilio is properly configured
  * @returns {boolean} True if Twilio client is available
  */
@@ -167,7 +237,9 @@ module.exports = {
   escapeXML,
   generateHangupTwiML,
   generateIncomingCallTwiML,
+  generateTransferTwiML,
   hangup,
+  transferCall,
   isTwilioConfigured,
   pendingHangupTwiML // Export for route access
 };

@@ -302,6 +302,42 @@ wss.on('connection', (ws, _req) => {
           },
           required: ["customer_name", "message_content", "priority", "subject"]
         }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_catering",
+        description: "Transfer call to restaurant staff for catering inquiries or large orders (15+ people, bulk orders, corporate events, weddings, parties). Use when customer mentions catering.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_manager",
+        description: "Transfer call to restaurant manager when customer requests to speak with manager or owner.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_complaint",
+        description: "Transfer call to restaurant staff when customer has a complaint about food or service.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        type: "function",
+        name: "transfer_call_for_credit_card",
+        description: "Transfer call to restaurant staff to process credit card payment for delivery order.",
+        parameters: {
+          type: "object",
+          properties: {}
+        }
       }
     ];
   }
@@ -445,6 +481,46 @@ wss.on('connection', (ws, _req) => {
           result = { success: !!messageResult, message_id: messageResult?.id };
         } else {
           result = { success: false, reason: 'Message intent not suitable for storage' };
+        }
+        break;
+
+      case 'transfer_call_for_catering':
+      case 'transfer_call_for_manager':
+      case 'transfer_call_for_complaint':
+      case 'transfer_call_for_credit_card':
+        // Map function name to database reason string
+        const functionToReason = {
+          'transfer_call_for_catering': 'Forward calls for catering orders',
+          'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
+          'transfer_call_for_complaint': 'Forward calls for issues or complaints',
+          'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
+        };
+
+        const reason = functionToReason[functionName];
+        console.log(`🔄 Transfer request: ${functionName} (reason: ${reason})`);
+
+        // Check if call forwarding is enabled and configured
+        if (restaurant.call_forwarding_enabled &&
+            restaurant.call_forwarding_number &&
+            restaurant.call_forwarding_reasons?.includes(reason)) {
+
+          console.log(`✅ Transferring call to ${restaurant.call_forwarding_number}`);
+
+          // Transfer the call
+          await twilio.transferCall(callSid, restaurant.call_forwarding_number, reason);
+
+          result = {
+            transferred: true,
+            message: 'Call transferred to restaurant staff'
+          };
+        } else {
+          // Forwarding not enabled - tell AI to create customer message instead
+          console.log(`⚠️ Call forwarding not available for: ${reason}`);
+          result = {
+            transferred: false,
+            should_create_message: true,
+            message: 'Call forwarding not enabled. Please create a customer message instead.'
+          };
         }
         break;
     }
