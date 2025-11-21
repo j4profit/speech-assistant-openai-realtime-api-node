@@ -86,8 +86,8 @@ async function upsertCallLog(callData) {
       return null;
     }
 
-    console.log('Call log upserted:', result.data?.id, '(action:', result.action || 'unknown', ')');
-    return result.data;
+    console.log('Call log upserted:', result.call_log?.id || result.data?.id, '(action:', result.action || 'unknown', ')');
+    return result.call_log || result.data;
 
   } catch (error) {
     console.error('Error calling create-call-log Edge Function:', error);
