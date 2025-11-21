@@ -213,7 +213,8 @@ wss.on('connection', (ws, _req) => {
             model: 'whisper-1'
           },
           turn_detection: {
-            type: 'semantic_vad'
+            type: 'semantic_vad',
+            eagerness: 'medium'
           },
           temperature: 0.6,
           max_response_output_tokens: 400,
