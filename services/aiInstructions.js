@@ -41,11 +41,16 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
  * @param {Object} restaurant - Restaurant object
  * @param {string} customerPhone - Customer's phone number (caller ID)
  * @param {string} menuText - Formatted menu text
+ * @param {Object} prefetchedAddress - Pre-fetched customer address (if exists)
  * @returns {string} AI instructions
  */
-function generateAIInstructions(restaurant, customerPhone, menuText) {
-  return `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
+function generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress = null) {
+  const savedAddressInfo = prefetchedAddress
+    ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.full_address}\n- Address ID: ${prefetchedAddress.address_id}\n- When customer chooses delivery, you can immediately confirm this address instead of calling check_customer_address\n- Simply say: "I have your delivery address on file: ${prefetchedAddress.full_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n\n`
+    : '\n';
 
+  return `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
+${savedAddressInfo}
 🚨🚨🚨 CRITICAL CALLER ID RULE - NEVER ASK FOR PHONE NUMBERS:
 - Customer's phone number is AUTOMATICALLY CAPTURED: ${customerPhone}
 - NEVER, EVER ask customers for their phone number

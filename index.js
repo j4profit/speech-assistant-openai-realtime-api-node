@@ -156,6 +156,19 @@ wss.on('connection', (ws, _req) => {
 
     const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
+    // Pre-fetch customer address to include in AI instructions (v2.9.13 optimization)
+    let prefetchedCustomerAddress = null;
+    try {
+      prefetchedCustomerAddress = await database.getCustomerAddress(customerPhone, restaurant.id);
+      if (prefetchedCustomerAddress) {
+        console.log('✅ Pre-fetched customer address:', prefetchedCustomerAddress.full_address);
+      } else {
+        console.log('ℹ️ No saved customer address found during pre-fetch');
+      }
+    } catch (error) {
+      console.error('⚠️ Error pre-fetching customer address:', error.message);
+    }
+
     console.log('Connecting to OpenAI Realtime API...');
 
     try {
@@ -177,15 +190,15 @@ wss.on('connection', (ws, _req) => {
       return;
     }
 
-    setupOpenAIHandlers(menuText);
+    setupOpenAIHandlers(menuText, prefetchedCustomerAddress);
   }
 
   // Setup OpenAI WebSocket event handlers
-  function setupOpenAIHandlers(menuText) {
+  function setupOpenAIHandlers(menuText, prefetchedAddress) {
     openaiWs.on('open', () => {
       console.log('Connected to OpenAI Realtime API');
 
-      const instructions = generateAIInstructions(restaurant, customerPhone, menuText);
+      const instructions = generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress);
       const tools = getAITools();
 
       const sessionUpdate = {
