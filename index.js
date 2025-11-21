@@ -599,6 +599,7 @@ wss.on('connection', (ws, _req) => {
 
     // Send function result back to OpenAI
     if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+      // First, send the function output
       openaiWs.send(JSON.stringify({
         type: 'conversation.item.create',
         item: {
@@ -607,6 +608,9 @@ wss.on('connection', (ws, _req) => {
           output: JSON.stringify(result)
         }
       }));
+
+      // Then trigger a response so AI continues the conversation
+      openaiWs.send(JSON.stringify({ type: 'response.create' }));
     }
   }
 

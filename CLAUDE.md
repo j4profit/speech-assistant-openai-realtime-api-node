@@ -282,3 +282,4 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 - **v2.1**: Added restaurant-specific AI voices, hours, taxes, and delivery fees
 - DO NOT EVER USE SERVER_VAD only use semantic_vad
 - everytime you edit something when i ask you must push and commit
+- Double-check that your session creation (the initial payload to OpenAI) includes the full tools array (your function definitions), and explicitly set tool_choice: 'auto'
