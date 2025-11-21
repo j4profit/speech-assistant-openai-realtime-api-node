@@ -46,8 +46,8 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
  */
 function generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress = null) {
   const savedAddressInfo = prefetchedAddress
-    ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.delivery_address}\n- Address ID: ${prefetchedAddress.id}\n- When customer chooses delivery, IMMEDIATELY say: "I have your delivery address on file: ${prefetchedAddress.delivery_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n- Do NOT call check_customer_address - you already have the address!\n\n`
-    : `\n🔍 NO SAVED ADDRESS ON FILE:\n- This customer does NOT have a saved delivery address in our system\n- When customer chooses delivery, ask them for their delivery address directly\n- Do NOT call check_customer_address - we already checked and they don't have one saved\n- Once they provide an address, call validate_delivery_address to check if we can deliver there\n\n`;
+    ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.delivery_address}\n- Address ID: ${prefetchedAddress.id}\n- When customer chooses delivery, ask for their name first\n- After getting name, IMMEDIATELY say: "I have your delivery address on file: ${prefetchedAddress.delivery_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n- Do NOT call check_customer_address - you already have the address!\n\n`
+    : `\n🔍 NO SAVED ADDRESS ON FILE:\n- This customer does NOT have a saved delivery address in our system\n- When customer chooses delivery, ask for their name first\n- After getting name, say: "What's your delivery address?"\n- Once they provide an address, call validate_delivery_address to check if we can deliver there\n\n`;
 
   return `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 ${savedAddressInfo}
