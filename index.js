@@ -788,8 +788,10 @@ wss.on('connection', (ws, _req) => {
     const callData = stateManager.getCallData(callSid);
     if (callData) {
       callData.call_ended_at = callEndTime.toISOString();
-      callData.call_duration = callDuration;
+      // DO NOT set call_duration - Twilio webhook will provide accurate duration
+      // callData.call_duration = callDuration;  // REMOVED - only Twilio webhook sets this
       callData.conversation_transcript = JSON.stringify(conversationTranscript);
+      callData.source = 'websocket';  // Mark source for Edge Function logging
 
       await database.createCallLog(callData);
       stateManager.removeCallData(callSid);
