@@ -46,8 +46,8 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
  */
 function generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress = null) {
   const savedAddressInfo = prefetchedAddress
-    ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.full_address}\n- Address ID: ${prefetchedAddress.address_id}\n- When customer chooses delivery, you can immediately confirm this address instead of calling check_customer_address\n- Simply say: "I have your delivery address on file: ${prefetchedAddress.full_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n\n`
-    : '\n';
+    ? `\n🎯 SAVED DELIVERY ADDRESS AVAILABLE:\n- This customer has a saved delivery address: ${prefetchedAddress.full_address}\n- Address ID: ${prefetchedAddress.address_id}\n- When customer chooses delivery, IMMEDIATELY say: "I have your delivery address on file: ${prefetchedAddress.full_address}. Is this still correct?"\n- If they confirm, you can proceed to take their order (address is already validated!)\n- Do NOT call check_customer_address - you already have the address!\n\n`
+    : `\n🔍 NO SAVED ADDRESS FOUND:\n- This customer does NOT have a saved delivery address in our system\n- When customer chooses delivery, you MUST call check_customer_address function first\n- While waiting for the function result, say: "Let me check if we have your delivery address on file..."\n- After calling the function, wait for the response before continuing\n\n`;
 
   return `You are the AI assistant for ${restaurant.name}. The restaurant is extremely busy and cannot take phone calls right now, so you're helping customers place orders and take messages.
 ${savedAddressInfo}
