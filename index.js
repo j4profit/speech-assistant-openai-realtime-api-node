@@ -216,7 +216,7 @@ wss.on('connection', (ws, _req) => {
             type: 'server_vad',
             threshold: 0.8,
             prefix_padding_ms: 200,
-            silence_duration_ms: 500
+            silence_duration_ms: 3000
           },
           temperature: 0.6,
           max_response_output_tokens: 400,
