@@ -506,12 +506,12 @@ wss.on('connection', (ws, _req) => {
       case 'transfer_call_for_manager':
       case 'transfer_call_for_complaint':
       case 'transfer_call_for_credit_card':
-        // Map function name to database reason string
+        // Map function name to database reason string (must match call_forwarding_reasons array values)
         const functionToReason = {
-          'transfer_call_for_catering': 'Forward calls for catering orders',
-          'transfer_call_for_manager': 'Forward calls when customer requests to speak with manager',
-          'transfer_call_for_complaint': 'Forward calls for issues or complaints',
-          'transfer_call_for_credit_card': 'Forward calls for credit card transactions'
+          'transfer_call_for_catering': 'catering_order',
+          'transfer_call_for_manager': 'manager_request',
+          'transfer_call_for_complaint': 'complaint',
+          'transfer_call_for_credit_card': 'credit_card_payment'
         };
 
         const reason = functionToReason[functionName];

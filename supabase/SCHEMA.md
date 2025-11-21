@@ -117,7 +117,7 @@ CREATE TABLE public.restaurants (
 - `specials` - Daily/weekly specials text
 - `call_forwarding_enabled` - Enable/disable call forwarding (boolean)
 - `call_forwarding_number` - Phone number to transfer calls to (E.164 format: +14105551234)
-- `call_forwarding_reasons` - Array of reasons that trigger call transfer: ['credit_card_payment', 'complaint', 'manager_request', 'complex_order', 'technical_issue', 'billing_question', 'custom_request', 'refund_request', 'delivery_issue']
+- `call_forwarding_reasons` - Array of reasons that trigger call transfer: ['catering_order', 'manager_request', 'complaint', 'credit_card_payment']
 
 **Relationships:**
 - Has many: menu_items, orders, call_logs, customer_messages
