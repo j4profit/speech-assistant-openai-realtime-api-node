@@ -213,7 +213,9 @@ wss.on('connection', (ws, _req) => {
           input_audio_transcription: {
             model: 'whisper-1'
           },
-          turn_detection: null,
+          turn_detection: {
+            type: 'semantic_vad'
+          },
           temperature: 0.6,
           max_response_output_tokens: 400,
           tools: tools,
@@ -737,19 +739,6 @@ wss.on('connection', (ws, _req) => {
               audio: msg.media.payload
             };
             openaiWs.send(JSON.stringify(audioAppend));
-
-            // Clear any existing silence timer
-            if (silenceTimer) {
-              clearTimeout(silenceTimer);
-            }
-
-            // Set new silence timer - commit audio buffer after 2 seconds of silence
-            silenceTimer = setTimeout(() => {
-              if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                openaiWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-                openaiWs.send(JSON.stringify({ type: 'response.create' }));
-              }
-            }, 2000);
           }
           break;
 
