@@ -401,6 +401,52 @@ wss.on('connection', (ws, _req) => {
           type: "object",
           properties: {}
         }
+      },
+      {
+        type: "function",
+        name: "submit_order",
+        description: "Submit the customer's order after confirming all details and payment method. Call this function SILENTLY without speaking - then speak only the brief closing message.",
+        parameters: {
+          type: "object",
+          properties: {
+            customer_name: {
+              type: "string",
+              description: "Customer's name"
+            },
+            order_type: {
+              type: "string",
+              enum: ["pickup", "delivery"],
+              description: "Order type: pickup or delivery"
+            },
+            delivery_address: {
+              type: "string",
+              description: "Delivery address (or 'N/A' for pickup orders)"
+            },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Item name" },
+                  quantity: { type: "number", description: "Quantity" },
+                  price: { type: "number", description: "Price per item" }
+                },
+                required: ["name", "quantity", "price"]
+              },
+              description: "Array of order items"
+            },
+            payment_method: {
+              type: "string",
+              enum: ["cash", "credit card"],
+              description: "Payment method"
+            },
+            special_instructions: {
+              type: "string",
+              description: "Any special instructions from customer"
+            }
+          },
+          required: ["customer_name", "order_type", "items", "payment_method"]
+        }
       }
     ];
   }
@@ -547,6 +593,25 @@ wss.on('connection', (ws, _req) => {
         }
         break;
 
+      case 'submit_order':
+        {
+          console.log('📦 submit_order function called with:', parsedArgs);
+
+          // Process the order from the structured function call data
+          await processOrderFromFunctionCall(parsedArgs);
+
+          // Calculate ready time
+          const readyTimeInfo = calculateOrderReadyTime(restaurant, parsedArgs.order_type === 'delivery');
+
+          // Return success with ready time info for AI to speak
+          result = {
+            success: true,
+            ready_time_minutes: readyTimeInfo.totalMinutes,
+            message: `Order submitted successfully. Ready in ${readyTimeInfo.totalMinutes} minutes.`
+          };
+        }
+        break;
+
       case 'transfer_call_for_catering':
       case 'transfer_call_for_manager':
       case 'transfer_call_for_complaint':
@@ -684,7 +749,92 @@ wss.on('connection', (ws, _req) => {
     }
   }
 
-  // Process order from transcript
+  // Process order from function call (new method)
+  async function processOrderFromFunctionCall(orderData) {
+    orderProcessed = true;
+    console.log('Processing order from function call...');
+
+    try {
+      // Calculate subtotal from items
+      const subtotal = orderData.items.reduce((sum, item) => {
+        return sum + (item.price * item.quantity);
+      }, 0);
+
+      const isDelivery = orderData.order_type === 'delivery';
+      const deliveryFee = isDelivery && restaurant.delivery_fee ? restaurant.delivery_fee : 0;
+      const taxableAmount = subtotal + deliveryFee;
+      const taxAmount = restaurant.tax_rate ? taxableAmount * restaurant.tax_rate : 0;
+      const finalTotal = taxableAmount + taxAmount;
+
+      console.log('Order pricing breakdown:', {
+        subtotal,
+        deliveryFee,
+        taxRate: restaurant.tax_rate,
+        taxAmount,
+        finalTotal
+      });
+
+      const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
+
+      // Format items for ticket
+      const itemsText = orderData.items.map(item =>
+        `${item.quantity}x ${item.name} - $${item.price.toFixed(2)}`
+      ).join('\n');
+
+      // Create the full formatted ticket
+      const ticket = createOrderTicket({
+        customerName: orderData.customer_name,
+        customerPhone: customerPhone,
+        orderType: orderData.order_type,
+        deliveryAddress: orderData.delivery_address || 'N/A',
+        items: itemsText,
+        specialInstructions: orderData.special_instructions || '',
+        paymentMethod: orderData.payment_method,
+        subtotal,
+        deliveryFee,
+        taxRate: restaurant.tax_rate,
+        taxAmount,
+        totalAmount: finalTotal,
+        readyTime: readyTimeInfo.readyTimeString,
+        restaurantName: restaurant.name
+      });
+
+      const dbOrderData = {
+        restaurant_id: restaurant.id,
+        customer_name: orderData.customer_name,
+        customer_phone: customerPhone,
+        order_type: orderData.order_type,
+        delivery_address: orderData.delivery_address || 'N/A',
+        order_details: ticket,
+        total_amount: finalTotal,
+        special_instructions: orderData.special_instructions || '',
+        payment_method: orderData.payment_method,
+        call_sid: callSid,
+        ready_time: readyTimeInfo.readyTimeString,
+        estimated_ready_at: readyTimeInfo.readyTime,
+        status: 'pending'
+      };
+
+      const order = await database.createOrder(dbOrderData);
+
+      if (order) {
+        console.log('Order created successfully:', order.id);
+        console.log('\n' + ticket + '\n');
+
+        // Update call data with order reference
+        stateManager.updateCallData(callSid, { order_id: order.id });
+
+        // Schedule hangup after 8 seconds to allow AI to finish speaking closing message
+        hangupTimer = setTimeout(async () => {
+          await initiateHangup('order_completed');
+        }, 8000);
+      }
+    } catch (error) {
+      console.error('Error processing order from function call:', error);
+    }
+  }
+
+  // Process order from transcript (legacy method - keeping for backwards compatibility)
   async function processOrderFromTranscript(transcript) {
     orderProcessed = true;
     console.log('Processing order from transcript...');
