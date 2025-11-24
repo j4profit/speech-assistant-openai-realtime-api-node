@@ -238,13 +238,9 @@ function formatMenuForAI(menuItems, restaurant) {
     // Determine price display based on variants
     let priceDisplay;
     if (groupedItem.variants.length === 1) {
-      // Single variant - show simple price with optional size
+      // Single variant - show simple price WITHOUT size (to avoid AI asking for size)
       const variant = groupedItem.variants[0];
-      if (variant.size) {
-        priceDisplay = `${variant.size}: $${variant.price}`;
-      } else {
-        priceDisplay = `$${variant.price}`;
-      }
+      priceDisplay = `$${variant.price}`;
     } else {
       // Multiple variants - show all sizes and prices
       priceDisplay = groupedItem.variants
