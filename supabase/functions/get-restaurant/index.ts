@@ -39,11 +39,13 @@ serve(async (req) => {
       .select(`
         *,
         menu_items(
+          id,
           name,
           description,
           price,
           category,
-          size
+          size,
+          available
         )
       `)
       .eq('phone_number', phone_number)
@@ -85,9 +87,11 @@ serve(async (req) => {
       const baseName = item.name;
       if (!groupedMenuItems[baseName]) {
         groupedMenuItems[baseName] = {
+          id: item.id,
           name: baseName,
           description: item.description,
           category: item.category,
+          available: item.available,
           sizes: []
         };
       }
