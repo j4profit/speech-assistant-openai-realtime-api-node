@@ -707,7 +707,12 @@ wss.on('connection', (ws, _req) => {
         paymentMethod: null
       };
 
-      for (const line of lines) {
+      let itemsStarted = false;
+      let itemsLines = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
         if (line.includes('Customer Name:')) {
           orderInfo.customerName = line.split(':')[1]?.trim() || 'Unknown';
         } else if (line.includes('Order Type:')) {
@@ -716,8 +721,17 @@ wss.on('connection', (ws, _req) => {
           const addr = line.split(':')[1]?.trim();
           orderInfo.deliveryAddress = addr && addr !== 'N/A' ? addr : 'N/A';
         } else if (line.includes('Items:')) {
-          orderInfo.items = line.split(':')[1]?.trim() || '';
+          // Extract items from this line and potentially next lines
+          const itemsContent = line.split(':')[1]?.trim() || '';
+          if (itemsContent) {
+            itemsLines.push(itemsContent);
+          }
+          itemsStarted = true;
+        } else if (itemsStarted && !line.includes('Payment Method:') && !line.includes('Total:') && line.trim()) {
+          // Continue collecting items if we're in items section and haven't hit the next field
+          itemsLines.push(line.trim());
         } else if (line.includes('Payment Method:')) {
+          itemsStarted = false;
           const payment = line.split(':')[1]?.trim().toLowerCase();
           // Normalize to 'cash' or 'credit card'
           if (payment && payment.includes('credit')) {
@@ -726,10 +740,21 @@ wss.on('connection', (ws, _req) => {
             orderInfo.paymentMethod = 'cash';
           }
         } else if (line.includes('Total:')) {
+          itemsStarted = false;
           const totalMatch = line.match(/\$?(\d+\.?\d*)/);
           orderInfo.totalAmount = totalMatch ? parseFloat(totalMatch[1]) : 0;
         }
       }
+
+      // Join all items lines, preserving the format
+      orderInfo.items = itemsLines.join(', ').trim();
+
+      console.log('Parsed order info:', {
+        customerName: orderInfo.customerName,
+        orderType: orderInfo.orderType,
+        items: orderInfo.items,
+        totalAmount: orderInfo.totalAmount
+      });
 
       return orderInfo;
     } catch (error) {

@@ -232,9 +232,18 @@ ORDER_CONFIRMED:
 Customer Name: [name]
 Order Type: [pickup or delivery]
 Delivery Address: [address or N/A for pickup]
-Items: [itemized list]
+Items: [quantity]x [item name with size] ($[price each]), [quantity]x [item name with size] ($[price each])
 Payment Method: [cash or credit card]
 Total: $[subtotal before tax/fees]
+
+EXAMPLE ORDER_CONFIRMED FORMAT:
+ORDER_CONFIRMED:
+Customer Name: John Smith
+Order Type: delivery
+Delivery Address: 123 Main St, Baltimore, MD 21201
+Items: 1x Large Cheese Pizza ($90.99), 2x Small Soft Drink ($2.99 each)
+Payment Method: cash
+Total: $96.97
 
 3. After generating ORDER_CONFIRMED format, briefly thank them and tell them the ready time
 4. The system will automatically hang up - you don't need to say goodbye`;
