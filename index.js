@@ -241,7 +241,7 @@ wss.on('connection', (ws, _req) => {
             interrupt_response: true
           },
           temperature: 0.8,
-          max_response_output_tokens: 250,
+          max_response_output_tokens: 500,
           tools: tools,
           tool_choice: 'auto'
         }
