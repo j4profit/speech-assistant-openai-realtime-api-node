@@ -766,6 +766,10 @@ wss.on('connection', (ws, _req) => {
   // Parse ORDER_CONFIRMED format from transcript
   function parseOrderConfirmation(transcript) {
     try {
+      console.log('📋 Parsing ORDER_CONFIRMED block:');
+      console.log(transcript);
+      console.log('---');
+
       const lines = transcript.split('\n');
       const orderInfo = {
         customerName: '',
@@ -818,6 +822,7 @@ wss.on('connection', (ws, _req) => {
           itemsStarted = false;
           const totalMatch = line.match(/\$?(\d+\.?\d*)/);
           orderInfo.totalAmount = totalMatch ? parseFloat(totalMatch[1]) : 0;
+          console.log(`💰 Total line parsed: "${line}" → totalAmount = ${orderInfo.totalAmount}`);
         }
       }
 
