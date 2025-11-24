@@ -645,13 +645,26 @@ wss.on('connection', (ws, _req) => {
         finalTotal
       });
 
+      // Create the full formatted ticket
+      const ticket = createOrderTicket({
+        ...orderInfo,
+        subtotal,
+        deliveryFee,
+        taxRate: restaurant.tax_rate,
+        taxAmount,
+        totalAmount: finalTotal,
+        readyTime: readyTimeInfo.readyTimeString,
+        restaurantName: restaurant.name,
+        customerPhone: customerPhone
+      });
+
       const orderData = {
         restaurant_id: restaurant.id,
         customer_name: orderInfo.customerName,
         customer_phone: customerPhone,
         order_type: orderInfo.orderType,
         delivery_address: orderInfo.deliveryAddress,
-        order_details: orderInfo.items,
+        order_details: ticket,  // Store the full formatted ticket
         total_amount: finalTotal,
         special_instructions: orderInfo.specialInstructions || '',
         payment_method: orderInfo.paymentMethod,
@@ -665,18 +678,6 @@ wss.on('connection', (ws, _req) => {
 
       if (order) {
         console.log('Order created successfully:', order.id);
-
-        const ticket = createOrderTicket({
-          ...orderInfo,
-          subtotal,
-          deliveryFee,
-          taxRate: restaurant.tax_rate,
-          taxAmount,
-          totalAmount: finalTotal,
-          readyTime: readyTimeInfo.readyTimeString,
-          restaurantName: restaurant.name
-        });
-
         console.log('\n' + ticket + '\n');
 
         // Update call data with order reference
