@@ -219,12 +219,12 @@ wss.on('connection', (ws, _req) => {
           },
           turn_detection: {
             type: 'semantic_vad',
-            eagerness: 'low',
+            eagerness: 'high',
             create_response: true,
             interrupt_response: true
           },
-          temperature: 0.6,
-          max_response_output_tokens: 400,
+          temperature: 0.8,
+          max_response_output_tokens: 250,
           tools: tools,
           tool_choice: 'auto'
         }
