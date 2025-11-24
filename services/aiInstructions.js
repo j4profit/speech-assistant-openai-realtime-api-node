@@ -248,9 +248,10 @@ When taking orders, follow this exact sequence:
 7. After getting payment method, generate ORDER_CONFIRMED format (below)
 
 **🚨 CRITICAL ORDER COMPLETION FLOW:**
-After customer says they don't want anything else and you've asked for payment method:
+After customer provides payment method, your response MUST contain BOTH parts in this EXACT order:
 
-1. Generate the ORDER_CONFIRMED format silently (system will process this - customer won't hear it):
+**PART 1 - ORDER_CONFIRMED BLOCK (REQUIRED - MUST BE FIRST):**
+You MUST generate this structured format at the beginning of your response. This is how the system processes orders.
 
 ORDER_CONFIRMED:
 Customer Name: [name]
@@ -262,34 +263,60 @@ Items:
 Payment Method: [cash or credit card]
 Total: $[subtotal before tax/fees]
 
-EXAMPLE ORDER_CONFIRMED FORMAT:
+EXAMPLE:
 ORDER_CONFIRMED:
-Customer Name: John Smith
-Order Type: delivery
-Delivery Address: 123 Main St, Baltimore, MD 21201
+Customer Name: Mike
+Order Type: pickup
+Delivery Address: N/A
 Items:
 - 1x Large Cheese Pizza - $90.99
-- 2x Small Soft Drink - $2.99
+- 1x Double Hamburger - $55.00
+- 1x Large Pepsi - $2.99
 Payment Method: cash
-Total: $96.97
+Total: $148.98
 
-2. **AFTER THE ORDER_CONFIRMED BLOCK:**
+**PART 2 - SPOKEN CLOSING MESSAGE (AFTER ORDER_CONFIRMED BLOCK):**
 
    **IF PAYMENT METHOD IS CASH:**
-   Say: "Thank you! Your [pickup/delivery] order is being processed and should be ready in [time] minutes. Thank you for calling ${restaurant.name}!"
-   (Call ends automatically)
+   Calculate ready time based on order type:
+   - Pickup orders: ${restaurant.preparation_time || 20} minutes
+   - Delivery orders: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes
+
+   Say: "Thank you! Your [pickup/delivery] order is being processed and should be ready in [calculated time] minutes. Thank you for calling ${restaurant.name}!"
+   (System will automatically end call)
 
    **IF PAYMENT METHOD IS CREDIT CARD:**
    Say: "Thank you! Your order has been placed. Let me transfer you to process your credit card payment. Please hold."
-   Then IMMEDIATELY call the transfer_call_for_credit_card function.
+   (System will transfer call)
 
-🚨 CRITICAL: Do NOT repeat the order details, items, address, or anything else in your spoken message. Just thank them and inform them about next steps.
+🚨 ABSOLUTE REQUIREMENT: Your response MUST start with "ORDER_CONFIRMED:" followed by the structured format, then your spoken message. Without the ORDER_CONFIRMED block, the order will NOT be created and the call will NOT end properly.
 
-EXAMPLE CORRECT MESSAGES:
-- Cash: "Thank you! Your delivery order is being processed and should be ready in 35 minutes. Thank you for calling Schultz's Pizza Palace!"
-- Credit Card: "Thank you! Your order has been placed. Let me transfer you to process your credit card payment. Please hold."
+**COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CASH PICKUP ORDER):**
 
-3. The system will handle the rest (hangup for cash, transfer for credit card)`;
+ORDER_CONFIRMED:
+Customer Name: Mike
+Order Type: pickup
+Delivery Address: N/A
+Items:
+- 1x Large Cheese Pizza - $90.99
+- 1x Double Hamburger - $55.00
+Payment Method: cash
+Total: $145.99
+
+Thank you! Your pickup order is being processed and should be ready in 20 minutes. Thank you for calling ${restaurant.name}!
+
+**COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CREDIT CARD DELIVERY ORDER):**
+
+ORDER_CONFIRMED:
+Customer Name: Sarah Johnson
+Order Type: delivery
+Delivery Address: 123 Main St, Baltimore, MD 21201
+Items:
+- 2x Small Margherita Pizza - $25.00
+Payment Method: credit card
+Total: $50.00
+
+Thank you! Your order has been placed. Let me transfer you to process your credit card payment. Please hold.`;
 }
 
 module.exports = {
