@@ -528,10 +528,13 @@ wss.on('connection', (ws, _req) => {
           // Check if call forwarding is enabled
           if (!restaurant.call_forwarding_enabled) {
             console.log('❌ Call forwarding not enabled for this restaurant');
+            const fallbackMessage = functionName === 'transfer_call_for_credit_card'
+              ? "Your order has been placed successfully. Someone from the restaurant will be reaching out to obtain payment. Thank you!"
+              : "I've saved your request. The restaurant will call you back to help with this.";
             result = {
               success: false,
               should_create_message: true,
-              message: "I've saved your request. The restaurant will call you back to help with this."
+              message: fallbackMessage
             };
             break;
           }
@@ -542,10 +545,13 @@ wss.on('connection', (ws, _req) => {
 
           if (!shouldForward) {
             console.log(`❌ Reason "${reason}" not in forwarding reasons: ${forwardingReasons.join(', ')}`);
+            const fallbackMessage = functionName === 'transfer_call_for_credit_card'
+              ? "Your order has been placed successfully. Someone from the restaurant will be reaching out to obtain payment. Thank you!"
+              : "I've saved your request. The restaurant will call you back to help with this.";
             result = {
               success: false,
               should_create_message: true,
-              message: "I've saved your request. The restaurant will call you back to help with this."
+              message: fallbackMessage
             };
             break;
           }
@@ -553,10 +559,13 @@ wss.on('connection', (ws, _req) => {
           // Check if forwarding number is configured
           if (!restaurant.call_forwarding_number) {
             console.error('❌ Call forwarding enabled but no number configured');
+            const fallbackMessage = functionName === 'transfer_call_for_credit_card'
+              ? "Your order has been placed successfully. Someone from the restaurant will be reaching out to obtain payment. Thank you!"
+              : "I've saved your request. The restaurant will call you back to help with this.";
             result = {
               success: false,
               should_create_message: true,
-              message: "I've saved your request. The restaurant will call you back to help with this."
+              message: fallbackMessage
             };
             break;
           }
@@ -591,6 +600,29 @@ wss.on('connection', (ws, _req) => {
               console.log(`✅ Call transferred successfully to ${restaurant.call_forwarding_number}`);
             } else {
               console.error('❌ Transfer failed:', transferResult.error);
+
+              // If credit card transfer fails, notify the customer
+              if (functionName === 'transfer_call_for_credit_card' && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                const fallbackMessage = "I apologize, but I'm unable to transfer your call at this time. Your order has been placed successfully, and someone from the restaurant will be reaching out to obtain payment. Thank you!";
+
+                // Send the fallback message to AI to speak to customer
+                openaiWs.send(JSON.stringify({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{
+                      type: 'input_text',
+                      text: `[SYSTEM: Transfer failed. Please say this to the customer: "${fallbackMessage}"]`
+                    }]
+                  }
+                }));
+
+                // Trigger AI response
+                openaiWs.send(JSON.stringify({ type: 'response.create' }));
+
+                console.log('📢 Sent fallback message to AI for credit card transfer failure');
+              }
             }
           }, 3000);
         }
