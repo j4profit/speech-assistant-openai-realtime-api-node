@@ -753,10 +753,10 @@ wss.on('connection', (ws, _req) => {
         // Update call data with order reference
         stateManager.updateCallData(callSid, { order_id: order.id });
 
-        // Schedule hangup after 3 seconds to allow AI to finish speaking goodbye message
+        // Schedule hangup after 8 seconds to allow AI to finish reciting complete order summary
         hangupTimer = setTimeout(async () => {
           await initiateHangup('order_completed');
-        }, 3000);
+        }, 8000);
       }
     } catch (error) {
       console.error('Error processing order:', error);

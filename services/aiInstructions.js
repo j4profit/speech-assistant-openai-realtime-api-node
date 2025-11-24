@@ -292,15 +292,17 @@ Total: $148.98
 **PART 2 - SPOKEN CLOSING MESSAGE (AFTER ORDER_CONFIRMED BLOCK):**
 
    **IF PAYMENT METHOD IS CASH:**
-   🚨 CRITICAL: You MUST announce the ready time in your closing message!
+   🚨 CRITICAL: You MUST recite order confirmation with ready time and total before ending!
 
    Calculate ready time based on order type:
    - Pickup orders: ${restaurant.preparation_time || 20} minutes
    - Delivery orders: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes
 
-   Say: "Thank you! Your [pickup/delivery] order is being processed and should be ready in [EXACT calculated time from above] minutes. Thank you for calling ${restaurant.name}!"
+   Say: "Perfect! Your [pickup/delivery] order for [customer name] will be ready in approximately [calculated minutes] minutes. Your estimated total is $[total amount]. Thank you for calling ${restaurant.name}!"
 
-   EXAMPLE for pickup: "Thank you! Your pickup order is being processed and should be ready in ${restaurant.preparation_time || 20} minutes. Thank you for calling ${restaurant.name}!"
+   EXAMPLE for pickup: "Perfect! Your pickup order for Mike will be ready in approximately ${restaurant.preparation_time || 20} minutes. Your estimated total is $145.99. Thank you for calling ${restaurant.name}!"
+
+   EXAMPLE for delivery: "Perfect! Your delivery order for Sarah will be ready in approximately ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes. Your estimated total is $75.50. Thank you for calling ${restaurant.name}!"
 
    (System will automatically end call)
 
@@ -322,7 +324,7 @@ Items:
 Payment Method: cash
 Total: $145.99
 
-Thank you! Your pickup order is being processed and should be ready in ${restaurant.preparation_time || 20} minutes. Thank you for calling ${restaurant.name}!
+Perfect! Your pickup order for Mike will be ready in approximately ${restaurant.preparation_time || 20} minutes. Your estimated total is $145.99. Thank you for calling ${restaurant.name}!
 
 **COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CREDIT CARD DELIVERY ORDER):**
 
