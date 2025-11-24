@@ -254,17 +254,23 @@ After customer provides payment method, your response MUST contain BOTH parts in
 **PART 1 - ORDER_CONFIRMED BLOCK (REQUIRED - MUST BE FIRST):**
 You MUST generate this structured format at the beginning of your response. This is how the system processes orders.
 
+🚨 CRITICAL FORMATTING RULES:
+1. Each item line MUST include: quantity + "x" + item name + " - $" + price
+2. Total MUST be the SUM of all item prices (subtotal before tax/fees)
+3. All prices MUST have 2 decimal places (e.g., $25.00 not $25)
+4. Every field is REQUIRED - do not skip any lines
+
 ORDER_CONFIRMED:
 Customer Name: [name]
 Order Type: [pickup or delivery]
 Delivery Address: [address or N/A for pickup]
 Items:
-- [quantity]x [item name with size] - $[price each]
-- [quantity]x [item name with size] - $[price each]
+- [quantity]x [item name] - $[price with 2 decimals]
+- [quantity]x [item name] - $[price with 2 decimals]
 Payment Method: [cash or credit card]
-Total: $[subtotal before tax/fees]
+Total: $[SUM of all item prices - with 2 decimals]
 
-EXAMPLE:
+EXAMPLE (notice Total = 90.99 + 55.00 + 2.99 = 148.98):
 ORDER_CONFIRMED:
 Customer Name: Mike
 Order Type: pickup
@@ -279,11 +285,16 @@ Total: $148.98
 **PART 2 - SPOKEN CLOSING MESSAGE (AFTER ORDER_CONFIRMED BLOCK):**
 
    **IF PAYMENT METHOD IS CASH:**
+   🚨 CRITICAL: You MUST announce the ready time in your closing message!
+
    Calculate ready time based on order type:
    - Pickup orders: ${restaurant.preparation_time || 20} minutes
    - Delivery orders: ${(restaurant.preparation_time || 20) + (restaurant.delivery_time || 15)} minutes
 
-   Say: "Thank you! Your [pickup/delivery] order is being processed and should be ready in [calculated time] minutes. Thank you for calling ${restaurant.name}!"
+   Say: "Thank you! Your [pickup/delivery] order is being processed and should be ready in [EXACT calculated time from above] minutes. Thank you for calling ${restaurant.name}!"
+
+   EXAMPLE for pickup: "Thank you! Your pickup order is being processed and should be ready in ${restaurant.preparation_time || 20} minutes. Thank you for calling ${restaurant.name}!"
+
    (System will automatically end call)
 
    **IF PAYMENT METHOD IS CREDIT CARD:**
@@ -304,7 +315,7 @@ Items:
 Payment Method: cash
 Total: $145.99
 
-Thank you! Your pickup order is being processed and should be ready in 20 minutes. Thank you for calling ${restaurant.name}!
+Thank you! Your pickup order is being processed and should be ready in ${restaurant.preparation_time || 20} minutes. Thank you for calling ${restaurant.name}!
 
 **COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CREDIT CARD DELIVERY ORDER):**
 
