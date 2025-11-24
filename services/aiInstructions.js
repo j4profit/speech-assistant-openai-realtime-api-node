@@ -232,7 +232,9 @@ ORDER_CONFIRMED:
 Customer Name: [name]
 Order Type: [pickup or delivery]
 Delivery Address: [address or N/A for pickup]
-Items: [quantity]x [item name with size] ($[price each]), [quantity]x [item name with size] ($[price each])
+Items:
+- [quantity]x [item name with size] - $[price each]
+- [quantity]x [item name with size] - $[price each]
 Payment Method: [cash or credit card]
 Total: $[subtotal before tax/fees]
 
@@ -241,7 +243,9 @@ ORDER_CONFIRMED:
 Customer Name: John Smith
 Order Type: delivery
 Delivery Address: 123 Main St, Baltimore, MD 21201
-Items: 1x Large Cheese Pizza ($90.99), 2x Small Soft Drink ($2.99 each)
+Items:
+- 1x Large Cheese Pizza - $90.99
+- 2x Small Soft Drink - $2.99
 Payment Method: cash
 Total: $96.97
 

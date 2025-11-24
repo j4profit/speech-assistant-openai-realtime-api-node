@@ -721,7 +721,7 @@ wss.on('connection', (ws, _req) => {
           const addr = line.split(':')[1]?.trim();
           orderInfo.deliveryAddress = addr && addr !== 'N/A' ? addr : 'N/A';
         } else if (line.includes('Items:')) {
-          // Extract items from this line and potentially next lines
+          // Items section started - check if there's content on the same line
           const itemsContent = line.split(':')[1]?.trim() || '';
           if (itemsContent) {
             itemsLines.push(itemsContent);
@@ -729,7 +729,11 @@ wss.on('connection', (ws, _req) => {
           itemsStarted = true;
         } else if (itemsStarted && !line.includes('Payment Method:') && !line.includes('Total:') && line.trim()) {
           // Continue collecting items if we're in items section and haven't hit the next field
-          itemsLines.push(line.trim());
+          // Remove leading dashes/bullets and trim
+          const cleanedLine = line.trim().replace(/^[-•*]\s*/, '');
+          if (cleanedLine) {
+            itemsLines.push(cleanedLine);
+          }
         } else if (line.includes('Payment Method:')) {
           itemsStarted = false;
           const payment = line.split(':')[1]?.trim().toLowerCase();
@@ -746,8 +750,8 @@ wss.on('connection', (ws, _req) => {
         }
       }
 
-      // Join all items lines, preserving the format
-      orderInfo.items = itemsLines.join(', ').trim();
+      // Join all items lines with newline to preserve multi-line format
+      orderInfo.items = itemsLines.join('\n').trim();
 
       console.log('Parsed order info:', {
         customerName: orderInfo.customerName,

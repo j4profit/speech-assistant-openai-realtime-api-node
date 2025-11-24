@@ -102,7 +102,7 @@ ${specialInstructions}`;
 /**
  * Format order items for display
  * @param {string} items - Raw items string
- * @param {number} totalAmount - Total order amount
+ * @param {number} totalAmount - Total order amount (unused, kept for compatibility)
  * @returns {string} Formatted items list
  */
 function formatOrderItems(items, totalAmount) {
@@ -110,35 +110,21 @@ function formatOrderItems(items, totalAmount) {
     return '• Order details not available';
   }
 
-  if (items.includes('ORDER_CONFIRMED')) {
-    const lines = items.split('\n');
-    let formattedItems = '';
-    let currentItem = '';
-
-    for (const line of lines) {
-      if (line.includes('• ') || line.includes('- ')) {
-        if (currentItem) formattedItems += currentItem + '\n';
-        currentItem = line.trim();
-      } else if (line.trim() && !line.includes('ORDER_') && !line.includes('Customer') && !line.includes('Phone')) {
-        currentItem += ' ' + line.trim();
-      }
-    }
-    if (currentItem) formattedItems += currentItem;
-
-    return formattedItems || '• ' + items.replace(/ORDER_CONFIRMED.*?\n/g, '').trim();
-  }
-
-  const itemLines = items.split(/[,\n]/).filter(item => item.trim());
+  // Split by newlines to handle multi-line format
+  const itemLines = items.split('\n').filter(line => line.trim());
   let formattedItems = '';
 
   itemLines.forEach((item) => {
-    const cleanItem = item.trim().replace(/^\d+\.?\s*/, '').replace(/^[\-\*]\s*/, '');
+    const cleanItem = item.trim()
+      .replace(/^[-•*]\s*/, '')  // Remove leading bullets/dashes
+      .replace(/^\d+\.?\s*/, ''); // Remove leading numbers
+
     if (cleanItem) {
       formattedItems += `• ${cleanItem}\n`;
     }
   });
 
-  return formattedItems || '• ' + items;
+  return formattedItems.trim() || '• ' + items;
 }
 
 /**
