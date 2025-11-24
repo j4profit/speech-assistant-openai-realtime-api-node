@@ -54,6 +54,8 @@ wss.on('connection', (ws, _req) => {
   let callFinalized = false;
   let silenceTimer = null;
   let hangupTimer = null;
+  let currentModel = config.openai.model; // Track which model is being used
+  let modelRetryAttempted = false; // Prevent infinite retry loops
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -121,8 +123,15 @@ wss.on('connection', (ws, _req) => {
   }
 
   // Initialize OpenAI connection
-  async function initializeOpenAI(calledNumber, fromNumber, callId) {
+  async function initializeOpenAI(calledNumber, fromNumber, callId, retryWithFallback = false) {
     console.log('Loading restaurant data for:', calledNumber);
+
+    // Use fallback model if this is a retry attempt
+    if (retryWithFallback && !modelRetryAttempted) {
+      currentModel = config.openai.fallbackModel;
+      modelRetryAttempted = true;
+      console.log(`⚠️ Retrying with fallback model: ${currentModel}`);
+    }
 
     // First, check if restaurant data is already cached in stateManager
     const cachedCallData = stateManager.getCallData(callId);
@@ -170,10 +179,10 @@ wss.on('connection', (ws, _req) => {
       console.error('⚠️ Error pre-fetching customer address:', error.message);
     }
 
-    console.log('Connecting to OpenAI Realtime API...');
+    console.log(`Connecting to OpenAI Realtime API with model: ${currentModel}...`);
 
     try {
-      openaiWs = new WebSocket(`${config.openai.websocketUrl}?model=${config.openai.model}`, {
+      openaiWs = new WebSocket(`${config.openai.websocketUrl}?model=${currentModel}`, {
         headers: {
           'Authorization': `Bearer ${config.openai.apiKey}`,
           'OpenAI-Beta': 'realtime=v1'
@@ -183,10 +192,18 @@ wss.on('connection', (ws, _req) => {
         maxPayload: 100 * 1024 * 1024
       });
 
-      console.log('WebSocket created successfully');
+      console.log(`WebSocket created successfully with model: ${currentModel}`);
 
     } catch (createError) {
-      console.error('Failed to create OpenAI WebSocket:', createError);
+      console.error(`Failed to create OpenAI WebSocket with ${currentModel}:`, createError);
+
+      // Retry with fallback model if primary failed and we haven't retried yet
+      if (!modelRetryAttempted && config.openai.fallbackModel) {
+        console.log(`Attempting to retry with fallback model: ${config.openai.fallbackModel}`);
+        await initializeOpenAI(calledNumber, fromNumber, callId, true);
+        return;
+      }
+
       await initiateHangup('websocket_creation_failed');
       return;
     }
@@ -237,11 +254,32 @@ wss.on('connection', (ws, _req) => {
     });
 
     openaiWs.on('message', handleOpenAIMessage);
-    openaiWs.on('error', (error) => {
-      console.error('OpenAI WebSocket error:', error);
+
+    openaiWs.on('error', async (error) => {
+      console.error(`OpenAI WebSocket error with ${currentModel}:`, error);
+
+      // Check if this is a model-related error and we haven't retried yet
+      const errorMessage = error.message || error.toString();
+      const isModelError = errorMessage.includes('model') ||
+                          errorMessage.includes('404') ||
+                          errorMessage.includes('invalid') ||
+                          errorMessage.includes('not found');
+
+      if (isModelError && !modelRetryAttempted && config.openai.fallbackModel) {
+        console.log(`🔄 Model error detected. Retrying with fallback model: ${config.openai.fallbackModel}`);
+
+        // Close current connection
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          openaiWs.close();
+        }
+
+        // Retry with fallback
+        await initializeOpenAI(restaurant.phone_number, customerPhone, callSid, true);
+      }
     });
-    openaiWs.on('close', () => {
-      console.log('OpenAI WebSocket closed');
+
+    openaiWs.on('close', (code, reason) => {
+      console.log(`OpenAI WebSocket closed - Code: ${code}, Reason: ${reason || 'None'}, Model: ${currentModel}`);
     });
   }
 
