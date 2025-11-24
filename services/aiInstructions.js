@@ -271,7 +271,8 @@ When taking orders, follow this exact sequence:
 **🚨 CRITICAL ORDER COMPLETION FLOW:**
 After customer provides payment method, your response MUST contain BOTH parts in this EXACT order:
 
-**PART 1 - ORDER_CONFIRMED BLOCK (REQUIRED - MUST BE FIRST):**
+**PART 1 - ORDER_CONFIRMED BLOCK (SILENT - FOR SYSTEM PROCESSING ONLY):**
+🚨 THIS BLOCK IS NOT SPOKEN - IT'S ONLY FOR THE SYSTEM TO READ
 You MUST generate this structured format at the beginning of your response. This is how the system processes orders.
 
 🚨 CRITICAL FORMATTING RULES:
@@ -279,6 +280,7 @@ You MUST generate this structured format at the beginning of your response. This
 2. Total MUST be the SUM of all item prices (subtotal before tax/fees)
 3. All prices MUST have 2 decimal places (e.g., $25.00 not $25)
 4. Every field is REQUIRED - do not skip any lines
+5. 🚨 DO NOT READ THIS BLOCK OUT LOUD - it's for system processing only!
 
 ORDER_CONFIRMED:
 Customer Name: [name]
@@ -302,13 +304,14 @@ Items:
 Payment Method: cash
 Total: $148.98
 
-**PART 2 - SPOKEN CLOSING MESSAGE (AFTER ORDER_CONFIRMED BLOCK):**
+**PART 2 - SPOKEN CLOSING MESSAGE (THIS IS WHAT YOU ACTUALLY SAY):**
 
    **IF PAYMENT METHOD IS CASH:**
-   🚨 CRITICAL RULES FOR CLOSING MESSAGE:
-   - DO NOT list the items again - they were already confirmed
-   - ONLY state: order type, customer name, ready time, and total
-   - Keep it brief and concise
+   🚨 CRITICAL RULES FOR WHAT TO SAY OUT LOUD:
+   - DO NOT read the ORDER_CONFIRMED block out loud
+   - DO NOT list all the items - they were already confirmed in review step
+   - ONLY say: order type, customer name, ready time, total, thank you
+   - Keep it brief - ONE sentence only
 
    Calculate ready time based on order type:
    - Pickup orders: ${restaurant.preparation_time || 20} minutes
@@ -332,6 +335,7 @@ Total: $148.98
 
 **COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CASH PICKUP ORDER):**
 
+--- PART 1: SILENT BLOCK (NOT SPOKEN) ---
 ORDER_CONFIRMED:
 Customer Name: Mike
 Order Type: pickup
@@ -342,9 +346,11 @@ Items:
 Payment Method: cash
 Total: $145.99
 
+--- PART 2: WHAT YOU ACTUALLY SAY OUT LOUD ---
 Perfect! Your pickup order for Mike will be ready in approximately 20 minutes. Your estimated total is $145.99. Thank you for calling ${restaurant.name}!
 
-🚨 NOTE: Do NOT list the items in the spoken message - only say order type, name, ready time, and total!
+🚨 CRITICAL: The ORDER_CONFIRMED block above is NOT spoken - you only speak the one-sentence closing message!
+🚨 DO NOT SAY: "I have one large cheese pizza, one double hamburger..." - that's repeating the items!
 
 **COMPLETE EXAMPLE OF CORRECT FINAL RESPONSE (CREDIT CARD DELIVERY ORDER):**
 
