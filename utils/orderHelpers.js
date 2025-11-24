@@ -202,30 +202,61 @@ function formatMenuForAI(menuItems, restaurant) {
   }
 
   const categories = {};
+
+  // First, group items by category and name to handle size variants
+  const groupedItems = {};
   menuItems.forEach(item => {
     if (!item.available) return;
 
     const categoryName = item.category || 'Other';
+    const itemKey = `${categoryName}::${item.name}`;
+
+    if (!groupedItems[itemKey]) {
+      groupedItems[itemKey] = {
+        category: categoryName,
+        name: item.name,
+        description: item.description,
+        variants: []
+      };
+    }
+
+    // Add this variant (with or without size)
+    groupedItems[itemKey].variants.push({
+      size: item.size || null,
+      price: item.price,
+      id: item.id
+    });
+  });
+
+  // Now format grouped items into categories
+  Object.values(groupedItems).forEach(groupedItem => {
+    const categoryName = groupedItem.category;
     if (!categories[categoryName]) {
       categories[categoryName] = [];
     }
 
-    // Handle both flat price and sizes array formats
+    // Determine price display based on variants
     let priceDisplay;
-    if (item.sizes && Array.isArray(item.sizes) && item.sizes.length > 0) {
-      // Format sizes with prices
-      priceDisplay = item.sizes.map(s => `${s.size}: $${s.price}`).join(', ');
-    } else if (item.price !== undefined) {
-      priceDisplay = `$${item.price}`;
+    if (groupedItem.variants.length === 1) {
+      // Single variant - show simple price with optional size
+      const variant = groupedItem.variants[0];
+      if (variant.size) {
+        priceDisplay = `${variant.size}: $${variant.price}`;
+      } else {
+        priceDisplay = `$${variant.price}`;
+      }
     } else {
-      priceDisplay = 'Price varies';
+      // Multiple variants - show all sizes and prices
+      priceDisplay = groupedItem.variants
+        .map(v => v.size ? `${v.size}: $${v.price}` : `$${v.price}`)
+        .join(', ');
     }
 
     categories[categoryName].push({
-      name: item.name,
-      description: item.description,
+      name: groupedItem.name,
+      description: groupedItem.description,
       priceDisplay: priceDisplay,
-      id: item.id
+      variants: groupedItem.variants
     });
   });
 
