@@ -230,9 +230,6 @@ wss.on('connection', (ws, _req) => {
           voice: restaurant.ai_voice || 'coral',
           input_audio_format: 'g711_ulaw',
           output_audio_format: 'g711_ulaw',
-          input_audio_transcription: {
-            model: 'whisper-1'
-          },
           turn_detection: {
             type: 'semantic_vad',
             eagerness: 'medium',
@@ -475,14 +472,8 @@ wss.on('connection', (ws, _req) => {
           });
           break;
 
-        case 'conversation.item.input_audio_transcription.completed':
-          console.log('Customer said:', response.transcript);
-          conversationTranscript.push({
-            timestamp: new Date().toISOString(),
-            speaker: 'Customer',
-            text: response.transcript
-          });
-
+        case 'input_audio_buffer.speech_started':
+          // Customer started speaking - cancel greeting timeout
           if (greetingTimeout) {
             clearTimeout(greetingTimeout);
             greetingTimeout = null;
@@ -923,17 +914,8 @@ wss.on('connection', (ws, _req) => {
       callData.conversation_transcript = JSON.stringify(conversationTranscript);
       callData.source = 'websocket';  // Mark source for Edge Function logging
 
-      // Debug: Log transcript being sent
-      console.log('📝 Transcript being saved:', {
-        length: conversationTranscript.length,
-        preview: conversationTranscript.slice(0, 2),
-        stringified_length: callData.conversation_transcript.length
-      });
-
       await database.createCallLog(callData);
       stateManager.removeCallData(callSid);
-    } else {
-      console.error('❌ No callData found in stateManager for callSid:', callSid);
     }
 
     // Close OpenAI WebSocket if still open
