@@ -52,7 +52,6 @@ wss.on('connection', (ws, _req) => {
   let customerHasSpoken = false;
   let greetingTimeout = null;
   let callFinalized = false;
-  let silenceTimer = null;
   let hangupTimer = null;
   let currentModel = config.openai.model; // Track which model is being used
   let modelRetryAttempted = false; // Prevent infinite retry loops
@@ -474,10 +473,6 @@ wss.on('connection', (ws, _req) => {
             speaker: 'AI',
             text: response.transcript
           });
-
-          if (response.transcript.includes('ORDER_CONFIRMED:') && !orderProcessed) {
-            await processOrderFromTranscript(response.transcript);
-          }
           break;
 
         case 'conversation.item.input_audio_transcription.completed':
@@ -749,7 +744,7 @@ wss.on('connection', (ws, _req) => {
     }
   }
 
-  // Process order from function call (new method)
+  // Process order from function call
   async function processOrderFromFunctionCall(orderData) {
     orderProcessed = true;
     console.log('Processing order from function call...');
@@ -831,165 +826,6 @@ wss.on('connection', (ws, _req) => {
       }
     } catch (error) {
       console.error('Error processing order from function call:', error);
-    }
-  }
-
-  // Process order from transcript (legacy method - keeping for backwards compatibility)
-  async function processOrderFromTranscript(transcript) {
-    orderProcessed = true;
-    console.log('Processing order from transcript...');
-
-    try {
-      const orderInfo = parseOrderConfirmation(transcript);
-
-      if (!orderInfo) {
-        console.error('Failed to parse order confirmation');
-        return;
-      }
-
-      const readyTimeInfo = calculateOrderReadyTime(restaurant, orderInfo.orderType === 'delivery');
-
-      // Calculate order totals with tax and delivery fee
-      const subtotal = orderInfo.totalAmount;
-      const isDelivery = orderInfo.orderType === 'delivery';
-      const deliveryFee = isDelivery && restaurant.delivery_fee ? restaurant.delivery_fee : 0;
-      const taxableAmount = subtotal + deliveryFee;
-      const taxAmount = restaurant.tax_rate ? taxableAmount * restaurant.tax_rate : 0;
-      const finalTotal = taxableAmount + taxAmount;
-
-      console.log('Order pricing breakdown:', {
-        subtotal,
-        deliveryFee,
-        taxRate: restaurant.tax_rate,
-        taxAmount,
-        finalTotal
-      });
-
-      // Create the full formatted ticket
-      const ticket = createOrderTicket({
-        ...orderInfo,
-        subtotal,
-        deliveryFee,
-        taxRate: restaurant.tax_rate,
-        taxAmount,
-        totalAmount: finalTotal,
-        readyTime: readyTimeInfo.readyTimeString,
-        restaurantName: restaurant.name,
-        customerPhone: customerPhone
-      });
-
-      const orderData = {
-        restaurant_id: restaurant.id,
-        customer_name: orderInfo.customerName,
-        customer_phone: customerPhone,
-        order_type: orderInfo.orderType,
-        delivery_address: orderInfo.deliveryAddress,
-        order_details: ticket,  // Store the full formatted ticket
-        total_amount: finalTotal,
-        special_instructions: orderInfo.specialInstructions || '',
-        payment_method: orderInfo.paymentMethod,
-        call_sid: callSid,
-        ready_time: readyTimeInfo.readyTimeString,
-        estimated_ready_at: readyTimeInfo.readyTime,
-        status: 'pending'
-      };
-
-      const order = await database.createOrder(orderData);
-
-      if (order) {
-        console.log('Order created successfully:', order.id);
-        console.log('\n' + ticket + '\n');
-
-        // Update call data with order reference
-        stateManager.updateCallData(callSid, { order_id: order.id });
-
-        // Schedule hangup after 8 seconds to allow AI to finish reciting complete order summary
-        hangupTimer = setTimeout(async () => {
-          await initiateHangup('order_completed');
-        }, 8000);
-      }
-    } catch (error) {
-      console.error('Error processing order:', error);
-    }
-  }
-
-  // Parse ORDER_CONFIRMED format from transcript
-  function parseOrderConfirmation(transcript) {
-    try {
-      console.log('📋 Parsing ORDER_CONFIRMED block:');
-      console.log(transcript);
-      console.log('---');
-
-      const lines = transcript.split('\n');
-      const orderInfo = {
-        customerName: '',
-        customerPhone: customerPhone,
-        orderType: 'pickup',
-        deliveryAddress: 'N/A',
-        items: '',
-        totalAmount: 0,
-        specialInstructions: '',
-        paymentMethod: null
-      };
-
-      let itemsStarted = false;
-      let itemsLines = [];
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-
-        if (line.includes('Customer Name:')) {
-          orderInfo.customerName = line.split(':')[1]?.trim() || 'Unknown';
-        } else if (line.includes('Order Type:')) {
-          orderInfo.orderType = line.split(':')[1]?.trim().toLowerCase() || 'pickup';
-        } else if (line.includes('Delivery Address:')) {
-          const addr = line.split(':')[1]?.trim();
-          orderInfo.deliveryAddress = addr && addr !== 'N/A' ? addr : 'N/A';
-        } else if (line.includes('Items:')) {
-          // Items section started - check if there's content on the same line
-          const itemsContent = line.split(':')[1]?.trim() || '';
-          if (itemsContent) {
-            itemsLines.push(itemsContent);
-          }
-          itemsStarted = true;
-        } else if (itemsStarted && !line.includes('Payment Method:') && !line.includes('Total:') && line.trim()) {
-          // Continue collecting items if we're in items section and haven't hit the next field
-          // Remove leading dashes/bullets and trim
-          const cleanedLine = line.trim().replace(/^[-•*]\s*/, '');
-          if (cleanedLine) {
-            itemsLines.push(cleanedLine);
-          }
-        } else if (line.includes('Payment Method:')) {
-          itemsStarted = false;
-          const payment = line.split(':')[1]?.trim().toLowerCase();
-          // Normalize to 'cash' or 'credit card'
-          if (payment && payment.includes('credit')) {
-            orderInfo.paymentMethod = 'credit card';
-          } else if (payment && payment.includes('cash')) {
-            orderInfo.paymentMethod = 'cash';
-          }
-        } else if (line.includes('Total:')) {
-          itemsStarted = false;
-          const totalMatch = line.match(/\$?(\d+\.?\d*)/);
-          orderInfo.totalAmount = totalMatch ? parseFloat(totalMatch[1]) : 0;
-          console.log(`💰 Total line parsed: "${line}" → totalAmount = ${orderInfo.totalAmount}`);
-        }
-      }
-
-      // Join all items lines with newline to preserve multi-line format
-      orderInfo.items = itemsLines.join('\n').trim();
-
-      console.log('Parsed order info:', {
-        customerName: orderInfo.customerName,
-        orderType: orderInfo.orderType,
-        items: orderInfo.items,
-        totalAmount: orderInfo.totalAmount
-      });
-
-      return orderInfo;
-    } catch (error) {
-      console.error('Error parsing order confirmation:', error);
-      return null;
     }
   }
 
