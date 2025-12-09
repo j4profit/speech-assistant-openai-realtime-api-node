@@ -923,8 +923,17 @@ wss.on('connection', (ws, _req) => {
       callData.conversation_transcript = JSON.stringify(conversationTranscript);
       callData.source = 'websocket';  // Mark source for Edge Function logging
 
+      // Debug: Log transcript being sent
+      console.log('📝 Transcript being saved:', {
+        length: conversationTranscript.length,
+        preview: conversationTranscript.slice(0, 2),
+        stringified_length: callData.conversation_transcript.length
+      });
+
       await database.createCallLog(callData);
       stateManager.removeCallData(callSid);
+    } else {
+      console.error('❌ No callData found in stateManager for callSid:', callSid);
     }
 
     // Close OpenAI WebSocket if still open
