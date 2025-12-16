@@ -434,8 +434,8 @@ wss.on('connection', (ws, _req) => {
             },
             payment_method: {
               type: "string",
-              enum: ["cash", "credit card"],
-              description: "Payment method"
+              enum: ["in_store", "cash", "credit card"],
+              description: "Payment method - use 'in_store' for all pickup orders, 'cash' or 'credit card' for delivery orders"
             },
             special_instructions: {
               type: "string",
