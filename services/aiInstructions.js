@@ -59,8 +59,8 @@ PICKUP ORDERS: No address, no payment question - customer pays when they arrive 
 
 🔴🔴🔴 MANDATORY ORDER SUBMISSION:
 WHEN CUSTOMER CONFIRMS ORDER → YOU MUST CALL submit_order FUNCTION
-- For PICKUP: use payment_method="in_store" (customer pays at store)
-- For DELIVERY: use payment_method based on what customer says ("cash" or "credit card")
+- For PICKUP: Do NOT include payment_method (customer pays at store)
+- For DELIVERY: Include payment_method based on what customer says ("cash" or "credit card")
 - WITHOUT calling submit_order, the order will NOT be created in the system!
 
 ${savedAddressInfo}
@@ -302,10 +302,10 @@ After customer confirms the order (for pickup) or provides payment method (for d
 - order_type: "pickup" or "delivery"
 - delivery_address: The delivery address or "N/A" for pickup
 - items: Array of items, each with {name, quantity, price}
-- payment_method: ALWAYS use "in_store" for pickup orders (customer pays at store), use "cash" or "credit card" for delivery based on what customer says
+- payment_method: ONLY for DELIVERY orders - use "cash" or "credit card" based on what customer says. Do NOT include this field for pickup orders!
 - special_instructions: Any special requests (optional)
 
-EXAMPLE submit_order function call FOR PICKUP:
+EXAMPLE submit_order function call FOR PICKUP (NO payment_method field!):
 {
   "customer_name": "Mike",
   "order_type": "pickup",
@@ -314,7 +314,6 @@ EXAMPLE submit_order function call FOR PICKUP:
     {"name": "Large Cheese Pizza", "quantity": 1, "price": 90.99},
     {"name": "Double Hamburger", "quantity": 1, "price": 55.00}
   ],
-  "payment_method": "in_store",
   "special_instructions": ""
 }
 

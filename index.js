@@ -434,15 +434,15 @@ wss.on('connection', (ws, _req) => {
             },
             payment_method: {
               type: "string",
-              enum: ["in_store", "cash", "credit card"],
-              description: "Payment method - use 'in_store' for all pickup orders, 'cash' or 'credit card' for delivery orders"
+              enum: ["cash", "credit card"],
+              description: "Payment method - ONLY required for DELIVERY orders. Do NOT include for pickup orders."
             },
             special_instructions: {
               type: "string",
               description: "Any special instructions from customer"
             }
           },
-          required: ["customer_name", "order_type", "items", "payment_method"]
+          required: ["customer_name", "order_type", "items"]
         }
       }
     ];
@@ -488,21 +488,13 @@ wss.on('connection', (ws, _req) => {
           break;
 
         case 'conversation.item.created':
-          // Log all item types to debug function calling
+          // Log for debugging (don't handle function calls here - use response.function_call_arguments.done)
           console.log(`📋 conversation.item.created - type: ${response.item?.type}, name: ${response.item?.name || 'N/A'}`);
-          if (response.item?.type === 'function_call') {
-            console.log('✅ Function call detected via conversation.item.created');
-            await handleFunctionCall(response.item);
-          }
           break;
 
-        // Handle function calls from response.output_item.done (newer API format)
         case 'response.output_item.done':
+          // Log for debugging (don't handle function calls here - use response.function_call_arguments.done)
           console.log(`📋 response.output_item.done - type: ${response.item?.type}, name: ${response.item?.name || 'N/A'}`);
-          if (response.item?.type === 'function_call') {
-            console.log('✅ Function call detected via response.output_item.done');
-            await handleFunctionCall(response.item);
-          }
           break;
 
         // Handle function call arguments done event
