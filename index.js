@@ -488,15 +488,19 @@ wss.on('connection', (ws, _req) => {
           break;
 
         case 'conversation.item.created':
+          // Log all item types to debug function calling
+          console.log(`📋 conversation.item.created - type: ${response.item?.type}, name: ${response.item?.name || 'N/A'}`);
           if (response.item?.type === 'function_call') {
+            console.log('✅ Function call detected via conversation.item.created');
             await handleFunctionCall(response.item);
           }
           break;
 
         // Handle function calls from response.output_item.done (newer API format)
         case 'response.output_item.done':
+          console.log(`📋 response.output_item.done - type: ${response.item?.type}, name: ${response.item?.name || 'N/A'}`);
           if (response.item?.type === 'function_call') {
-            console.log('📞 Function call via response.output_item.done:', response.item.name);
+            console.log('✅ Function call detected via response.output_item.done');
             await handleFunctionCall(response.item);
           }
           break;
@@ -509,6 +513,14 @@ wss.on('connection', (ws, _req) => {
             arguments: response.arguments,
             call_id: response.call_id
           });
+          break;
+
+        case 'session.created':
+          console.log('📡 Session created');
+          break;
+
+        case 'session.updated':
+          console.log('📡 Session updated - tools configured:', response.session?.tools?.length || 0);
           break;
 
         case 'error':
