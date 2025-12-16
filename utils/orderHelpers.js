@@ -317,7 +317,13 @@ function formatMenuForAI(menuItems, restaurant) {
     categories[category]
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach(item => {
-        menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
+        // For items with multiple sizes, add explicit indicator so AI doesn't miss it
+        if (item.variants && item.variants.length > 1) {
+          const sizeNames = item.variants.map(v => v.size).join(' or ');
+          menuText += `- ${item.name} [${item.variants.length} SIZES - MUST ASK: ${sizeNames}]: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
+        } else {
+          menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
+        }
       });
   });
 
