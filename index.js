@@ -628,11 +628,23 @@ wss.on('connection', (ws, _req) => {
             break;
           }
 
-          orderSubmitted = true; // Mark as submitted immediately
           console.log('📦 submit_order function called with:', parsedArgs);
 
-          // Process the order from the structured function call data
-          await processOrderFromFunctionCall(parsedArgs);
+          try {
+            // Process the order from the structured function call data
+            await processOrderFromFunctionCall(parsedArgs);
+
+            // Only mark as submitted AFTER successful processing
+            orderSubmitted = true;
+            console.log('✅ Order successfully submitted');
+          } catch (orderError) {
+            console.error('❌ Failed to process order:', orderError);
+            result = {
+              success: false,
+              message: 'Failed to process order. Please try again.'
+            };
+            break;
+          }
 
           // Calculate ready time
           const readyTimeInfo = calculateOrderReadyTime(restaurant, parsedArgs.order_type === 'delivery');
