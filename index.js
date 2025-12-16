@@ -41,6 +41,7 @@ wss.on('connection', (ws, _req) => {
   let callStartTime = new Date();
   let conversationTranscript = [];
   let orderProcessed = false;
+  let orderSubmitted = false; // Prevent duplicate submit_order calls
   let addressValidated = false;
   let validatedDeliveryAddress = null;
   let addressRequested = false;
@@ -604,6 +605,18 @@ wss.on('connection', (ws, _req) => {
 
       case 'submit_order':
         {
+          // Prevent duplicate order submissions
+          if (orderSubmitted) {
+            console.log('⚠️ submit_order already called - preventing duplicate');
+            result = {
+              success: true,
+              already_submitted: true,
+              message: 'Order was already submitted.'
+            };
+            break;
+          }
+
+          orderSubmitted = true; // Mark as submitted immediately
           console.log('📦 submit_order function called with:', parsedArgs);
 
           // Process the order from the structured function call data
