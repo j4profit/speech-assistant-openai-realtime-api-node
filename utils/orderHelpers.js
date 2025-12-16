@@ -211,12 +211,15 @@ function formatMenuForAI(menuItems, restaurant) {
     console.log('🔍 FIRST ITEM HAS SIZES ARRAY?', Array.isArray(menuItems[0].sizes), 'length:', menuItems[0].sizes?.length);
   }
 
-  // Check specifically for Margherita Pizza
-  const margherita = menuItems.find(item => item.name && item.name.toLowerCase().includes('margherita'));
-  if (margherita) {
-    console.log('*** MARGHERITA FOUND:', JSON.stringify(margherita, null, 2));
+  // Debug: Log any items with multiple sizes to verify size handling
+  const itemsWithMultipleSizes = menuItems.filter(item => item.sizes && Array.isArray(item.sizes) && item.sizes.length > 1);
+  if (itemsWithMultipleSizes.length > 0) {
+    console.log(`🔍 ITEMS WITH MULTIPLE SIZES (${itemsWithMultipleSizes.length} found):`);
+    itemsWithMultipleSizes.forEach(item => {
+      console.log(`  📌 ${item.name}: ${item.sizes.length} sizes ->`, item.sizes.map(s => `${s.size}: $${s.price}`).join(', '));
+    });
   } else {
-    console.log('*** MARGHERITA NOT FOUND in menu items');
+    console.log('🔍 NO ITEMS WITH MULTIPLE SIZES FOUND in raw data');
   }
 
   const categories = {};
@@ -353,10 +356,18 @@ function formatMenuForAI(menuItems, restaurant) {
   // Debug: Log final menu text (first 500 chars)
   console.log('📋 formatMenuForAI - Final menu text preview (first 500 chars):\n', menuText.substring(0, 500));
 
-  // CRITICAL DEBUG: Show the exact Margherita line that will be sent to AI
-  const finalMargheritaLine = menuText.split('\n').find(line => line.toLowerCase().includes('margherita'));
-  console.log('🍕🍕🍕 FINAL MARGHERITA LINE FOR AI:', finalMargheritaLine || 'NOT FOUND');
-  console.log('🍕🍕🍕 Does it show multiple prices?', finalMargheritaLine && finalMargheritaLine.includes(',') ? 'YES - Multiple sizes' : 'NO - Single price only');
+  // CRITICAL DEBUG: Show menu lines that have multiple sizes (comma-separated prices)
+  const multiSizeLines = menuText.split('\n').filter(line => {
+    // Look for lines with size:price patterns like "Small: $15, Large: $25"
+    return line.includes(': $') && line.includes(', ');
+  });
+  console.log('📋 MENU LINES WITH MULTIPLE SIZES:', multiSizeLines.length > 0 ? multiSizeLines : 'NONE FOUND');
+
+  // Also show any lines that have size labels
+  const linesWithSizeLabels = menuText.split('\n').filter(line =>
+    /\b(Small|Medium|Large|Regular|XL|Extra Large):/i.test(line)
+  );
+  console.log('📋 MENU LINES WITH SIZE LABELS:', linesWithSizeLabels.length > 0 ? linesWithSizeLabels : 'NONE FOUND');
 
   return menuText;
 }
