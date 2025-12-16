@@ -452,6 +452,11 @@ wss.on('connection', (ws, _req) => {
     try {
       const response = JSON.parse(data);
 
+      // Debug: Log all event types to diagnose function calling
+      if (response.type && !response.type.includes('audio.delta')) {
+        console.log(`📨 OpenAI event: ${response.type}`, response.type.includes('function') || response.type.includes('tool') ? JSON.stringify(response, null, 2) : '');
+      }
+
       switch (response.type) {
         case 'response.audio.delta':
           if (streamSid && ws.readyState === WebSocket.OPEN) {
@@ -485,6 +490,24 @@ wss.on('connection', (ws, _req) => {
           if (response.item?.type === 'function_call') {
             await handleFunctionCall(response.item);
           }
+          break;
+
+        // Handle function calls from response.output_item.done (newer API format)
+        case 'response.output_item.done':
+          if (response.item?.type === 'function_call') {
+            console.log('📞 Function call via response.output_item.done:', response.item.name);
+            await handleFunctionCall(response.item);
+          }
+          break;
+
+        // Handle function call arguments done event
+        case 'response.function_call_arguments.done':
+          console.log('📞 Function call arguments done:', response.name, response.arguments);
+          await handleFunctionCall({
+            name: response.name,
+            arguments: response.arguments,
+            call_id: response.call_id
+          });
           break;
 
         case 'error':
