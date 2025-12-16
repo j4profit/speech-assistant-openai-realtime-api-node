@@ -166,13 +166,19 @@ wss.on('connection', (ws, _req) => {
 
     const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
-    // DEBUG: Log menu text to verify size handling
-    console.log('=== MENU TEXT DEBUG ===');
-    const pizzaLines = menuText.split('\n').filter(line => line.toLowerCase().includes('pizza'));
-    console.log('Pizza menu lines:', pizzaLines);
-    const margheritaLine = menuText.split('\n').find(line => line.toLowerCase().includes('margherita'));
-    console.log('*** MARGHERITA LINE IN MENU TEXT:', margheritaLine || 'NOT FOUND');
-    console.log('=== END MENU TEXT DEBUG ===');
+    // DEBUG: Log raw menu items structure
+    console.log('🔴 RAW MENU ITEMS COUNT:', restaurant.menu_items?.length);
+    if (restaurant.menu_items?.length > 0) {
+      restaurant.menu_items.forEach((item, i) => {
+        const sizesInfo = item.sizes ? `${item.sizes.length} sizes: ${item.sizes.map(s => `${s.size}=$${s.price}`).join(', ')}` : 'NO SIZES ARRAY';
+        console.log(`🔴 ITEM ${i}: ${item.name} -> ${sizesInfo}`);
+      });
+    }
+
+    // DEBUG: Log final menu text lines with prices
+    const menuLines = menuText.split('\n').filter(line => line.startsWith('- ') && line.includes('$'));
+    console.log('🔴 MENU LINES WITH PRICES:');
+    menuLines.forEach(line => console.log('  ', line));
 
     // Pre-fetch customer address to include in AI instructions (v2.9.13 optimization)
     let prefetchedCustomerAddress = null;

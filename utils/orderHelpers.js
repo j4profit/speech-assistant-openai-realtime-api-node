@@ -278,22 +278,27 @@ function formatMenuForAI(menuItems, restaurant) {
       categories[categoryName] = [];
     }
 
+    // DEBUG: Log ALL items and their variant counts
+    console.log(`🔴 GROUPED ITEM: ${groupedItem.name} has ${groupedItem.variants.length} variant(s)`);
+    if (groupedItem.variants.length > 0) {
+      groupedItem.variants.forEach((v, i) => {
+        console.log(`   variant ${i}: size="${v.size}", price=${v.price}`);
+      });
+    }
+
     // Determine price display based on variants
     let priceDisplay;
     if (groupedItem.variants.length === 1) {
       // Single variant - show simple price WITHOUT size (to avoid AI asking for size)
       const variant = groupedItem.variants[0];
       priceDisplay = `$${variant.price}`;
+      console.log(`🔴 SINGLE VARIANT for ${groupedItem.name}: showing "$${variant.price}"`);
     } else {
       // Multiple variants - show all sizes and prices
       priceDisplay = groupedItem.variants
         .map(v => v.size ? `${v.size}: $${v.price}` : `$${v.price}`)
         .join(', ');
-    }
-
-    // Debug: Log items with multiple sizes to verify price display
-    if (groupedItem.variants.length > 1) {
-      console.log(`📋 MULTI-SIZE ITEM: ${groupedItem.name} -> priceDisplay: "${priceDisplay}"`);
+      console.log(`🔴 MULTIPLE VARIANTS for ${groupedItem.name}: showing "${priceDisplay}"`);
     }
 
     categories[categoryName].push({
