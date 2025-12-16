@@ -166,6 +166,14 @@ wss.on('connection', (ws, _req) => {
 
     const menuText = formatMenuForAI(restaurant.menu_items, restaurant);
 
+    // DEBUG: Log menu text to verify size handling
+    console.log('=== MENU TEXT DEBUG ===');
+    const pizzaLines = menuText.split('\n').filter(line => line.toLowerCase().includes('pizza'));
+    console.log('Pizza menu lines:', pizzaLines);
+    const margheritaLine = menuText.split('\n').find(line => line.toLowerCase().includes('margherita'));
+    console.log('*** MARGHERITA LINE IN MENU TEXT:', margheritaLine || 'NOT FOUND');
+    console.log('=== END MENU TEXT DEBUG ===');
+
     // Pre-fetch customer address to include in AI instructions (v2.9.13 optimization)
     let prefetchedCustomerAddress = null;
     try {
