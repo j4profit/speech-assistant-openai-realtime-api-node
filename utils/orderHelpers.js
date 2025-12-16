@@ -206,7 +206,7 @@ function formatMenuForAI(menuItems, restaurant) {
   // First, group items by category and name to handle size variants
   const groupedItems = {};
   menuItems.forEach(item => {
-    if (!item.available) return;
+    if (item.available === false) return; // Skip explicitly unavailable items
 
     const categoryName = item.category || 'Other';
     const itemKey = `${categoryName}::${item.name}`;
@@ -220,12 +220,24 @@ function formatMenuForAI(menuItems, restaurant) {
       };
     }
 
-    // Add this variant (with or without size)
-    groupedItems[itemKey].variants.push({
-      size: item.size || null,
-      price: item.price,
-      id: item.id
-    });
+    // Handle nested sizes array (from database) OR flat size/price (legacy format)
+    if (item.sizes && Array.isArray(item.sizes)) {
+      // Database format: item has sizes array with multiple variants
+      item.sizes.forEach(sizeVariant => {
+        groupedItems[itemKey].variants.push({
+          size: sizeVariant.size || null,
+          price: sizeVariant.price,
+          id: sizeVariant.id || item.id
+        });
+      });
+    } else {
+      // Legacy flat format: item has single size/price
+      groupedItems[itemKey].variants.push({
+        size: item.size || null,
+        price: item.price,
+        id: item.id
+      });
+    }
   });
 
   // Now format grouped items into categories
