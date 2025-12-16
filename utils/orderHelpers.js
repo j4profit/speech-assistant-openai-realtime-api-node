@@ -202,8 +202,16 @@ function formatMenuForAI(menuItems, restaurant) {
   }
 
   // Debug: Log raw menu items to see their structure
-  console.log('📋 formatMenuForAI - Raw menu items count:', menuItems.length);
-  console.log('📋 formatMenuForAI - First 3 items structure:', JSON.stringify(menuItems.slice(0, 3), null, 2));
+  console.log('=== formatMenuForAI DEBUG START ===');
+  console.log('Raw menu items count:', menuItems.length);
+
+  // Check specifically for Margherita Pizza
+  const margherita = menuItems.find(item => item.name && item.name.toLowerCase().includes('margherita'));
+  if (margherita) {
+    console.log('*** MARGHERITA FOUND:', JSON.stringify(margherita, null, 2));
+  } else {
+    console.log('*** MARGHERITA NOT FOUND in menu items');
+  }
 
   const categories = {};
 
