@@ -542,6 +542,19 @@ wss.on('connection', (ws, _req) => {
     switch (functionName) {
       case 'search_recent_orders':
         const phoneToSearch = parsedArgs.phone_number || customerPhone;
+        console.log('🔍 search_recent_orders - checking params:', {
+          phoneToSearch,
+          restaurantId: restaurant?.id,
+          hasRestaurant: !!restaurant
+        });
+        if (!phoneToSearch || !restaurant?.id) {
+          console.error('❌ search_recent_orders - missing required params:', {
+            phoneToSearch: phoneToSearch || 'MISSING',
+            restaurantId: restaurant?.id || 'MISSING'
+          });
+          result = { orders: [], count: 0, error: 'Missing required parameters' };
+          break;
+        }
         recentOrders = await database.searchRecentOrders(phoneToSearch, restaurant.id);
         result = { orders: recentOrders, count: recentOrders.length };
         break;

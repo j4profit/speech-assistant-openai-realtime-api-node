@@ -247,10 +247,8 @@ function formatMenuForAI(menuItems, restaurant) {
   // Debug: Log grouped items to see variant counts
   console.log('📋 formatMenuForAI - Grouped items with variants:');
   Object.entries(groupedItems).forEach(([key, item]) => {
-    if (item.variants.length > 1) {
-      console.log(`  📌 ${item.name}: ${item.variants.length} variants ->`,
-        item.variants.map(v => `${v.size || 'no-size'}: $${v.price}`).join(', '));
-    }
+    console.log(`  📌 ${item.name}: ${item.variants.length} variant(s) ->`,
+      item.variants.map(v => `${v.size || 'no-size'}: $${v.price}`).join(', '));
   });
 
   // Now format grouped items into categories
@@ -271,6 +269,11 @@ function formatMenuForAI(menuItems, restaurant) {
       priceDisplay = groupedItem.variants
         .map(v => v.size ? `${v.size}: $${v.price}` : `$${v.price}`)
         .join(', ');
+    }
+
+    // Debug: Log items with multiple sizes to verify price display
+    if (groupedItem.variants.length > 1) {
+      console.log(`📋 MULTI-SIZE ITEM: ${groupedItem.name} -> priceDisplay: "${priceDisplay}"`);
     }
 
     categories[categoryName].push({
