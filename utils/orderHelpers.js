@@ -235,7 +235,9 @@ function formatMenuForAI(menuItems, restaurant) {
     // Handle nested sizes array (from database) OR flat size/price (legacy format)
     if (item.sizes && Array.isArray(item.sizes)) {
       // Database format: item has sizes array with multiple variants
-      item.sizes.forEach(sizeVariant => {
+      console.log(`🔍 Processing sizes array for ${item.name}: ${item.sizes.length} sizes found`);
+      item.sizes.forEach((sizeVariant, idx) => {
+        console.log(`  ➡️ Adding size ${idx + 1}: ${sizeVariant.size} @ $${sizeVariant.price}`);
         groupedItems[itemKey].variants.push({
           size: sizeVariant.size || null,
           price: sizeVariant.price,
@@ -244,6 +246,7 @@ function formatMenuForAI(menuItems, restaurant) {
       });
     } else {
       // Legacy flat format: item has single size/price
+      console.log(`🔍 Processing legacy format for ${item.name}: size=${item.size}, price=${item.price}`);
       groupedItems[itemKey].variants.push({
         size: item.size || null,
         price: item.price,
