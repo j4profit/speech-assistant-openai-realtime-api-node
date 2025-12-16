@@ -109,6 +109,15 @@ serve(async (req) => {
     console.log('About to return restaurant data with name:', restaurant.name);
     console.log('Optimized menu items count:', optimizedMenuItems.length);
 
+    // Debug: Log items with multiple sizes
+    console.log('📋 Items with multiple sizes:');
+    optimizedMenuItems.forEach((item: any) => {
+      if (item.sizes && item.sizes.length > 1) {
+        console.log(`  📌 ${item.name}: ${item.sizes.length} sizes ->`,
+          item.sizes.map((s: any) => `${s.size}: $${s.price}`).join(', '));
+      }
+    });
+
     // Return the restaurant data
     return new Response(JSON.stringify({
       data: restaurant
