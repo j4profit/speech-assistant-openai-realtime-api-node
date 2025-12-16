@@ -20,7 +20,7 @@ const config = {
   // OpenAI Configuration
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: 'gpt-4o-mini-realtime-preview-2024-12-17', // Primary model
+    model: 'gpt-realtime-mini-2025-12-15', // Primary model
     fallbackModel: 'gpt-realtime-mini', // Backup if primary fails
     websocketUrl: 'wss://api.openai.com/v1/realtime'
   },

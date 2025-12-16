@@ -244,7 +244,7 @@ Configure Twilio phone number webhook to point to `{BASE_URL}/voice`.
 - Perform expensive operations (DB lookups, API calls) asynchronously after responding
 
 ### OpenAI Realtime API
-- Model: `gpt-4o-mini-realtime-preview-2024-12-17`
+- Model: `gpt-realtime-mini-2025-12-15`
 - WebSocket URL: `wss://api.openai.com/v1/realtime`
 - Maximum response tokens: 400 (configured in session)
 - Temperature: 0.6
