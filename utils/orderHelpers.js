@@ -205,6 +205,12 @@ function formatMenuForAI(menuItems, restaurant) {
   console.log('=== formatMenuForAI DEBUG START ===');
   console.log('Raw menu items count:', menuItems.length);
 
+  // CRITICAL DEBUG: Log first item structure to see if sizes array exists
+  if (menuItems.length > 0) {
+    console.log('🔍 FIRST ITEM STRUCTURE:', JSON.stringify(menuItems[0], null, 2));
+    console.log('🔍 FIRST ITEM HAS SIZES ARRAY?', Array.isArray(menuItems[0].sizes), 'length:', menuItems[0].sizes?.length);
+  }
+
   // Check specifically for Margherita Pizza
   const margherita = menuItems.find(item => item.name && item.name.toLowerCase().includes('margherita'));
   if (margherita) {
@@ -346,6 +352,11 @@ function formatMenuForAI(menuItems, restaurant) {
 
   // Debug: Log final menu text (first 500 chars)
   console.log('📋 formatMenuForAI - Final menu text preview (first 500 chars):\n', menuText.substring(0, 500));
+
+  // CRITICAL DEBUG: Show the exact Margherita line that will be sent to AI
+  const finalMargheritaLine = menuText.split('\n').find(line => line.toLowerCase().includes('margherita'));
+  console.log('🍕🍕🍕 FINAL MARGHERITA LINE FOR AI:', finalMargheritaLine || 'NOT FOUND');
+  console.log('🍕🍕🍕 Does it show multiple prices?', finalMargheritaLine && finalMargheritaLine.includes(',') ? 'YES - Multiple sizes' : 'NO - Single price only');
 
   return menuText;
 }
