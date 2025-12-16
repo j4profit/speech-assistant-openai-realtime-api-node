@@ -201,6 +201,10 @@ function formatMenuForAI(menuItems, restaurant) {
     return "No menu items available.";
   }
 
+  // Debug: Log raw menu items to see their structure
+  console.log('📋 formatMenuForAI - Raw menu items count:', menuItems.length);
+  console.log('📋 formatMenuForAI - First 3 items structure:', JSON.stringify(menuItems.slice(0, 3), null, 2));
+
   const categories = {};
 
   // First, group items by category and name to handle size variants
@@ -237,6 +241,15 @@ function formatMenuForAI(menuItems, restaurant) {
         price: item.price,
         id: item.id
       });
+    }
+  });
+
+  // Debug: Log grouped items to see variant counts
+  console.log('📋 formatMenuForAI - Grouped items with variants:');
+  Object.entries(groupedItems).forEach(([key, item]) => {
+    if (item.variants.length > 1) {
+      console.log(`  📌 ${item.name}: ${item.variants.length} variants ->`,
+        item.variants.map(v => `${v.size || 'no-size'}: $${v.price}`).join(', '));
     }
   });
 
@@ -316,6 +329,9 @@ function formatMenuForAI(menuItems, restaurant) {
       menuText += '- Pickup Only\n';
     }
   }
+
+  // Debug: Log final menu text (first 500 chars)
+  console.log('📋 formatMenuForAI - Final menu text preview (first 500 chars):\n', menuText.substring(0, 500));
 
   return menuText;
 }
