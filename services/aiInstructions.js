@@ -382,70 +382,63 @@ After customer confirms the order (for pickup) or provides payment method (for d
 - NEVER round prices or make up numbers - use the EXACT dollar amount from the menu
 - Example: If menu shows "Margherita Pizza: Small: $25" → price must be exactly 25, not 25.00, not 24.99, not 30
 
-🚨🚨🚨 ADD-ON/TOPPING PRICING FROM DESCRIPTIONS - CRITICAL:
-- Menu items with add-ons show "🚨 ADD-ON PRICING (MUST ADD TO BASE PRICE)" section
-- EACH add-on requested by customer = ADD that price to the base item price
-- Example description: "2.99 for extra cheese and 3.99 for extra items like onions, peppers, steak"
-  → "extra cheese" = +$2.99
-  → "peppers" (an extra item) = +$3.99
-  → "onions" (an extra item) = +$3.99
-  → "steak" (an extra item) = +$3.99
+🚨🚨🚨 PRICED ADD-ONS FROM MENU - CRITICAL FOR ALL RESTAURANTS:
+- Menu items may show "🚨🚨🚨 ADD-ON PRICES" section listing priced modifications
+- ANY item listed with a price (e.g., "BACON = +$2.50", "EXTRA SAUCE = +$1.00") is a PRICED ADD-ON
+- When customer requests ANY priced add-on, you MUST add that price to the item
 
 🧮 PRICING CALCULATION FORMULA (FOLLOW EXACTLY):
 1. Start with BASE PRICE (from menu for the size ordered)
-2. ADD each add-on price (from description) for EACH add-on customer requests
-3. Calculate SUBTOTAL = base + all add-ons
-4. Calculate TAX = subtotal × tax_rate (e.g., 0.08 for 8%)
+2. IDENTIFY all customer-requested items that match priced add-ons in the menu
+3. ADD each matching add-on price to get SUBTOTAL = base + all add-ons
+4. Calculate TAX = subtotal × tax_rate
 5. FINAL TOTAL = subtotal + tax
 
-🚨🚨🚨 CRITICAL - TWO DIFFERENT NUMBERS:
+🚨🚨🚨 TWO DIFFERENT NUMBERS - CRITICAL:
 • SUBMIT to system (price field): SUBTOTAL only (NO TAX) - system adds tax automatically
 • SAY to customer: FINAL TOTAL (with tax included)
 
-📝 CONCRETE EXAMPLE - Customer orders "Large Margherita with extra cheese and peppers":
-- Base price (Large): $50.00
-- Extra cheese: +$2.99
-- Peppers: +$3.99
-- SUBTOTAL: $50.00 + $2.99 + $3.99 = $56.98 ← SUBMIT THIS IN PRICE FIELD
-- TAX (8%): $56.98 × 0.08 = $4.56
-- FINAL TOTAL: $56.98 + $4.56 = $61.54 ← SAY THIS TO CUSTOMER
-
-❌❌❌ WRONG (causes double-tax):
-- Submitting $61.54 in price field → System adds tax again → $66.46 total (WRONG!)
-- Submitting $57.97 in price field → System adds tax again → $62.61 total (WRONG!)
-
-✅✅✅ CORRECT:
-- Submit price: $56.98 (subtotal, no tax)
-- Say to customer: "$61.54 including tax"
+📝 GENERIC EXAMPLE:
+- Customer orders: "[Size] [Item] with [Add-on A] and [Add-on B], cooked [preference]"
+- Base price: $X (from menu)
+- Add-on A: +$Y (from menu's add-on list)
+- Add-on B: +$Z (from menu's add-on list)
+- SUBTOTAL: $X + $Y + $Z ← SUBMIT THIS IN PRICE FIELD
+- TAX: subtotal × tax_rate
+- FINAL TOTAL: subtotal + tax ← SAY THIS TO CUSTOMER
 
 ⚠️ COMMON MISTAKES TO AVOID:
 - ❌ Including tax in the price field → DOUBLE TAX ERROR
-- ❌ Forgetting to add peppers/toppings → WRONG SUBTOTAL
-- ❌ Quoting pre-tax total to customer → CUSTOMER SURPRISE
+- ❌ Forgetting to add priced add-ons → WRONG SUBTOTAL
+- ❌ Putting priced add-ons in special_instructions instead of item price → WRONG TICKET
 
-🚨🚨🚨 ADD-ONS GO IN ITEM NAME AND PRICE - NOT IN SPECIAL_INSTRUCTIONS:
-- ADD-ONS (extra cheese, peppers, etc.) → include in item NAME and ADD to item PRICE
-- COOKING PREFERENCES (well done, cut in pieces) → put in special_instructions
-- Example: Customer orders "Large Margherita with extra cheese and peppers, well done"
-  → name: "Large Margherita Pizza with extra cheese and peppers"
-  → price: 56.98 (base $50 + cheese $2.99 + peppers $3.99)
-  → special_instructions: "well done"
+🚨🚨🚨 WHAT GOES WHERE - CRITICAL DISTINCTION:
 
-EXAMPLE submit_order function call FOR PICKUP (NO payment_method field!):
+PRICED ADD-ONS (items with $ in menu's add-on list):
+→ Include in item NAME (e.g., "Burger with bacon and cheese")
+→ ADD price to item PRICE field
+→ Examples: extra toppings, premium ingredients, size upgrades, protein additions
+
+NON-PRICED PREFERENCES (no price listed):
+→ Put in special_instructions field only
+→ Examples: cooking temperature (well done, medium rare), cut style (sliced, diced),
+  portion requests (cut in X pieces), allergies, sauce on side, no salt, etc.
+
+EXAMPLE submit_order - CORRECT:
 {
-  "customer_name": "Hank",
+  "customer_name": "Customer",
   "order_type": "pickup",
   "delivery_address": "N/A",
   "items": [
-    {"name": "Large Margherita Pizza with extra cheese and peppers", "quantity": 1, "price": 56.98}
+    {"name": "[Item] with [priced add-on A] and [priced add-on B]", "quantity": 1, "price": [base + addons]}
   ],
-  "special_instructions": "well done, cut in 14 pieces"
+  "special_instructions": "[non-priced preferences only]"
 }
 
-❌ WRONG - DO NOT DO THIS:
+❌ WRONG - NEVER DO THIS:
 {
-  "items": [{"name": "Large Margherita Pizza", "quantity": 1, "price": 50.00}],
-  "special_instructions": "extra cheese, peppers, well done"  ← WRONG! Add-ons in wrong place!
+  "items": [{"name": "[Item]", "quantity": 1, "price": [base only]}],
+  "special_instructions": "[priced add-ons], [preferences]"  ← WRONG! Priced add-ons must be in name AND price!
 }
 
 **STEP 2 - SPOKEN CLOSING MESSAGE (THIS IS WHAT YOU ACTUALLY SAY):**
