@@ -242,6 +242,13 @@ wss.on('connection', (ws, _req) => {
       console.log('📝 AI Instructions length:', instructions.length, 'characters');
       console.log('📋 Menu text being sent to AI:\n', menuText);
 
+      // Debug: Log call forwarding configuration
+      console.log('📞 Call Forwarding Config:', {
+        enabled: restaurant.call_forwarding_enabled,
+        reasons: restaurant.call_forwarding_reasons,
+        number: restaurant.call_forwarding_number ? 'configured' : 'not configured'
+      });
+
       const sessionUpdate = {
         type: 'session.update',
         session: {
