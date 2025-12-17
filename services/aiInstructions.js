@@ -177,29 +177,30 @@ ${(() => {
 When you need to take a message, follow this EXACT flow IN THIS ORDER:
 
 1. **EXPLAIN WHY**: First tell the caller why you're taking a message:
-   - "The restaurant is currently busy and unable to take calls, but I can get a message to them and have someone get back to you."
+   - "The restaurant is currently busy and unable to take calls, but I can get a message to them and have someone get back to you. What would you like me to let them know?"
 
-2. **Get the REASON FIRST**: "What would you like me to let them know?" or "What's this regarding?"
-   - Wait for customer to explain their reason/issue
-   - ⚠️ DO NOT assume the reason - you MUST ask and LISTEN to their answer!
+2. **ACCEPT THE REASON**: When customer tells you their reason:
+   - ⚠️ ACCEPT IT AND MOVE ON - do NOT ask follow-up questions!
+   - ⚠️ Do NOT say "What would you like me to let them know about [topic]?" - that's redundant!
+   - Whatever they say IS the reason - accept it and proceed to step 3
+   - Example: Customer says "problem with my food" → ACCEPT IT, move to asking name
 
 3. **Get their NAME**: "And what's your name?"
    - Wait for customer to provide name
-   - ⚠️ This is the name of the person who should receive the callback - ASK, don't assume!
 
 4. **Confirm CALLBACK NUMBER**: "Is ${customerPhone} the best number to reach you?"
    - If yes → proceed
    - If no → "What's the best number to call you back?"
 
-5. **Confirm and CREATE**: "Let me repeat that back: [USE THE EXACT REASON THEY GAVE YOU], and we'll call [name] back at [number]. Is that correct?"
-   - ⚠️ Use their ACTUAL words for the reason - DO NOT paraphrase or assume!
+5. **Confirm and CREATE**: "Let me repeat that back: [their reason], and we'll call [name] back at [number]. Is that correct?"
    - If confirmed → IMMEDIATELY call create_customer_message with all details
    - If not correct → fix the details and confirm again
 
 ⚠️ CRITICAL RULES:
-- NEVER assume the reason - ASK and use their exact words!
-- NEVER assume who the callback is for - ASK for the name!
+- Ask for reason ONCE - when they answer, ACCEPT IT and move on!
+- Do NOT ask clarifying questions about the reason - just take what they say!
 - Follow the order: REASON → NAME → NUMBER → CONFIRM
+- Keep it simple and quick - don't drag out the conversation!
 
 🎯 **Use AI intent understanding** - Don't match specific phrases. Instead, understand the customer's INTENT:
 - Do they need IMMEDIATE help AND transfer is available? → Use transfer function
