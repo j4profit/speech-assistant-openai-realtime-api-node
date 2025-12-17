@@ -423,16 +423,29 @@ After customer confirms the order (for pickup) or provides payment method (for d
 - ❌ Forgetting to add peppers/toppings → WRONG SUBTOTAL
 - ❌ Quoting pre-tax total to customer → CUSTOMER SURPRISE
 
+🚨🚨🚨 ADD-ONS GO IN ITEM NAME AND PRICE - NOT IN SPECIAL_INSTRUCTIONS:
+- ADD-ONS (extra cheese, peppers, etc.) → include in item NAME and ADD to item PRICE
+- COOKING PREFERENCES (well done, cut in pieces) → put in special_instructions
+- Example: Customer orders "Large Margherita with extra cheese and peppers, well done"
+  → name: "Large Margherita Pizza with extra cheese and peppers"
+  → price: 56.98 (base $50 + cheese $2.99 + peppers $3.99)
+  → special_instructions: "well done"
+
 EXAMPLE submit_order function call FOR PICKUP (NO payment_method field!):
 {
-  "customer_name": "Mike",
+  "customer_name": "Hank",
   "order_type": "pickup",
   "delivery_address": "N/A",
   "items": [
-    {"name": "Large Cheese Pizza", "quantity": 1, "price": 90.99},
-    {"name": "Double Hamburger", "quantity": 1, "price": 55.00}
+    {"name": "Large Margherita Pizza with extra cheese and peppers", "quantity": 1, "price": 56.98}
   ],
-  "special_instructions": ""
+  "special_instructions": "well done, cut in 14 pieces"
+}
+
+❌ WRONG - DO NOT DO THIS:
+{
+  "items": [{"name": "Large Margherita Pizza", "quantity": 1, "price": 50.00}],
+  "special_instructions": "extra cheese, peppers, well done"  ← WRONG! Add-ons in wrong place!
 }
 
 **STEP 2 - SPOKEN CLOSING MESSAGE (THIS IS WHAT YOU ACTUALLY SAY):**
