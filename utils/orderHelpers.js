@@ -314,17 +314,31 @@ function formatMenuForAI(menuItems, restaurant) {
         const priceMatch = segment.match(/\$?(\d+(?:\.\d{2})?)\s+for\s+(.+?)(?:\.|$)/i);
         if (priceMatch) {
           const price = priceMatch[1];
-          const description = priceMatch[2].trim();
-          extractedAddOns.push(`$${price} for ${description}`);
+          let description = priceMatch[2].trim();
+
+          // Expand "like X, Y, Z" patterns into individual items
+          // e.g., "extra items like onions, peppers, steak" -> list each separately
+          const likeMatch = description.match(/(.+?)\s+like\s+(.+)/i);
+          if (likeMatch) {
+            const itemList = likeMatch[2].split(/,\s*/);
+            itemList.forEach(item => {
+              const cleanItem = item.replace(/\s*etc\.?\s*/gi, '').trim();
+              if (cleanItem) {
+                extractedAddOns.push(`${cleanItem.toUpperCase()} = +$${price}`);
+              }
+            });
+          } else {
+            extractedAddOns.push(`${description.toUpperCase()} = +$${price}`);
+          }
         }
       });
 
       if (extractedAddOns.length > 0) {
-        addOnPricing = `\n  🚨 ADD-ON PRICING (MUST ADD TO BASE PRICE):`;
+        addOnPricing = `\n  🚨🚨🚨 ADD-ON PRICES - ADD EACH ONE CUSTOMER ORDERS:`;
         extractedAddOns.forEach(addon => {
           addOnPricing += `\n    • ${addon}`;
         });
-        addOnPricing += `\n  ⚠️ CALCULATE: base_price + add-on_prices + tax = final_total`;
+        addOnPricing += `\n  ⚠️ FORMULA: (base + ALL add-ons) × 1.08 = total`;
       }
     }
 
