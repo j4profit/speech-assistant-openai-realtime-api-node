@@ -301,9 +301,20 @@ function formatMenuForAI(menuItems, restaurant) {
       console.log(`🔴 MULTIPLE VARIANTS for ${groupedItem.name}: showing "${priceDisplay}"`);
     }
 
+    // Check if description contains add-on pricing (e.g., "$2.99 for extra cheese")
+    let addOnPricing = '';
+    if (groupedItem.description) {
+      // Look for price patterns like "2.99 for extra cheese" or "$3.99 for extra items"
+      const priceMatches = groupedItem.description.match(/\$?\d+\.?\d*\s*(for|per)\s+[^,.$]+/gi);
+      if (priceMatches && priceMatches.length > 0) {
+        addOnPricing = `\n  ⚠️ ADD-ON PRICES: ${priceMatches.join(', ')} - ADD THESE TO ITEM PRICE WHEN CUSTOMER REQUESTS THEM!`;
+      }
+    }
+
     categories[categoryName].push({
       name: groupedItem.name,
       description: groupedItem.description,
+      addOnPricing: addOnPricing,
       priceDisplay: priceDisplay,
       variants: groupedItem.variants
     });
@@ -320,10 +331,15 @@ function formatMenuForAI(menuItems, restaurant) {
         // For items with multiple sizes, add explicit indicator so AI doesn't miss it
         if (item.variants && item.variants.length > 1) {
           const sizeNames = item.variants.map(v => v.size).join(' or ');
-          menuText += `- ${item.name} [${item.variants.length} SIZES - MUST ASK: ${sizeNames}]: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
+          menuText += `- ${item.name} [${item.variants.length} SIZES - MUST ASK: ${sizeNames}]: ${item.description || 'No description'} - ${item.priceDisplay}`;
         } else {
-          menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}\n`;
+          menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}`;
         }
+        // Add prominent add-on pricing warning if present
+        if (item.addOnPricing) {
+          menuText += item.addOnPricing;
+        }
+        menuText += '\n';
       });
   });
 
