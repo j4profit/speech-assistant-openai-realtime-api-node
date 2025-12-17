@@ -37,6 +37,22 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
 }
 
 /**
+ * Format phone number for speaking (e.g., "+14435061908" -> "443-506-1908")
+ * @param {string} phone - Phone number in E.164 format
+ * @returns {string} Formatted phone number for speaking
+ */
+function formatPhoneForSpeaking(phone) {
+  if (!phone) return 'unknown number';
+  // Remove +1 prefix and format as XXX-XXX-XXXX
+  const digits = phone.replace(/\D/g, '');
+  const nationalNumber = digits.startsWith('1') ? digits.slice(1) : digits;
+  if (nationalNumber.length === 10) {
+    return `${nationalNumber.slice(0, 3)}-${nationalNumber.slice(3, 6)}-${nationalNumber.slice(6)}`;
+  }
+  return phone; // Return original if can't format
+}
+
+/**
  * Generate AI instructions for restaurant ordering system
  * @param {Object} restaurant - Restaurant object
  * @param {string} customerPhone - Customer's phone number (caller ID)
@@ -45,6 +61,9 @@ function shouldCreateCustomerMessage(customerMessage, conversationHistory) {
  * @returns {string} AI instructions
  */
 function generateAIInstructions(restaurant, customerPhone, menuText, prefetchedAddress = null) {
+  // Format phone number for speaking (removes +1, formats as XXX-XXX-XXXX)
+  const formattedPhone = formatPhoneForSpeaking(customerPhone);
+
   // Only include saved address info if delivery is enabled for this restaurant
   const savedAddressInfo = restaurant.delivery_enabled
     ? (prefetchedAddress
@@ -188,7 +207,7 @@ When you need to take a message, follow this EXACT flow IN THIS ORDER:
 3. **Get their NAME**: "And what's your name?"
    - Wait for customer to provide name
 
-4. **Confirm CALLBACK NUMBER**: "Is ${customerPhone} the best number to reach you?"
+4. **Confirm CALLBACK NUMBER**: "Is ${formattedPhone} the best number to reach you?"
    - If yes → proceed
    - If no → "What's the best number to call you back?"
 
