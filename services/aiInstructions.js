@@ -144,7 +144,7 @@ ${restaurant.delivery_enabled ? `EVERY caller gets this exact sequence:
 3. ONLY after they answer pickup/delivery, IMMEDIATELY respond with: "Great! May I have your name for the order?"
 4. After getting name, IMMEDIATELY move to the next step based on order type` : `🚨 PICKUP ONLY MODE - DELIVERY IS NOT AVAILABLE 🚨
 This restaurant ONLY offers PICKUP orders. NEVER mention or offer delivery.
-1. Greeting (PICKUP ONLY): "Hello! Thank you for calling ${restaurant.name}. What can I get you for pickup? May I have your name for the order?"
+1. Greeting (PICKUP ONLY): "Thank you for calling ${restaurant.name}, can I get a name for your pickup order?"
 2. After getting name, ask: "What would you like to order?"
 3. Take the order - NO delivery address needed, NO payment method question needed
 
