@@ -382,6 +382,17 @@ After customer confirms the order (for pickup) or provides payment method (for d
 - NEVER round prices or make up numbers - use the EXACT dollar amount from the menu
 - Example: If menu shows "Margherita Pizza: Small: $25" → price must be exactly 25, not 25.00, not 24.99, not 30
 
+🚨🚨🚨 ADD-ON/TOPPING PRICING FROM DESCRIPTIONS - CRITICAL:
+- Some menu items have ADD-ON PRICES listed in their DESCRIPTION field
+- Example: Description says "2.99 for extra cheese and 3.99 for extra items like onions, peppers, steak"
+- When customer requests add-ons (extra cheese, toppings, etc.), you MUST:
+  1. Look at the item's DESCRIPTION for add-on pricing
+  2. ADD those prices to the base item price
+  3. Include the add-on cost in the price field when submitting the order
+- Example: Large Margherita ($50) + Extra Cheese ($2.99 from description) = submit price as $52.99
+- ALWAYS check item descriptions for add-on pricing before calculating totals
+- If description mentions "$X.XX for extra cheese" and customer wants extra cheese → ADD $X.XX to the item price
+
 EXAMPLE submit_order function call FOR PICKUP (NO payment_method field!):
 {
   "customer_name": "Mike",
