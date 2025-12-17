@@ -463,6 +463,21 @@ wss.on('connection', (ws, _req) => {
           },
           required: ["customer_name", "order_type", "items"]
         }
+      },
+      {
+        type: "function",
+        name: "end_call",
+        description: "End the call gracefully. Use ONLY after saying goodbye when: (1) customer confirms they have no more questions after a message was taken, or (2) customer explicitly wants to end the call without ordering.",
+        parameters: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              description: "Brief reason for ending call (e.g., 'message_complete_no_more_questions', 'customer_ended_call')"
+            }
+          },
+          required: ["reason"]
+        }
       }
     ];
   }
@@ -672,12 +687,8 @@ wss.on('connection', (ws, _req) => {
           });
           result = { success: !!messageResult, message_id: messageResult?.id };
 
-          // Schedule hangup after 8 seconds to allow AI to finish speaking confirmation
           if (messageResult) {
-            console.log('📝 Message created successfully, scheduling call end');
-            hangupTimer = setTimeout(async () => {
-              await initiateHangup('message_completed');
-            }, 8000);
+            console.log('📝 Message created successfully - AI will ask if anything else needed');
           }
         } else {
           result = { success: false, reason: 'Message intent not suitable for storage' };
@@ -849,6 +860,20 @@ wss.on('connection', (ws, _req) => {
               }
             }
           }, 3000);
+        }
+        break;
+
+      case 'end_call':
+        {
+          const reason = parsedArgs.reason || 'conversation_complete';
+          console.log(`📞 end_call function called with reason: ${reason}`);
+
+          result = { success: true, message: 'Call ending' };
+
+          // End the call immediately (no delay needed - AI has already said goodbye)
+          setTimeout(async () => {
+            await initiateHangup(reason);
+          }, 1000); // 1 second delay to ensure goodbye is spoken
         }
         break;
     }
