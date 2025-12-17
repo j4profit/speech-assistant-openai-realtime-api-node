@@ -180,20 +180,18 @@ wss.on('connection', (ws, _req) => {
     console.log('🔴 MENU LINES WITH PRICES:');
     menuLines.forEach(line => console.log('  ', line));
 
-    // Pre-fetch customer address in parallel with OpenAI connection (v2.9.14 optimization)
+    // Pre-fetch customer address to include in AI instructions (v2.9.13 optimization)
     let prefetchedCustomerAddress = null;
-    const addressPromise = database.getCustomerAddress(customerPhone, restaurant.id)
-      .then(address => {
-        prefetchedCustomerAddress = address;
-        if (address) {
-          console.log('✅ Pre-fetched customer address:', address.delivery_address);
-        } else {
-          console.log('ℹ️ No saved customer address found during pre-fetch');
-        }
-      })
-      .catch(error => {
-        console.error('⚠️ Error pre-fetching customer address:', error.message);
-      });
+    try {
+      prefetchedCustomerAddress = await database.getCustomerAddress(customerPhone, restaurant.id);
+      if (prefetchedCustomerAddress) {
+        console.log('✅ Pre-fetched customer address:', prefetchedCustomerAddress.delivery_address);
+      } else {
+        console.log('ℹ️ No saved customer address found during pre-fetch');
+      }
+    } catch (error) {
+      console.error('⚠️ Error pre-fetching customer address:', error.message);
+    }
 
     console.log(`Connecting to OpenAI Realtime API with model: ${currentModel}...`);
 
@@ -207,9 +205,6 @@ wss.on('connection', (ws, _req) => {
         handshakeTimeout: 5000,
         maxPayload: 100 * 1024 * 1024
       });
-
-      // Wait for address fetch to complete (should be done by now since WS handshake takes time)
-      await addressPromise;
 
       console.log(`WebSocket created successfully with model: ${currentModel}`);
 
