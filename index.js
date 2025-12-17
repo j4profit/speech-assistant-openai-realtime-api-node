@@ -57,6 +57,11 @@ wss.on('connection', (ws, _req) => {
   let currentModel = config.openai.model; // Track which model is being used
   let modelRetryAttempted = false; // Prevent infinite retry loops
 
+  // Adaptive VAD: Track AI responses to detect background noise issues
+  let aiResponseTimestamps = []; // Timestamps of recent AI responses
+  let vadEagerness = 'high'; // Current VAD eagerness setting
+  let vadAdjusted = false; // Whether we've already adjusted VAD (only do once per call)
+
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
     if (callFinalized) {
@@ -490,6 +495,43 @@ wss.on('connection', (ws, _req) => {
             speaker: 'AI',
             text: response.transcript
           });
+
+          // Adaptive VAD: Track response timestamps and detect rapid-fire responses
+          // If AI responds 3+ times within 10 seconds, background noise may be triggering
+          if (!vadAdjusted && vadEagerness === 'high') {
+            const now = Date.now();
+            aiResponseTimestamps.push(now);
+
+            // Keep only timestamps from last 10 seconds
+            const tenSecondsAgo = now - 10000;
+            aiResponseTimestamps = aiResponseTimestamps.filter(t => t > tenSecondsAgo);
+
+            // If 3+ responses in 10 seconds, switch to medium eagerness
+            if (aiResponseTimestamps.length >= 3) {
+              console.log('🔊 ADAPTIVE VAD: Detected rapid AI responses - likely background noise');
+              console.log(`   ${aiResponseTimestamps.length} responses in last 10 seconds`);
+              console.log('   Switching semantic_vad eagerness from "high" to "medium"');
+
+              vadEagerness = 'medium';
+              vadAdjusted = true;
+
+              // Send session update to change VAD eagerness
+              if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify({
+                  type: 'session.update',
+                  session: {
+                    turn_detection: {
+                      type: 'semantic_vad',
+                      eagerness: 'medium',
+                      create_response: true,
+                      interrupt_response: true
+                    }
+                  }
+                }));
+                console.log('   ✅ Session updated with medium eagerness');
+              }
+            }
+          }
           break;
 
         case 'input_audio_buffer.speech_started':
