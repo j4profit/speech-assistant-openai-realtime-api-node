@@ -247,7 +247,7 @@ wss.on('connection', (ws, _req) => {
           output_audio_format: 'g711_ulaw',
           turn_detection: {
             type: 'semantic_vad',
-            eagerness: 'medium',
+            eagerness: 'high',
             create_response: true,
             interrupt_response: true
           },
