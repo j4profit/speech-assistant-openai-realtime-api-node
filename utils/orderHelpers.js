@@ -304,10 +304,27 @@ function formatMenuForAI(menuItems, restaurant) {
     // Check if description contains add-on pricing (e.g., "$2.99 for extra cheese")
     let addOnPricing = '';
     if (groupedItem.description) {
-      // Look for price patterns like "2.99 for extra cheese" or "$3.99 for extra items"
-      const priceMatches = groupedItem.description.match(/\$?\d+\.?\d*\s*(for|per)\s+[^,.$]+/gi);
-      if (priceMatches && priceMatches.length > 0) {
-        addOnPricing = `\n  ⚠️ ADD-ON PRICES: ${priceMatches.join(', ')} - ADD THESE TO ITEM PRICE WHEN CUSTOMER REQUESTS THEM!`;
+      // Split description by " and " when followed by a number to handle multiple add-ons
+      // Example: "2.99 for extra cheese and 3.99 for extra items" -> ["2.99 for extra cheese", "3.99 for extra items"]
+      const addOnSegments = groupedItem.description.split(/\s+and\s+(?=\$?\d)/i);
+      const extractedAddOns = [];
+
+      addOnSegments.forEach(segment => {
+        // Match price pattern: $X.XX or X.XX followed by "for" and description
+        const priceMatch = segment.match(/\$?(\d+(?:\.\d{2})?)\s+for\s+(.+?)(?:\.|$)/i);
+        if (priceMatch) {
+          const price = priceMatch[1];
+          const description = priceMatch[2].trim();
+          extractedAddOns.push(`$${price} for ${description}`);
+        }
+      });
+
+      if (extractedAddOns.length > 0) {
+        addOnPricing = `\n  🚨 ADD-ON PRICING (MUST ADD TO BASE PRICE):`;
+        extractedAddOns.forEach(addon => {
+          addOnPricing += `\n    • ${addon}`;
+        });
+        addOnPricing += `\n  ⚠️ CALCULATE: base_price + add-on_prices + tax = final_total`;
       }
     }
 

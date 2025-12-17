@@ -383,15 +383,35 @@ After customer confirms the order (for pickup) or provides payment method (for d
 - Example: If menu shows "Margherita Pizza: Small: $25" → price must be exactly 25, not 25.00, not 24.99, not 30
 
 🚨🚨🚨 ADD-ON/TOPPING PRICING FROM DESCRIPTIONS - CRITICAL:
-- Some menu items have ADD-ON PRICES listed in their DESCRIPTION field
-- Example: Description says "2.99 for extra cheese and 3.99 for extra items like onions, peppers, steak"
-- When customer requests add-ons (extra cheese, toppings, etc.), you MUST:
-  1. Look at the item's DESCRIPTION for add-on pricing
-  2. ADD those prices to the base item price
-  3. Include the add-on cost in the price field when submitting the order
-- Example: Large Margherita ($50) + Extra Cheese ($2.99 from description) = submit price as $52.99
-- ALWAYS check item descriptions for add-on pricing before calculating totals
-- If description mentions "$X.XX for extra cheese" and customer wants extra cheese → ADD $X.XX to the item price
+- Menu items with add-ons show "🚨 ADD-ON PRICING (MUST ADD TO BASE PRICE)" section
+- EACH add-on requested by customer = ADD that price to the base item price
+- Example description: "2.99 for extra cheese and 3.99 for extra items like onions, peppers, steak"
+  → "extra cheese" = +$2.99
+  → "peppers" (an extra item) = +$3.99
+  → "onions" (an extra item) = +$3.99
+  → "steak" (an extra item) = +$3.99
+
+🧮 PRICING CALCULATION FORMULA (FOLLOW EXACTLY):
+1. Start with BASE PRICE (from menu for the size ordered)
+2. ADD each add-on price (from description) for EACH add-on customer requests
+3. Calculate SUBTOTAL = base + all add-ons
+4. Calculate TAX = subtotal × tax_rate (e.g., 0.08 for 8%)
+5. FINAL TOTAL = subtotal + tax
+
+📝 CONCRETE EXAMPLE - Customer orders "Large Margherita with extra cheese and peppers":
+- Base price (Large): $50.00
+- Extra cheese (from description): +$2.99
+- Peppers (extra item from description): +$3.99
+- SUBTOTAL: $50.00 + $2.99 + $3.99 = $56.98
+- TAX (8%): $56.98 × 0.08 = $4.56
+- FINAL TOTAL: $56.98 + $4.56 = $61.54
+- Submit price in items array: 56.98 (subtotal before tax)
+
+⚠️ COMMON MISTAKES TO AVOID:
+- ❌ Forgetting to add peppers/toppings as "extra items" → WRONG
+- ❌ Only adding extra cheese but not other toppings → WRONG
+- ❌ Forgetting to apply tax rate → WRONG
+- ❌ Quoting pre-tax total as final price → WRONG
 
 EXAMPLE submit_order function call FOR PICKUP (NO payment_method field!):
 {
