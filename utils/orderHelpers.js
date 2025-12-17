@@ -430,9 +430,231 @@ function formatMenuForAI(menuItems, restaurant) {
   return menuText;
 }
 
+/**
+ * Extract add-on pricing from a menu item's description
+ * @param {string} description - Item description that may contain add-on pricing
+ * @returns {Object} Map of add-on names (lowercase) to prices
+ */
+function extractAddOnPrices(description) {
+  const addOns = {};
+  if (!description) return addOns;
+
+  // Split description by " and " when followed by a number to handle multiple add-ons
+  const addOnSegments = description.split(/\s+and\s+(?=\$?\d)/i);
+
+  addOnSegments.forEach(segment => {
+    // Match price pattern: $X.XX or X.XX followed by "for" and description
+    const priceMatch = segment.match(/\$?(\d+(?:\.\d{2})?)\s+for\s+(.+?)(?:\.|$)/i);
+    if (priceMatch) {
+      const price = parseFloat(priceMatch[1]);
+      let itemDescription = priceMatch[2].trim().toLowerCase();
+
+      // Expand "like X, Y, Z" patterns into individual items
+      const likeMatch = itemDescription.match(/(.+?)\s+like\s+(.+)/i);
+      if (likeMatch) {
+        const itemList = likeMatch[2].split(/,\s*/);
+        itemList.forEach(item => {
+          const cleanItem = item.replace(/\s*etc\.?\s*/gi, '').trim();
+          if (cleanItem) {
+            addOns[cleanItem] = price;
+          }
+        });
+      } else {
+        // Store the add-on with its price
+        addOns[itemDescription] = price;
+      }
+    }
+  });
+
+  return addOns;
+}
+
+/**
+ * Validate and recalculate item prices based on menu data
+ * This corrects AI arithmetic errors by looking up actual menu prices
+ * @param {Array} items - Items array from AI's submit_order call
+ * @param {Array} menuItems - Menu items from the restaurant
+ * @returns {Object} Validated items with corrected prices and debug info
+ */
+function validateAndRecalculatePrices(items, menuItems) {
+  if (!items || !Array.isArray(items) || !menuItems || !Array.isArray(menuItems)) {
+    console.log('⚠️ Price validation skipped - missing items or menu');
+    return { items, corrections: [], validated: false };
+  }
+
+  console.log('🧮 SERVER-SIDE PRICE VALIDATION STARTING...');
+
+  // Build a lookup map of menu items with their prices and add-ons
+  const menuLookup = {};
+  const addOnLookup = {};
+
+  menuItems.forEach(item => {
+    if (item.available === false) return;
+
+    const itemNameLower = item.name.toLowerCase();
+
+    // Handle items with sizes array
+    if (item.sizes && Array.isArray(item.sizes)) {
+      item.sizes.forEach(sizeVariant => {
+        const sizeKey = sizeVariant.size ? `${sizeVariant.size.toLowerCase()} ${itemNameLower}` : itemNameLower;
+        menuLookup[sizeKey] = {
+          name: item.name,
+          size: sizeVariant.size,
+          price: parseFloat(sizeVariant.price),
+          description: item.description
+        };
+        // Also store without size prefix for matching
+        if (!menuLookup[itemNameLower]) {
+          menuLookup[itemNameLower] = {
+            name: item.name,
+            size: sizeVariant.size,
+            price: parseFloat(sizeVariant.price),
+            description: item.description
+          };
+        }
+      });
+    } else {
+      // Single size item
+      const sizeKey = item.size ? `${item.size.toLowerCase()} ${itemNameLower}` : itemNameLower;
+      menuLookup[sizeKey] = {
+        name: item.name,
+        size: item.size,
+        price: parseFloat(item.price),
+        description: item.description
+      };
+      menuLookup[itemNameLower] = {
+        name: item.name,
+        size: item.size,
+        price: parseFloat(item.price),
+        description: item.description
+      };
+    }
+
+    // Extract add-on prices from description
+    const itemAddOns = extractAddOnPrices(item.description);
+    Object.entries(itemAddOns).forEach(([addOnName, addOnPrice]) => {
+      addOnLookup[addOnName.toLowerCase()] = addOnPrice;
+    });
+  });
+
+  console.log('📋 Menu lookup keys:', Object.keys(menuLookup).slice(0, 10));
+  console.log('📋 Add-on lookup:', addOnLookup);
+
+  const corrections = [];
+  const validatedItems = items.map(item => {
+    const originalPrice = parseFloat(item.price);
+    const itemNameLower = item.name.toLowerCase();
+
+    // Try to find the base item in the menu
+    // Parse item name to separate base item from add-ons
+    // Format: "Large Margherita Pizza with extra cheese and peppers"
+    const withMatch = itemNameLower.match(/^(.+?)\s+with\s+(.+)$/);
+    let baseItemName = itemNameLower;
+    let addOnsPart = '';
+
+    if (withMatch) {
+      baseItemName = withMatch[1].trim();
+      addOnsPart = withMatch[2].trim();
+    }
+
+    console.log(`🔍 Processing item: "${item.name}"`);
+    console.log(`   Base item: "${baseItemName}"`);
+    console.log(`   Add-ons part: "${addOnsPart}"`);
+
+    // Look up base item in menu
+    let menuItem = menuLookup[baseItemName];
+
+    // If not found, try fuzzy matching
+    if (!menuItem) {
+      const menuKeys = Object.keys(menuLookup);
+      for (const key of menuKeys) {
+        if (baseItemName.includes(key) || key.includes(baseItemName)) {
+          menuItem = menuLookup[key];
+          console.log(`   Fuzzy matched: "${baseItemName}" → "${key}"`);
+          break;
+        }
+      }
+    }
+
+    if (!menuItem) {
+      console.log(`   ⚠️ Could not find base item in menu, keeping AI price: $${originalPrice}`);
+      return item;
+    }
+
+    let calculatedPrice = menuItem.price;
+    console.log(`   Base price from menu: $${calculatedPrice}`);
+
+    // Calculate add-on prices
+    if (addOnsPart) {
+      // Split add-ons by "and" or ","
+      const addOnsList = addOnsPart.split(/\s+and\s+|,\s*/);
+      addOnsList.forEach(addOn => {
+        const addOnClean = addOn.trim().toLowerCase()
+          .replace(/^extra\s+/i, '') // Remove "extra " prefix
+          .replace(/^add\s+/i, '');  // Remove "add " prefix
+
+        // Check if this add-on has a price
+        if (addOnLookup[addOnClean]) {
+          const addOnPrice = addOnLookup[addOnClean];
+          console.log(`   + Add-on "${addOnClean}": $${addOnPrice}`);
+          calculatedPrice += addOnPrice;
+        } else {
+          // Try partial matching
+          for (const [addOnKey, addOnPrice] of Object.entries(addOnLookup)) {
+            if (addOnClean.includes(addOnKey) || addOnKey.includes(addOnClean)) {
+              console.log(`   + Add-on "${addOnClean}" matched to "${addOnKey}": $${addOnPrice}`);
+              calculatedPrice += addOnPrice;
+              break;
+            }
+          }
+        }
+      });
+    }
+
+    // Round to 2 decimal places
+    calculatedPrice = Math.round(calculatedPrice * 100) / 100;
+
+    console.log(`   Calculated price: $${calculatedPrice} (AI submitted: $${originalPrice})`);
+
+    // Check if prices differ
+    const priceDifference = Math.abs(calculatedPrice - originalPrice);
+    if (priceDifference > 0.01) {
+      corrections.push({
+        itemName: item.name,
+        aiPrice: originalPrice,
+        correctedPrice: calculatedPrice,
+        difference: priceDifference
+      });
+      console.log(`   ✅ CORRECTED: $${originalPrice} → $${calculatedPrice} (diff: $${priceDifference.toFixed(2)})`);
+    }
+
+    return {
+      ...item,
+      price: calculatedPrice,
+      original_ai_price: originalPrice
+    };
+  });
+
+  if (corrections.length > 0) {
+    console.log('🧮 PRICE CORRECTIONS APPLIED:');
+    corrections.forEach(c => {
+      console.log(`   ${c.itemName}: AI=$${c.aiPrice} → Corrected=$${c.correctedPrice}`);
+    });
+  } else {
+    console.log('✅ No price corrections needed');
+  }
+
+  return {
+    items: validatedItems,
+    corrections,
+    validated: true
+  };
+}
+
 module.exports = {
   createOrderTicket,
   formatOrderItems,
   calculateOrderReadyTime,
-  formatMenuForAI
+  formatMenuForAI,
+  validateAndRecalculatePrices
 };

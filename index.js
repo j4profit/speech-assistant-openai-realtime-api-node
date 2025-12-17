@@ -9,7 +9,7 @@ const twilioService = require('./services/twilio');
 const database = require('./services/database');
 const stateManager = require('./services/stateManager');
 const { shouldCreateCustomerMessage, generateAIInstructions } = require('./services/aiInstructions');
-const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime } = require('./utils/orderHelpers');
+const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime, validateAndRecalculatePrices } = require('./utils/orderHelpers');
 
 // Initialize Express app
 const app = express();
@@ -820,7 +820,15 @@ wss.on('connection', (ws, _req) => {
     console.log('Processing order from function call...');
 
     try {
-      // Calculate subtotal from items
+      // SERVER-SIDE PRICE VALIDATION: Recalculate prices based on actual menu data
+      // This corrects any arithmetic errors made by the AI
+      const validationResult = validateAndRecalculatePrices(orderData.items, restaurant.menu_items);
+      if (validationResult.validated && validationResult.corrections.length > 0) {
+        console.log('🔧 AI price corrections applied to order');
+        orderData.items = validationResult.items;
+      }
+
+      // Calculate subtotal from items (now using validated prices)
       const subtotal = orderData.items.reduce((sum, item) => {
         return sum + (item.price * item.quantity);
       }, 0);
