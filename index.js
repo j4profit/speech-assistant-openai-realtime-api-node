@@ -671,6 +671,14 @@ wss.on('connection', (ws, _req) => {
             subject: parsedArgs.subject || 'Customer Message'
           });
           result = { success: !!messageResult, message_id: messageResult?.id };
+
+          // Schedule hangup after 8 seconds to allow AI to finish speaking confirmation
+          if (messageResult) {
+            console.log('📝 Message created successfully, scheduling call end');
+            hangupTimer = setTimeout(async () => {
+              await initiateHangup('message_completed');
+            }, 8000);
+          }
         } else {
           result = { success: false, reason: 'Message intent not suitable for storage' };
         }
