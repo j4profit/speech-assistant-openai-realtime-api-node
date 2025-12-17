@@ -649,9 +649,11 @@ wss.on('connection', (ws, _req) => {
 
           console.log('📦 submit_order function called with:', parsedArgs);
 
+          let orderResult;
           try {
             // Process the order from the structured function call data
-            await processOrderFromFunctionCall(parsedArgs);
+            // Returns pricing info with server-validated totals
+            orderResult = await processOrderFromFunctionCall(parsedArgs);
 
             // Only mark as submitted AFTER successful processing
             orderSubmitted = true;
@@ -665,15 +667,19 @@ wss.on('connection', (ws, _req) => {
             break;
           }
 
-          // Calculate ready time
-          const readyTimeInfo = calculateOrderReadyTime(restaurant, parsedArgs.order_type === 'delivery');
-
-          // Return success with ready time info for AI to speak
+          // Return success with SERVER-CALCULATED pricing for AI to speak
+          // CRITICAL: AI must use this total, not its own calculation
           result = {
             success: true,
-            ready_time_minutes: readyTimeInfo.totalMinutes,
-            message: `Order submitted successfully. Ready in ${readyTimeInfo.totalMinutes} minutes.`
+            ready_time_minutes: orderResult.readyTimeMinutes,
+            total_with_tax: orderResult.total,
+            subtotal: orderResult.subtotal,
+            tax: orderResult.tax,
+            delivery_fee: orderResult.deliveryFee,
+            message: `Order submitted successfully. The correct total is $${orderResult.total.toFixed(2)}. Ready in ${orderResult.readyTimeMinutes} minutes.`
           };
+
+          console.log('📢 Returning corrected total to AI:', orderResult.total);
         }
         break;
 
@@ -815,6 +821,7 @@ wss.on('connection', (ws, _req) => {
   }
 
   // Process order from function call
+  // Returns pricing info so AI can speak the correct total
   async function processOrderFromFunctionCall(orderData) {
     orderProcessed = true;
     console.log('Processing order from function call...');
@@ -839,12 +846,17 @@ wss.on('connection', (ws, _req) => {
       const taxAmount = restaurant.tax_rate ? taxableAmount * restaurant.tax_rate : 0;
       const finalTotal = taxableAmount + taxAmount;
 
+      // Round to 2 decimal places for currency
+      const roundedSubtotal = Math.round(subtotal * 100) / 100;
+      const roundedTax = Math.round(taxAmount * 100) / 100;
+      const roundedTotal = Math.round(finalTotal * 100) / 100;
+
       console.log('Order pricing breakdown:', {
-        subtotal,
+        subtotal: roundedSubtotal,
         deliveryFee,
         taxRate: restaurant.tax_rate,
-        taxAmount,
-        finalTotal
+        taxAmount: roundedTax,
+        finalTotal: roundedTotal
       });
 
       const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
@@ -863,11 +875,11 @@ wss.on('connection', (ws, _req) => {
         items: itemsText,
         specialInstructions: orderData.special_instructions || '',
         paymentMethod: orderData.payment_method,
-        subtotal,
+        subtotal: roundedSubtotal,
         deliveryFee,
         taxRate: restaurant.tax_rate,
-        taxAmount,
-        totalAmount: finalTotal,
+        taxAmount: roundedTax,
+        totalAmount: roundedTotal,
         readyTime: readyTimeInfo.readyTimeString,
         restaurantName: restaurant.name
       });
@@ -879,7 +891,7 @@ wss.on('connection', (ws, _req) => {
         order_type: orderData.order_type,
         delivery_address: orderData.delivery_address || 'N/A',
         order_details: ticket,
-        total_amount: finalTotal,
+        total_amount: roundedTotal,
         special_instructions: orderData.special_instructions || '',
         payment_method: orderData.payment_method,
         call_sid: callSid,
@@ -901,9 +913,23 @@ wss.on('connection', (ws, _req) => {
         hangupTimer = setTimeout(async () => {
           await initiateHangup('order_completed');
         }, 8000);
+
+        // Return pricing info for AI to speak the CORRECT total
+        return {
+          success: true,
+          subtotal: roundedSubtotal,
+          tax: roundedTax,
+          deliveryFee: deliveryFee,
+          total: roundedTotal,
+          readyTimeMinutes: readyTimeInfo.totalMinutes,
+          readyTimeString: readyTimeInfo.readyTimeString
+        };
       }
+
+      return { success: false };
     } catch (error) {
       console.error('Error processing order from function call:', error);
+      throw error;
     }
   }
 
