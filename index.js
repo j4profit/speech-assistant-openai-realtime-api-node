@@ -1031,13 +1031,19 @@ wss.on('connection', (ws, _req) => {
 
           await initializeOpenAI(calledNumber, fromNumber, callSid);
 
-          // Start recording via Twilio REST API AFTER OpenAI is initialized
-          // Small delay to ensure call is fully connected
-          setTimeout(() => {
-            twilioService.startRecording(callSid).catch(err => {
-              console.error('Recording start error (non-blocking):', err.message);
-            });
-          }, 2000);
+          // TEMPORARILY DISABLED - Recording via Twilio REST API
+          // TODO: Re-enable after debugging call hangup issue
+          // if (config.twilio.recording !== 'do-not-record') {
+          //   setImmediate(() => {
+          //     setTimeout(async () => {
+          //       try {
+          //         await twilioService.startRecording(callSid);
+          //       } catch (err) {
+          //         console.error('Recording error (non-blocking):', err.message);
+          //       }
+          //     }, 3000);
+          //   });
+          // }
 
           // Set greeting timeout
           greetingTimeout = setTimeout(() => {
