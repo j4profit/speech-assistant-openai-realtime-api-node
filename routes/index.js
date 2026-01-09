@@ -148,19 +148,92 @@ router.post('/call-status', async (req, res) => {
 
 /**
  * Recording status callback webhook
+ * Downloads recording from Twilio, uploads to Supabase Storage, updates call_logs
  */
-router.post('/recording-status', (req, res) => {
+router.post('/recording-status', async (req, res) => {
   console.log('📹 Recording status callback:', req.body);
 
   const { RecordingSid, RecordingStatus, RecordingUrl, CallSid, RecordingDuration } = req.body;
 
-  if (RecordingStatus === 'completed') {
-    console.log(`✅ Recording completed: ${RecordingSid} (${RecordingDuration}s) - ${RecordingUrl}`);
-  } else if (RecordingStatus === 'failed') {
-    console.error(`❌ Recording failed: ${RecordingSid} for call ${CallSid}`);
-  }
-
+  // Respond immediately to Twilio
   res.status(200).send('OK');
+
+  // Process recording asynchronously
+  setImmediate(async () => {
+    if (RecordingStatus === 'completed') {
+      console.log(`✅ Recording completed: ${RecordingSid} (${RecordingDuration}s) - ${RecordingUrl}`);
+
+      try {
+        // Download recording from Twilio (requires authentication)
+        const twilioRecordingUrl = `${RecordingUrl}.mp3`;
+        console.log(`📥 Downloading recording from: ${twilioRecordingUrl}`);
+
+        const authHeader = 'Basic ' + Buffer.from(
+          `${config.twilio.accountSid}:${config.twilio.authToken}`
+        ).toString('base64');
+
+        const recordingResponse = await fetch(twilioRecordingUrl, {
+          headers: { 'Authorization': authHeader }
+        });
+
+        if (!recordingResponse.ok) {
+          console.error(`❌ Failed to download recording: ${recordingResponse.status}`);
+          return;
+        }
+
+        const recordingBuffer = Buffer.from(await recordingResponse.arrayBuffer());
+        console.log(`📦 Downloaded recording: ${recordingBuffer.length} bytes`);
+
+        // Upload to Supabase Storage
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `${CallSid}_${timestamp}.mp3`;
+        const storageBucket = 'call-recordings';
+        const storageUrl = `${config.supabase.url}/storage/v1/object/${storageBucket}/${filename}`;
+
+        console.log(`📤 Uploading to Supabase Storage: ${filename}`);
+
+        const uploadResponse = await fetch(storageUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${config.supabase.anonKey}`,
+            'Content-Type': 'audio/mpeg',
+            'x-upsert': 'true'
+          },
+          body: recordingBuffer
+        });
+
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text();
+          console.error(`❌ Supabase Storage upload failed (${uploadResponse.status}):`, errorText);
+          return;
+        }
+
+        // Construct public URL
+        const publicRecordingUrl = `${config.supabase.url}/storage/v1/object/public/${storageBucket}/${filename}`;
+        console.log(`✅ Recording uploaded to Supabase: ${publicRecordingUrl}`);
+
+        // Update call_logs with recording URL
+        const { upsertCallLog } = require('../services/database');
+        const updateResult = await upsertCallLog({
+          call_sid: CallSid,
+          recording_url: publicRecordingUrl,
+          source: 'recording_webhook'
+        });
+
+        if (updateResult) {
+          console.log(`✅ Call log updated with recording URL for ${CallSid}`);
+        } else {
+          console.error(`❌ Failed to update call log with recording URL for ${CallSid}`);
+        }
+
+      } catch (error) {
+        console.error(`❌ Error processing recording for ${CallSid}:`, error.message);
+      }
+
+    } else if (RecordingStatus === 'failed') {
+      console.error(`❌ Recording failed: ${RecordingSid} for call ${CallSid}`);
+    }
+  });
 });
 
 /**
