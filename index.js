@@ -10,6 +10,7 @@ const database = require('./services/database');
 const stateManager = require('./services/stateManager');
 const { shouldCreateCustomerMessage, generateAIInstructions } = require('./services/aiInstructions');
 const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime, validateAndRecalculatePrices } = require('./utils/orderHelpers');
+const { AudioRecorder } = require('./utils/audioRecorder');
 
 // Initialize Express app
 const app = express();
@@ -56,6 +57,7 @@ wss.on('connection', (ws, _req) => {
   let hangupTimer = null;
   let currentModel = config.openai.model; // Track which model is being used
   let modelRetryAttempted = false; // Prevent infinite retry loops
+  let audioRecorder = null; // Audio recorder instance for call recording
 
   // Adaptive VAD: Track AI responses to detect background noise issues
   let aiResponseTimestamps = []; // Timestamps of recent AI responses
@@ -501,6 +503,11 @@ wss.on('connection', (ws, _req) => {
 
       switch (response.type) {
         case 'response.audio.delta':
+          // Record AI audio if recording is enabled
+          if (audioRecorder) {
+            audioRecorder.addAIAudio(response.delta);
+          }
+
           if (streamSid && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
               event: 'media',
@@ -1026,24 +1033,16 @@ wss.on('connection', (ws, _req) => {
           callSid = msg.start.callSid;
           console.log('Media stream started:', { streamSid, callSid });
 
+          // Initialize audio recorder if recording is enabled
+          if (config.twilio.recording !== 'do-not-record') {
+            audioRecorder = new AudioRecorder(callSid);
+            console.log(`📹 Call recording enabled (local WebSocket capture)`);
+          }
+
           const calledNumber = msg.start.customParameters?.Called;
           const fromNumber = msg.start.customParameters?.From;
 
           await initializeOpenAI(calledNumber, fromNumber, callSid);
-
-          // TEMPORARILY DISABLED - Recording via Twilio REST API
-          // TODO: Re-enable after debugging call hangup issue
-          // if (config.twilio.recording !== 'do-not-record') {
-          //   setImmediate(() => {
-          //     setTimeout(async () => {
-          //       try {
-          //         await twilioService.startRecording(callSid);
-          //       } catch (err) {
-          //         console.error('Recording error (non-blocking):', err.message);
-          //       }
-          //     }, 3000);
-          //   });
-          // }
 
           // Set greeting timeout
           greetingTimeout = setTimeout(() => {
@@ -1063,6 +1062,11 @@ wss.on('connection', (ws, _req) => {
           break;
 
         case 'media':
+          // Record caller audio if recording is enabled
+          if (audioRecorder) {
+            audioRecorder.addCallerAudio(msg.media.payload);
+          }
+
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             const audioAppend = {
               type: 'input_audio_buffer.append',
@@ -1125,6 +1129,18 @@ wss.on('connection', (ws, _req) => {
 
       await database.createCallLog(callData);
       stateManager.removeCallData(callSid);
+    }
+
+    // Save audio recording if enabled
+    if (audioRecorder) {
+      try {
+        const recordingResult = await audioRecorder.save();
+        if (recordingResult.success) {
+          console.log(`📹 Recording saved: ${Object.keys(recordingResult.files).join(', ')}`);
+        }
+      } catch (err) {
+        console.error('Error saving recording:', err.message);
+      }
     }
 
     // Close OpenAI WebSocket if still open
