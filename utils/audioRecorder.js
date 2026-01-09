@@ -1,11 +1,7 @@
 // Audio recording utility for capturing call audio from WebSocket streams
 const fs = require('fs');
 const path = require('path');
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../config');
-
-// Initialize Supabase client for storage uploads
-const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
 // Ensure recordings directory exists (for temporary local storage)
 const RECORDINGS_DIR = path.join(__dirname, '..', 'recordings');
@@ -15,6 +11,45 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 
 // Supabase storage bucket name
 const STORAGE_BUCKET = 'call-recordings';
+
+/**
+ * Upload file to Supabase Storage using REST API directly
+ * @param {string} filename - Name of file to upload
+ * @param {Buffer} buffer - File data
+ * @param {string} contentType - MIME type
+ * @returns {Promise<{url: string|null, error: string|null}>}
+ */
+async function uploadToSupabaseStorage(filename, buffer, contentType) {
+  const storageUrl = `${config.supabase.url}/storage/v1/object/${STORAGE_BUCKET}/${filename}`;
+
+  console.log(`📤 Uploading to: ${storageUrl}`);
+
+  try {
+    const response = await fetch(storageUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.supabase.anonKey}`,
+        'Content-Type': contentType,
+        'x-upsert': 'true'
+      },
+      body: buffer
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Storage upload failed (${response.status}):`, errorText);
+      return { url: null, error: `${response.status}: ${errorText}` };
+    }
+
+    // Construct public URL
+    const publicUrl = `${config.supabase.url}/storage/v1/object/public/${STORAGE_BUCKET}/${filename}`;
+    return { url: publicUrl, error: null };
+
+  } catch (error) {
+    console.error(`❌ Storage upload error:`, error.message);
+    return { url: null, error: error.message };
+  }
+}
 
 /**
  * Create a WAV header for µ-law audio
@@ -99,18 +134,6 @@ class AudioRecorder {
       callSid: this.callSid
     });
 
-    // Debug: List available buckets to verify access
-    try {
-      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-      if (listError) {
-        console.error('❌ Cannot list buckets:', listError.message, listError);
-      } else {
-        console.log('📦 Available buckets:', buckets.map(b => b.name));
-      }
-    } catch (e) {
-      console.error('❌ Bucket list error:', e.message);
-    }
-
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const baseFilename = `${this.callSid}_${timestamp}`;
 
@@ -126,73 +149,75 @@ class AudioRecorder {
       const callerData = this.callerAudio.length > 0 ? Buffer.concat(this.callerAudio) : Buffer.alloc(0);
       const aiData = this.aiAudio.length > 0 ? Buffer.concat(this.aiAudio) : Buffer.alloc(0);
 
-      // Save combined recording (caller audio)
+      // Upload caller audio
       if (callerData.length > 0) {
         const callerFilename = `${baseFilename}_caller.wav`;
         const callerHeader = createMuLawWavHeader(callerData.length);
         const callerBuffer = Buffer.concat([callerHeader, callerData]);
 
-        // Upload to Supabase Storage
-        const { data: callerUpload, error: callerError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(callerFilename, callerBuffer, {
-            contentType: 'audio/wav',
-            upsert: true
-          });
+        const { url: callerUrl, error: callerError } = await uploadToSupabaseStorage(
+          callerFilename,
+          callerBuffer,
+          'audio/wav'
+        );
 
         if (callerError) {
-          console.error(`❌ Failed to upload caller audio:`, callerError.message, callerError);
+          console.error(`❌ Caller audio upload failed:`, callerError);
         } else {
-          const { data: callerUrl } = supabase.storage
-            .from(STORAGE_BUCKET)
-            .getPublicUrl(callerFilename);
-          results.urls.caller = callerUrl.publicUrl;
-          console.log(`📤 Uploaded caller audio: ${callerUrl.publicUrl}`);
+          results.urls.caller = callerUrl;
+          console.log(`✅ Uploaded caller audio: ${callerUrl}`);
         }
       }
 
-      // Save AI recording
+      // Upload AI audio
       if (aiData.length > 0) {
         const aiFilename = `${baseFilename}_ai.wav`;
         const aiHeader = createMuLawWavHeader(aiData.length);
         const aiBuffer = Buffer.concat([aiHeader, aiData]);
 
-        // Upload to Supabase Storage
-        const { data: aiUpload, error: aiError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(aiFilename, aiBuffer, {
-            contentType: 'audio/wav',
-            upsert: true
-          });
+        const { url: aiUrl, error: aiError } = await uploadToSupabaseStorage(
+          aiFilename,
+          aiBuffer,
+          'audio/wav'
+        );
 
         if (aiError) {
-          console.error(`❌ Failed to upload AI audio:`, aiError.message, aiError);
+          console.error(`❌ AI audio upload failed:`, aiError);
         } else {
-          const { data: aiUrl } = supabase.storage
-            .from(STORAGE_BUCKET)
-            .getPublicUrl(aiFilename);
-          results.urls.ai = aiUrl.publicUrl;
-          console.log(`📤 Uploaded AI audio: ${aiUrl.publicUrl}`);
+          results.urls.ai = aiUrl;
+          console.log(`✅ Uploaded AI audio: ${aiUrl}`);
         }
       }
 
-      // Update call_logs with recording URLs
+      // Update call_logs with recording URLs using direct fetch
       if (results.urls.caller || results.urls.ai) {
-        const recordingUrls = {
-          caller_recording_url: results.urls.caller || null,
-          ai_recording_url: results.urls.ai || null,
-          recording_duration: results.duration
-        };
+        try {
+          const updateResponse = await fetch(
+            `${config.supabase.url}/rest/v1/call_logs?call_sid=eq.${this.callSid}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.supabase.anonKey}`,
+                'apikey': config.supabase.anonKey,
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({
+                caller_recording_url: results.urls.caller || null,
+                ai_recording_url: results.urls.ai || null,
+                recording_duration: results.duration
+              })
+            }
+          );
 
-        const { error: updateError } = await supabase
-          .from('call_logs')
-          .update(recordingUrls)
-          .eq('call_sid', this.callSid);
-
-        if (updateError) {
-          console.error(`❌ Failed to update call_logs with recording URLs:`, updateError.message);
-        } else {
-          console.log(`✅ Updated call_logs with recording URLs for ${this.callSid}`);
+          if (!updateResponse.ok) {
+            const errorText = await updateResponse.text();
+            console.error(`❌ Failed to update call_logs:`, errorText);
+          } else {
+            console.log(`✅ Updated call_logs with recording URLs for ${this.callSid}`);
+          }
+        } catch (updateErr) {
+          console.error(`❌ call_logs update error:`, updateErr.message);
         }
       }
 
