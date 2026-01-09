@@ -93,6 +93,12 @@ class AudioRecorder {
       return { success: false, reason: 'Recording disabled' };
     }
 
+    console.log(`📹 Saving recording to Supabase Storage:`, {
+      bucket: STORAGE_BUCKET,
+      supabaseUrl: config.supabase.url,
+      callSid: this.callSid
+    });
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const baseFilename = `${this.callSid}_${timestamp}`;
 
@@ -123,7 +129,7 @@ class AudioRecorder {
           });
 
         if (callerError) {
-          console.error(`❌ Failed to upload caller audio:`, callerError.message);
+          console.error(`❌ Failed to upload caller audio:`, callerError.message, callerError);
         } else {
           const { data: callerUrl } = supabase.storage
             .from(STORAGE_BUCKET)
@@ -148,7 +154,7 @@ class AudioRecorder {
           });
 
         if (aiError) {
-          console.error(`❌ Failed to upload AI audio:`, aiError.message);
+          console.error(`❌ Failed to upload AI audio:`, aiError.message, aiError);
         } else {
           const { data: aiUrl } = supabase.storage
             .from(STORAGE_BUCKET)
