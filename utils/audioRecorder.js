@@ -152,86 +152,38 @@ function mixMuLawBuffers(buffer1, buffer2) {
 }
 
 /**
- * Audio recorder class for capturing call audio with timestamp synchronization
+ * Audio recorder class for capturing call audio
+ * Simply records all audio chunks in arrival order
  */
 class AudioRecorder {
   constructor(callSid) {
     this.callSid = callSid;
-    this.audioChunks = []; // Combined timeline: { time, source, data }
+    this.recordingBuffer = []; // All audio chunks in arrival order
     this.startTime = Date.now();
     this.enabled = true;
+    this.chunkCount = { caller: 0, ai: 0 };
   }
 
   /**
-   * Add caller (customer) audio chunk with timestamp
+   * Add caller (customer) audio chunk
    * @param {string} base64Audio - Base64-encoded µ-law audio
    */
   addCallerAudio(base64Audio) {
     if (this.enabled && base64Audio) {
-      this.audioChunks.push({
-        time: Date.now() - this.startTime,
-        source: 'caller',
-        data: Buffer.from(base64Audio, 'base64')
-      });
+      this.recordingBuffer.push(Buffer.from(base64Audio, 'base64'));
+      this.chunkCount.caller++;
     }
   }
 
   /**
-   * Add AI audio chunk with timestamp
+   * Add AI audio chunk
    * @param {string} base64Audio - Base64-encoded µ-law audio
    */
   addAIAudio(base64Audio) {
     if (this.enabled && base64Audio) {
-      this.audioChunks.push({
-        time: Date.now() - this.startTime,
-        source: 'ai',
-        data: Buffer.from(base64Audio, 'base64')
-      });
+      this.recordingBuffer.push(Buffer.from(base64Audio, 'base64'));
+      this.chunkCount.ai++;
     }
-  }
-
-  /**
-   * Build timeline-synchronized audio buffer
-   * Places audio chunks at correct positions based on timestamps
-   */
-  buildTimelineBuffer() {
-    if (this.audioChunks.length === 0) {
-      return Buffer.alloc(0);
-    }
-
-    // Sort chunks by timestamp
-    this.audioChunks.sort((a, b) => a.time - b.time);
-
-    // Calculate total duration in samples (8000 samples/sec for µ-law)
-    const lastChunk = this.audioChunks[this.audioChunks.length - 1];
-    const totalDurationMs = lastChunk.time + (lastChunk.data.length / 8); // 8 samples per ms
-    const totalSamples = Math.ceil(totalDurationMs * 8); // 8000 Hz = 8 samples/ms
-
-    // Create silence-filled buffer (µ-law silence = 0xFF)
-    const buffer = Buffer.alloc(totalSamples, 0xFF);
-
-    // Place each chunk at its timestamp position
-    for (const chunk of this.audioChunks) {
-      const startSample = Math.floor(chunk.time * 8); // Convert ms to samples
-
-      for (let i = 0; i < chunk.data.length && (startSample + i) < buffer.length; i++) {
-        const pos = startSample + i;
-
-        // If there's already audio at this position, mix them
-        if (buffer[pos] !== 0xFF) {
-          // Decode both samples
-          const existing = MULAW_DECODE_TABLE[buffer[pos]];
-          const newSample = MULAW_DECODE_TABLE[chunk.data[i]];
-          // Mix and re-encode
-          const mixed = Math.round((existing + newSample) / 2);
-          buffer[pos] = encodeMuLaw(Math.max(-32768, Math.min(32767, mixed)));
-        } else {
-          buffer[pos] = chunk.data[i];
-        }
-      }
-    }
-
-    return buffer;
   }
 
   /**
@@ -260,20 +212,19 @@ class AudioRecorder {
     };
 
     try {
-      // Build timeline-synchronized audio
-      const timelineData = this.buildTimelineBuffer();
+      // Combine all audio chunks in arrival order
+      const recordingData = this.recordingBuffer.length > 0
+        ? Buffer.concat(this.recordingBuffer)
+        : Buffer.alloc(0);
 
-      if (timelineData.length > 0) {
+      if (recordingData.length > 0) {
         const mixedFilename = `${baseFilename}_recording.wav`;
 
-        // Create WAV file with timeline audio
-        const mixedHeader = createMuLawWavHeader(timelineData.length);
-        const mixedBuffer = Buffer.concat([mixedHeader, timelineData]);
+        // Create WAV file
+        const mixedHeader = createMuLawWavHeader(recordingData.length);
+        const mixedBuffer = Buffer.concat([mixedHeader, recordingData]);
 
-        // Count chunks by source for logging
-        const callerChunks = this.audioChunks.filter(c => c.source === 'caller').length;
-        const aiChunks = this.audioChunks.filter(c => c.source === 'ai').length;
-        console.log(`🎙️ Timeline recording: ${timelineData.length} bytes (${callerChunks} caller chunks, ${aiChunks} ai chunks)`);
+        console.log(`🎙️ Recording: ${recordingData.length} bytes (${this.chunkCount.caller} caller chunks, ${this.chunkCount.ai} ai chunks)`);
 
         const { url: mixedUrl, error: mixedError } = await uploadToSupabaseStorage(
           mixedFilename,
@@ -330,7 +281,7 @@ class AudioRecorder {
     }
 
     // Clear buffers
-    this.audioChunks = [];
+    this.recordingBuffer = [];
 
     return results;
   }
@@ -340,7 +291,7 @@ class AudioRecorder {
    */
   disable() {
     this.enabled = false;
-    this.audioChunks = [];
+    this.recordingBuffer = [];
   }
 }
 
