@@ -51,35 +51,32 @@ serve(async (req) => {
     // IMPORTANT: Only include fields that are actually provided to avoid overwriting with null
     const callLogData: any = {
       call_sid: callData.call_sid,
-      restaurant_id,
-      from_number: callData.from_number || null,
-      to_number: callData.to_number || null,
-      call_status: callData.call_status || null,
-      call_direction: callData.call_direction || null,
-      caller_country: callData.caller_country || null,
-      caller_state: callData.caller_state || null,
-      caller_city: callData.caller_city || null,
-      caller_zip: callData.caller_zip || null,
-      to_country: callData.to_country || null,
-      to_state: callData.to_state || null,
-      to_city: callData.to_city || null,
-      to_zip: callData.to_zip || null,
-      call_started_at: callData.call_started_at || null,
-      call_ended_at: callData.call_ended_at || null,
-      twilio_data: callData.twilio_data || null,
-      order_id: callData.order_id || null
     };
 
-    // Only set call_duration if provided (from Twilio webhook)
-    if (callData.call_duration) {
-      callLogData.call_duration = callData.call_duration;
-    }
+    // Only add fields if they have actual values (prevents overwriting existing data with null)
+    if (restaurant_id) callLogData.restaurant_id = restaurant_id;
+    if (callData.from_number) callLogData.from_number = callData.from_number;
+    if (callData.to_number) callLogData.to_number = callData.to_number;
+    if (callData.call_status) callLogData.call_status = callData.call_status;
+    if (callData.call_direction) callLogData.call_direction = callData.call_direction;
+    if (callData.caller_country) callLogData.caller_country = callData.caller_country;
+    if (callData.caller_state) callLogData.caller_state = callData.caller_state;
+    if (callData.caller_city) callLogData.caller_city = callData.caller_city;
+    if (callData.caller_zip) callLogData.caller_zip = callData.caller_zip;
+    if (callData.to_country) callLogData.to_country = callData.to_country;
+    if (callData.to_state) callLogData.to_state = callData.to_state;
+    if (callData.to_city) callLogData.to_city = callData.to_city;
+    if (callData.to_zip) callLogData.to_zip = callData.to_zip;
+    if (callData.call_started_at) callLogData.call_started_at = callData.call_started_at;
+    if (callData.call_ended_at) callLogData.call_ended_at = callData.call_ended_at;
+    if (callData.twilio_data) callLogData.twilio_data = callData.twilio_data;
+    if (callData.order_id) callLogData.order_id = callData.order_id;
+    if (callData.call_duration) callLogData.call_duration = callData.call_duration;
+    if (callData.conversation_transcript) callLogData.conversation_transcript = callData.conversation_transcript;
 
-    // Only set conversation_transcript if provided (from WebSocket)
-    // This prevents Twilio webhook from overwriting transcript with null
-    if (callData.conversation_transcript) {
-      callLogData.conversation_transcript = callData.conversation_transcript;
-    }
+    // Recording fields
+    if (callData.recording_url) callLogData.recording_url = callData.recording_url;
+    if (callData.recording_duration) callLogData.recording_duration = callData.recording_duration;
 
     // UPSERT: Insert or update based on call_sid
     // This prevents duplicates from WebSocket + Twilio webhook
