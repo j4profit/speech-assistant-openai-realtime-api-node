@@ -185,8 +185,7 @@ router.post('/recording-status', async (req, res) => {
         console.log(`📦 Downloaded recording: ${recordingBuffer.length} bytes`);
 
         // Upload to Supabase Storage
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `${CallSid}_${timestamp}.mp3`;
+        const filename = `${CallSid}.mp3`;
         const storageBucket = 'call-recordings';
         const storageUrl = `${config.supabase.url}/storage/v1/object/${storageBucket}/${filename}`;
 
