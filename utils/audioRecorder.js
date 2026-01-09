@@ -1,12 +1,20 @@
 // Audio recording utility for capturing call audio from WebSocket streams
 const fs = require('fs');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+const config = require('../config');
 
-// Ensure recordings directory exists
+// Initialize Supabase client for storage uploads
+const supabase = createClient(config.supabase.url, config.supabase.anonKey);
+
+// Ensure recordings directory exists (for temporary local storage)
 const RECORDINGS_DIR = path.join(__dirname, '..', 'recordings');
 if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }
+
+// Supabase storage bucket name
+const STORAGE_BUCKET = 'call-recordings';
 
 /**
  * Create a WAV header for µ-law audio
@@ -77,8 +85,8 @@ class AudioRecorder {
   }
 
   /**
-   * Save recordings to files
-   * @returns {Object} Paths to saved files
+   * Save recordings to Supabase Storage and update call_logs
+   * @returns {Object} Upload results with URLs
    */
   async save() {
     if (!this.enabled) {
@@ -91,32 +99,87 @@ class AudioRecorder {
     const results = {
       callSid: this.callSid,
       duration: Math.round((Date.now() - this.startTime) / 1000),
-      files: {}
+      files: {},
+      urls: {}
     };
 
     try {
-      // Save caller audio
-      if (this.callerAudio.length > 0) {
-        const callerData = Buffer.concat(this.callerAudio);
-        const callerPath = path.join(RECORDINGS_DIR, `${baseFilename}_caller.wav`);
+      // Combine caller and AI audio into a single file for easier playback
+      const callerData = this.callerAudio.length > 0 ? Buffer.concat(this.callerAudio) : Buffer.alloc(0);
+      const aiData = this.aiAudio.length > 0 ? Buffer.concat(this.aiAudio) : Buffer.alloc(0);
+
+      // Save combined recording (caller audio)
+      if (callerData.length > 0) {
+        const callerFilename = `${baseFilename}_caller.wav`;
         const callerHeader = createMuLawWavHeader(callerData.length);
-        fs.writeFileSync(callerPath, Buffer.concat([callerHeader, callerData]));
-        results.files.caller = callerPath;
-        console.log(`📁 Saved caller audio: ${callerPath} (${callerData.length} bytes)`);
+        const callerBuffer = Buffer.concat([callerHeader, callerData]);
+
+        // Upload to Supabase Storage
+        const { data: callerUpload, error: callerError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(callerFilename, callerBuffer, {
+            contentType: 'audio/wav',
+            upsert: true
+          });
+
+        if (callerError) {
+          console.error(`❌ Failed to upload caller audio:`, callerError.message);
+        } else {
+          const { data: callerUrl } = supabase.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(callerFilename);
+          results.urls.caller = callerUrl.publicUrl;
+          console.log(`📤 Uploaded caller audio: ${callerUrl.publicUrl}`);
+        }
       }
 
-      // Save AI audio
-      if (this.aiAudio.length > 0) {
-        const aiData = Buffer.concat(this.aiAudio);
-        const aiPath = path.join(RECORDINGS_DIR, `${baseFilename}_ai.wav`);
+      // Save AI recording
+      if (aiData.length > 0) {
+        const aiFilename = `${baseFilename}_ai.wav`;
         const aiHeader = createMuLawWavHeader(aiData.length);
-        fs.writeFileSync(aiPath, Buffer.concat([aiHeader, aiData]));
-        results.files.ai = aiPath;
-        console.log(`📁 Saved AI audio: ${aiPath} (${aiData.length} bytes)`);
+        const aiBuffer = Buffer.concat([aiHeader, aiData]);
+
+        // Upload to Supabase Storage
+        const { data: aiUpload, error: aiError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(aiFilename, aiBuffer, {
+            contentType: 'audio/wav',
+            upsert: true
+          });
+
+        if (aiError) {
+          console.error(`❌ Failed to upload AI audio:`, aiError.message);
+        } else {
+          const { data: aiUrl } = supabase.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(aiFilename);
+          results.urls.ai = aiUrl.publicUrl;
+          console.log(`📤 Uploaded AI audio: ${aiUrl.publicUrl}`);
+        }
+      }
+
+      // Update call_logs with recording URLs
+      if (results.urls.caller || results.urls.ai) {
+        const recordingUrls = {
+          caller_recording_url: results.urls.caller || null,
+          ai_recording_url: results.urls.ai || null,
+          recording_duration: results.duration
+        };
+
+        const { error: updateError } = await supabase
+          .from('call_logs')
+          .update(recordingUrls)
+          .eq('call_sid', this.callSid);
+
+        if (updateError) {
+          console.error(`❌ Failed to update call_logs with recording URLs:`, updateError.message);
+        } else {
+          console.log(`✅ Updated call_logs with recording URLs for ${this.callSid}`);
+        }
       }
 
       results.success = true;
-      console.log(`✅ Recording saved for call ${this.callSid} (${results.duration}s)`);
+      console.log(`✅ Recording uploaded for call ${this.callSid} (${results.duration}s)`);
 
     } catch (error) {
       console.error(`❌ Failed to save recording for ${this.callSid}:`, error.message);
