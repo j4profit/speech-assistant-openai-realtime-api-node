@@ -1027,7 +1027,7 @@ wss.on('connection', (ws, _req) => {
           console.log('Media stream started:', { streamSid, callSid });
 
           // Start Twilio-side recording via REST API (if enabled)
-          // Delayed by 5 seconds to ensure call is fully connected
+          // Delayed by 1 second to ensure call is connected
           if (config.twilio.recording !== 'do-not-record') {
             setTimeout(() => {
               setImmediate(async () => {
@@ -1040,7 +1040,7 @@ wss.on('connection', (ws, _req) => {
                   console.error('Twilio recording error (non-blocking):', err.message);
                 }
               });
-            }, 5000);
+            }, 1000);
           }
 
           const calledNumber = msg.start.customParameters?.Called;
