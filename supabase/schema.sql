@@ -28,12 +28,13 @@ CREATE TABLE public.call_logs (
   billing_status text DEFAULT 'pending'::text CHECK (billing_status = ANY (ARRAY['pending'::text, 'billed'::text, 'failed'::text, 'skipped'::text])),
   billing_processed_at timestamp with time zone,
   minutes_billed numeric,
-  billing_amount_cents integer,
-  usage_transaction_id uuid,
+  balance_after_call numeric,
+  balance_before_call numeric,
+  recording_duration integer,
+  recording_url text,
   CONSTRAINT call_logs_pkey PRIMARY KEY (id),
   CONSTRAINT call_logs_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
-  CONSTRAINT call_logs_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id),
-  CONSTRAINT call_logs_usage_transaction_id_fkey FOREIGN KEY (usage_transaction_id) REFERENCES public.usage_transactions(id)
+  CONSTRAINT call_logs_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
 );
 
 CREATE TABLE public.customer_delivery_addresses (
@@ -54,8 +55,7 @@ CREATE TABLE public.customer_delivery_addresses (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT customer_delivery_addresses_pkey PRIMARY KEY (id),
-  CONSTRAINT customer_delivery_addresses_restaurant_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id) ON DELETE CASCADE,
-  CONSTRAINT customer_delivery_addresses_unique UNIQUE (restaurant_id, customer_phone)
+  CONSTRAINT customer_delivery_addresses_restaurant_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
 );
 
 CREATE TABLE public.customer_messages (
@@ -124,22 +124,24 @@ CREATE TABLE public.orders (
   printed boolean DEFAULT false,
   printed_at timestamp with time zone,
   delivery_instructions text,
+  delivery_address_id uuid,
   CONSTRAINT orders_pkey PRIMARY KEY (id),
-  CONSTRAINT orders_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
+  CONSTRAINT orders_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
+  CONSTRAINT orders_delivery_address_id_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.customer_delivery_addresses(id)
 );
 
 CREATE TABLE public.restaurant_balances (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   restaurant_id uuid NOT NULL UNIQUE,
-  current_balance_seconds integer DEFAULT 0,
-  total_purchased_seconds integer DEFAULT 0,
+  total_purchased_minutes numeric DEFAULT 0,
   last_updated timestamp with time zone DEFAULT now(),
   low_balance_alert_sent boolean DEFAULT false,
   auto_recharge_enabled boolean DEFAULT false,
   auto_recharge_threshold_seconds integer DEFAULT 3000,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
-  current_balance_minutes numeric DEFAULT round(((current_balance_seconds)::numeric / (60)::numeric), 2),
+  total_used_minutes numeric DEFAULT 0,
+  current_balance_minutes numeric DEFAULT (total_purchased_minutes - total_used_minutes),
   CONSTRAINT restaurant_balances_pkey PRIMARY KEY (id),
   CONSTRAINT restaurant_balances_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id)
 );
@@ -171,6 +173,9 @@ CREATE TABLE public.restaurants (
   printer_enabled boolean DEFAULT false,
   printer_auto_print boolean DEFAULT false,
   printer_name text,
+  call_forwarding_enabled boolean DEFAULT false,
+  call_forwarding_number character varying,
+  call_forwarding_reasons ARRAY,
   CONSTRAINT restaurants_pkey PRIMARY KEY (id),
   CONSTRAINT restaurants_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES auth.users(id)
 );
