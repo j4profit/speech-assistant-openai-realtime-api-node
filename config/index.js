@@ -35,7 +35,9 @@ const config = {
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken: process.env.TWILIO_AUTH_TOKEN,
-    enabled: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN)
+    enabled: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+    // Recording options: 'record-from-answer-dual' (dual channel), 'record-from-answer' (single channel), or 'do-not-record'
+    recording: process.env.TWILIO_RECORDING || 'do-not-record'
   },
 
   // Server Configuration

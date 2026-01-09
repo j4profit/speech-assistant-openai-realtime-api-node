@@ -60,9 +60,17 @@ function generateHangupTwiML(callSid, restaurantName = '') {
  * @returns {string} TwiML XML
  */
 function generateIncomingCallTwiML(host, callParams) {
+  // Determine recording attribute based on config
+  const recordingMode = config.twilio.recording;
+  const recordAttr = recordingMode !== 'do-not-record' ? ` record="${recordingMode}"` : '';
+
+  if (recordingMode !== 'do-not-record') {
+    console.log(`📹 Call recording enabled: ${recordingMode} for call ${callParams.CallSid}`);
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Connect>
+    <Connect${recordAttr}>
         <Stream url="wss://${host}/media-stream">
             <Parameter name="Called" value="${callParams.Called || callParams.To}" />
             <Parameter name="From" value="${callParams.From || callParams.Caller}" />
