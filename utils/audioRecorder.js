@@ -88,6 +88,70 @@ function createMuLawWavHeader(dataLength) {
 }
 
 /**
+ * µ-law decoding table (µ-law byte -> 16-bit linear PCM)
+ */
+const MULAW_DECODE_TABLE = new Int16Array(256);
+for (let i = 0; i < 256; i++) {
+  let mulaw = ~i;
+  let sign = (mulaw & 0x80) ? -1 : 1;
+  let exponent = (mulaw >> 4) & 0x07;
+  let mantissa = mulaw & 0x0F;
+  let sample = (mantissa << 3) + 0x84;
+  sample <<= exponent;
+  sample -= 0x84;
+  MULAW_DECODE_TABLE[i] = sign * sample;
+}
+
+/**
+ * µ-law encoding (16-bit linear PCM -> µ-law byte)
+ */
+function encodeMuLaw(sample) {
+  const MULAW_MAX = 0x1FFF;
+  const MULAW_BIAS = 33;
+
+  let sign = (sample < 0) ? 0x80 : 0;
+  if (sign) sample = -sample;
+
+  sample = Math.min(sample + MULAW_BIAS, MULAW_MAX);
+
+  let exponent = 7;
+  for (let expMask = 0x1000; (sample & expMask) === 0 && exponent > 0; exponent--, expMask >>= 1) {}
+
+  let mantissa = (sample >> (exponent + 3)) & 0x0F;
+  let mulawByte = ~(sign | (exponent << 4) | mantissa);
+
+  return mulawByte & 0xFF;
+}
+
+/**
+ * Mix two µ-law audio buffers into a single mono buffer
+ * @param {Buffer} buffer1 - First µ-law audio buffer
+ * @param {Buffer} buffer2 - Second µ-law audio buffer
+ * @returns {Buffer} Mixed mono µ-law audio
+ */
+function mixMuLawBuffers(buffer1, buffer2) {
+  const maxLength = Math.max(buffer1.length, buffer2.length);
+  const mixed = Buffer.alloc(maxLength);
+
+  for (let i = 0; i < maxLength; i++) {
+    // Decode both samples to linear PCM
+    const sample1 = i < buffer1.length ? MULAW_DECODE_TABLE[buffer1[i]] : 0;
+    const sample2 = i < buffer2.length ? MULAW_DECODE_TABLE[buffer2[i]] : 0;
+
+    // Mix (average to prevent clipping)
+    let mixedSample = Math.round((sample1 + sample2) / 2);
+
+    // Clamp to 16-bit range
+    mixedSample = Math.max(-32768, Math.min(32767, mixedSample));
+
+    // Encode back to µ-law
+    mixed[i] = encodeMuLaw(mixedSample);
+  }
+
+  return mixed;
+}
+
+/**
  * Audio recorder class for capturing call audio
  */
 class AudioRecorder {
@@ -145,52 +209,37 @@ class AudioRecorder {
     };
 
     try {
-      // Combine caller and AI audio into a single file for easier playback
+      // Combine caller and AI audio into raw buffers
       const callerData = this.callerAudio.length > 0 ? Buffer.concat(this.callerAudio) : Buffer.alloc(0);
       const aiData = this.aiAudio.length > 0 ? Buffer.concat(this.aiAudio) : Buffer.alloc(0);
 
-      // Upload caller audio
-      if (callerData.length > 0) {
-        const callerFilename = `${baseFilename}_caller.wav`;
-        const callerHeader = createMuLawWavHeader(callerData.length);
-        const callerBuffer = Buffer.concat([callerHeader, callerData]);
+      // Mix both streams into a single mono recording
+      if (callerData.length > 0 || aiData.length > 0) {
+        const mixedFilename = `${baseFilename}_recording.wav`;
 
-        const { url: callerUrl, error: callerError } = await uploadToSupabaseStorage(
-          callerFilename,
-          callerBuffer,
+        // Mix the two audio streams
+        const mixedData = mixMuLawBuffers(callerData, aiData);
+        const mixedHeader = createMuLawWavHeader(mixedData.length);
+        const mixedBuffer = Buffer.concat([mixedHeader, mixedData]);
+
+        console.log(`🎙️ Mixed recording: ${mixedData.length} bytes (caller: ${callerData.length}, ai: ${aiData.length})`);
+
+        const { url: mixedUrl, error: mixedError } = await uploadToSupabaseStorage(
+          mixedFilename,
+          mixedBuffer,
           'audio/wav'
         );
 
-        if (callerError) {
-          console.error(`❌ Caller audio upload failed:`, callerError);
+        if (mixedError) {
+          console.error(`❌ Recording upload failed:`, mixedError);
         } else {
-          results.urls.caller = callerUrl;
-          console.log(`✅ Uploaded caller audio: ${callerUrl}`);
+          results.urls.recording = mixedUrl;
+          console.log(`✅ Uploaded recording: ${mixedUrl}`);
         }
       }
 
-      // Upload AI audio
-      if (aiData.length > 0) {
-        const aiFilename = `${baseFilename}_ai.wav`;
-        const aiHeader = createMuLawWavHeader(aiData.length);
-        const aiBuffer = Buffer.concat([aiHeader, aiData]);
-
-        const { url: aiUrl, error: aiError } = await uploadToSupabaseStorage(
-          aiFilename,
-          aiBuffer,
-          'audio/wav'
-        );
-
-        if (aiError) {
-          console.error(`❌ AI audio upload failed:`, aiError);
-        } else {
-          results.urls.ai = aiUrl;
-          console.log(`✅ Uploaded AI audio: ${aiUrl}`);
-        }
-      }
-
-      // Update call_logs with recording URLs using direct fetch
-      if (results.urls.caller || results.urls.ai) {
+      // Update call_logs with recording URL using direct fetch
+      if (results.urls.recording) {
         try {
           const updateResponse = await fetch(
             `${config.supabase.url}/rest/v1/call_logs?call_sid=eq.${this.callSid}`,
@@ -203,8 +252,7 @@ class AudioRecorder {
                 'Prefer': 'return=minimal'
               },
               body: JSON.stringify({
-                caller_recording_url: results.urls.caller || null,
-                ai_recording_url: results.urls.ai || null,
+                recording_url: results.urls.recording,
                 recording_duration: results.duration
               })
             }
@@ -214,7 +262,7 @@ class AudioRecorder {
             const errorText = await updateResponse.text();
             console.error(`❌ Failed to update call_logs:`, errorText);
           } else {
-            console.log(`✅ Updated call_logs with recording URLs for ${this.callSid}`);
+            console.log(`✅ Updated call_logs with recording URL for ${this.callSid}`);
           }
         } catch (updateErr) {
           console.error(`❌ call_logs update error:`, updateErr.message);
