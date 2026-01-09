@@ -211,16 +211,32 @@ router.post('/recording-status', async (req, res) => {
         const publicRecordingUrl = `${config.supabase.url}/storage/v1/object/public/${storageBucket}/${filename}`;
         console.log(`✅ Recording uploaded to Supabase: ${publicRecordingUrl}`);
 
-        // Update call_logs with recording URL
+        // Update call_logs with recording URL (with retry if record doesn't exist yet)
         const { upsertCallLog } = require('../services/database');
-        const updateResult = await upsertCallLog({
-          call_sid: CallSid,
-          recording_url: publicRecordingUrl,
-          source: 'recording_webhook'
-        });
 
-        if (updateResult) {
+        const updateRecordingUrl = async (retryCount = 0) => {
+          const result = await upsertCallLog({
+            call_sid: CallSid,
+            recording_url: publicRecordingUrl,
+            source: 'recording_webhook'
+          });
+
+          // If skipped (record doesn't exist yet), retry after delay
+          if (result && result.skipped && retryCount < 3) {
+            console.log(`⏳ Call log not ready, retrying in 2s (attempt ${retryCount + 1}/3)...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return updateRecordingUrl(retryCount + 1);
+          }
+
+          return result;
+        };
+
+        const updateResult = await updateRecordingUrl();
+
+        if (updateResult && !updateResult.skipped) {
           console.log(`✅ Call log updated with recording URL for ${CallSid}`);
+        } else if (updateResult && updateResult.skipped) {
+          console.log(`⚠️ Call log not found after retries for ${CallSid} - recording URL: ${publicRecordingUrl}`);
         } else {
           console.error(`❌ Failed to update call log with recording URL for ${CallSid}`);
         }

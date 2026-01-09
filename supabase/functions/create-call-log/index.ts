@@ -78,16 +78,52 @@ serve(async (req) => {
     if (callData.recording_url) callLogData.recording_url = callData.recording_url;
     if (callData.recording_duration) callLogData.recording_duration = callData.recording_duration;
 
-    // UPSERT: Insert or update based on call_sid
-    // This prevents duplicates from WebSocket + Twilio webhook
-    const { data: callLog, error: callLogError } = await supabase
+    // Check if record already exists
+    const { data: existingLog } = await supabase
       .from("call_logs")
-      .upsert([callLogData], {
-        onConflict: 'call_sid',
-        ignoreDuplicates: false  // Update if exists
-      })
-      .select()
-      .single();
+      .select("id")
+      .eq("call_sid", callData.call_sid)
+      .maybeSingle();
+
+    let callLog;
+    let callLogError;
+
+    if (existingLog) {
+      // UPDATE existing record
+      const { data, error } = await supabase
+        .from("call_logs")
+        .update(callLogData)
+        .eq("call_sid", callData.call_sid)
+        .select()
+        .single();
+      callLog = data;
+      callLogError = error;
+    } else {
+      // INSERT new record - but only if we have required fields
+      if (!callData.from_number || !callData.to_number) {
+        console.log("Skipping insert - missing required fields (from_number/to_number). Call log will be created by call-status webhook.");
+        return new Response(JSON.stringify({
+          success: false,
+          skipped: true,
+          reason: "Record does not exist and missing required fields. Waiting for call-status webhook.",
+          call_sid: callData.call_sid
+        }), {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          },
+          status: 200
+        });
+      }
+
+      const { data, error } = await supabase
+        .from("call_logs")
+        .insert([callLogData])
+        .select()
+        .single();
+      callLog = data;
+      callLogError = error;
+    }
 
     if (callLogError) {
       console.error("Database error (call_logs):", callLogError);
