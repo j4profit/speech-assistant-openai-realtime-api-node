@@ -1026,15 +1026,18 @@ wss.on('connection', (ws, _req) => {
           callSid = msg.start.callSid;
           console.log('Media stream started:', { streamSid, callSid });
 
-          // Start recording via Twilio REST API (if enabled)
-          twilioService.startRecording(callSid).catch(err => {
-            console.error('Recording start error (non-blocking):', err.message);
-          });
-
           const calledNumber = msg.start.customParameters?.Called;
           const fromNumber = msg.start.customParameters?.From;
 
           await initializeOpenAI(calledNumber, fromNumber, callSid);
+
+          // Start recording via Twilio REST API AFTER OpenAI is initialized
+          // Small delay to ensure call is fully connected
+          setTimeout(() => {
+            twilioService.startRecording(callSid).catch(err => {
+              console.error('Recording start error (non-blocking):', err.message);
+            });
+          }, 2000);
 
           // Set greeting timeout
           greetingTimeout = setTimeout(() => {
