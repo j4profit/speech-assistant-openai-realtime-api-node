@@ -99,6 +99,18 @@ class AudioRecorder {
       callSid: this.callSid
     });
 
+    // Debug: List available buckets to verify access
+    try {
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      if (listError) {
+        console.error('❌ Cannot list buckets:', listError.message, listError);
+      } else {
+        console.log('📦 Available buckets:', buckets.map(b => b.name));
+      }
+    } catch (e) {
+      console.error('❌ Bucket list error:', e.message);
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const baseFilename = `${this.callSid}_${timestamp}`;
 
