@@ -240,39 +240,8 @@ class AudioRecorder {
         }
       }
 
-      // Update call_logs with recording URL using direct fetch
-      if (results.urls.recording) {
-        try {
-          const updateResponse = await fetch(
-            `${config.supabase.url}/rest/v1/call_logs?call_sid=eq.${this.callSid}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.supabase.anonKey}`,
-                'apikey': config.supabase.anonKey,
-                'Prefer': 'return=minimal'
-              },
-              body: JSON.stringify({
-                recording_url: results.urls.recording,
-                recording_duration: results.duration
-              })
-            }
-          );
-
-          if (!updateResponse.ok) {
-            const errorText = await updateResponse.text();
-            console.error(`❌ Failed to update call_logs:`, errorText);
-          } else {
-            console.log(`✅ Updated call_logs with recording URL for ${this.callSid}`);
-          }
-        } catch (updateErr) {
-          console.error(`❌ call_logs update error:`, updateErr.message);
-        }
-      }
-
       results.success = true;
-      console.log(`✅ Recording uploaded for call ${this.callSid} (${results.duration}s)`);
+      console.log(`✅ Recording saved for call ${this.callSid} (${results.duration}s)`);
 
     } catch (error) {
       console.error(`❌ Failed to save recording for ${this.callSid}:`, error.message);
