@@ -55,22 +55,16 @@ function generateHangupTwiML(callSid, restaurantName = '') {
 
 /**
  * Generate TwiML for incoming call (WebSocket stream setup)
+ * Note: Recording is handled via REST API in startRecording() since <Connect record="...">
+ * only works for Twilio Video rooms, not <Stream>
  * @param {string} host - Request host
  * @param {Object} callParams - Call parameters (Called, From, CallSid)
  * @returns {string} TwiML XML
  */
 function generateIncomingCallTwiML(host, callParams) {
-  // Determine recording attribute based on config
-  const recordingMode = config.twilio.recording;
-  const recordAttr = recordingMode !== 'do-not-record' ? ` record="${recordingMode}"` : '';
-
-  if (recordingMode !== 'do-not-record') {
-    console.log(`📹 Call recording enabled: ${recordingMode} for call ${callParams.CallSid}`);
-  }
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Connect${recordAttr}>
+    <Connect>
         <Stream url="wss://${host}/media-stream">
             <Parameter name="Called" value="${callParams.Called || callParams.To}" />
             <Parameter name="From" value="${callParams.From || callParams.Caller}" />
@@ -240,6 +234,58 @@ function isTwilioConfigured() {
   return !!twilioClient;
 }
 
+/**
+ * Start recording a call via Twilio REST API
+ * Use this for calls using <Stream> since the record attribute on <Connect> only works for Video rooms
+ * @param {string} callSid - Twilio call SID
+ * @returns {Promise<Object>} Recording result with recording SID or error
+ */
+async function startRecording(callSid) {
+  if (!callSid || !twilioClient) {
+    console.log('startRecording() skipped - missing callSid or Twilio not configured');
+    return { success: false, error: 'Missing callSid or Twilio not configured' };
+  }
+
+  // Check if recording is enabled
+  const recordingMode = config.twilio.recording;
+  if (recordingMode === 'do-not-record') {
+    console.log('Recording disabled by config');
+    return { success: false, error: 'Recording disabled' };
+  }
+
+  try {
+    // Determine recording channels based on config
+    // 'record-from-answer-dual' -> dual channel, 'record-from-answer' -> single channel
+    const recordingChannels = recordingMode === 'record-from-answer-dual' ? 'dual' : 'mono';
+
+    console.log(`📹 Starting ${recordingChannels} channel recording for call ${callSid}`);
+
+    const recording = await twilioClient.calls(callSid)
+      .recordings
+      .create({
+        recordingChannels: recordingChannels,
+        recordingStatusCallback: `${config.server.baseUrl}/recording-status`,
+        recordingStatusCallbackEvent: ['completed', 'failed']
+      });
+
+    console.log(`✅ Recording started: ${recording.sid} (${recordingChannels} channel)`);
+    return {
+      success: true,
+      recording_sid: recording.sid,
+      channels: recordingChannels,
+      call_sid: callSid
+    };
+
+  } catch (error) {
+    console.error(`❌ Failed to start recording for call ${callSid}:`, error.message);
+    return {
+      success: false,
+      error: error.message,
+      call_sid: callSid
+    };
+  }
+}
+
 module.exports = {
   twilioClient,
   escapeXML,
@@ -249,5 +295,6 @@ module.exports = {
   hangup,
   transferCall,
   isTwilioConfigured,
+  startRecording,
   pendingHangupTwiML // Export for route access
 };

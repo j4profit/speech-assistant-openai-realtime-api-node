@@ -147,6 +147,23 @@ router.post('/call-status', async (req, res) => {
 });
 
 /**
+ * Recording status callback webhook
+ */
+router.post('/recording-status', (req, res) => {
+  console.log('📹 Recording status callback:', req.body);
+
+  const { RecordingSid, RecordingStatus, RecordingUrl, CallSid, RecordingDuration } = req.body;
+
+  if (RecordingStatus === 'completed') {
+    console.log(`✅ Recording completed: ${RecordingSid} (${RecordingDuration}s) - ${RecordingUrl}`);
+  } else if (RecordingStatus === 'failed') {
+    console.error(`❌ Recording failed: ${RecordingSid} for call ${CallSid}`);
+  }
+
+  res.status(200).send('OK');
+});
+
+/**
  * Health check endpoint with detailed status
  */
 router.get('/health', (_req, res) => {
