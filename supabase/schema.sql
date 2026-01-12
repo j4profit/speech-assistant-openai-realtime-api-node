@@ -32,6 +32,7 @@ CREATE TABLE public.call_logs (
   balance_before_call numeric,
   recording_duration integer,
   recording_url text,
+  preserve_recording boolean DEFAULT false,
   CONSTRAINT call_logs_pkey PRIMARY KEY (id),
   CONSTRAINT call_logs_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id),
   CONSTRAINT call_logs_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
