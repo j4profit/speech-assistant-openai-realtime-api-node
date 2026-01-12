@@ -218,6 +218,7 @@ router.post('/recording-status', async (req, res) => {
           const result = await upsertCallLog({
             call_sid: CallSid,
             recording_url: publicRecordingUrl,
+            recording_duration: parseInt(RecordingDuration) || null,
             source: 'recording_webhook'
           });
 
@@ -235,6 +236,29 @@ router.post('/recording-status', async (req, res) => {
 
         if (updateResult && !updateResult.skipped) {
           console.log(`✅ Call log updated with recording URL for ${CallSid}`);
+
+          // Delete recording from Twilio to save storage costs
+          try {
+            const deleteResponse = await fetch(
+              `https://api.twilio.com/2010-04-01/Accounts/${config.twilio.accountSid}/Recordings/${RecordingSid}.json`,
+              {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': 'Basic ' + Buffer.from(
+                    `${config.twilio.accountSid}:${config.twilio.authToken}`
+                  ).toString('base64')
+                }
+              }
+            );
+
+            if (deleteResponse.ok || deleteResponse.status === 204) {
+              console.log(`🗑️ Deleted recording ${RecordingSid} from Twilio`);
+            } else {
+              console.warn(`⚠️ Failed to delete Twilio recording ${RecordingSid}: ${deleteResponse.status}`);
+            }
+          } catch (deleteError) {
+            console.warn(`⚠️ Error deleting Twilio recording ${RecordingSid}:`, deleteError.message);
+          }
         } else if (updateResult && updateResult.skipped) {
           console.log(`⚠️ Call log not found after retries for ${CallSid} - recording URL: ${publicRecordingUrl}`);
         } else {
