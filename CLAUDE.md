@@ -98,7 +98,11 @@ The system uses a hybrid approach to ensure call logs are never lost:
 
 ### AI Instructions System
 
-The `aiInstructions.js` service generates dynamic prompts for OpenAI Realtime API:
+The `aiInstructions.js` service generates dynamic prompts for OpenAI Realtime API.
+
+**Prompt structure** (follows OpenAI's Realtime prompting guide): Role & Objective → Personality & Tone → Language & Audio → Core Rules → Order Flow (one numbered flow) → Menu Rules → Other Requests → Tool Use → Sample Call → Restaurant-Specific Instructions → Restaurant Info + Menu → This Caller. Static guidance is first and per-restaurant/per-caller details are last so the prefix can be prompt-cached. Keep it as plain bullet rules; avoid stacking emoji/ALL-CAPS warnings, which make the model skip steps.
+
+**Capabilities**: `getCapabilities(restaurant)` decides delivery and which transfers are available. Both the prompt and `getAITools()` use it, so the AI is only given tools the restaurant can actually use (no "NEVER call X" rules needed).
 
 **Critical Rules Enforced**:
 1. **Never ask for phone numbers** - Caller ID is automatically captured
@@ -190,7 +194,7 @@ OpenAI Realtime API uses `semantic_vad` (configured in `config/index.js` → `vo
 
 ### Adding a New AI Function Tool
 
-1. Define function schema in `index.js` in `getAITools()` (line 162-241)
+1. Define function schema in `index.js` in `getAllAITools()`; if it depends on a restaurant setting, gate it in `getAITools()` via `getCapabilities()`
 2. Add handler case in `handleFunctionCall()` (line 302-397)
 3. If needed, create corresponding database service in `services/database.js`
 4. Update AI instructions in `services/aiInstructions.js` to explain when to use the tool

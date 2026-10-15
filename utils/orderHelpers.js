@@ -340,21 +340,20 @@ function formatMenuForAI(menuItems, restaurant) {
             itemList.forEach(item => {
               const cleanItem = item.replace(/\s*etc\.?\s*/gi, '').trim();
               if (cleanItem) {
-                extractedAddOns.push(`${cleanItem.toUpperCase()} = +$${price}`);
+                extractedAddOns.push(`${cleanItem} +$${price}`);
               }
             });
           } else {
-            extractedAddOns.push(`${description.toUpperCase()} = +$${price}`);
+            extractedAddOns.push(`${description} +$${price}`);
           }
         }
       });
 
       if (extractedAddOns.length > 0) {
-        addOnPricing = `\n  🚨🚨🚨 ADD-ON PRICES - ADD EACH ONE CUSTOMER ORDERS:`;
+        addOnPricing = `\n  Add-ons:`;
         extractedAddOns.forEach(addon => {
           addOnPricing += `\n    • ${addon}`;
         });
-        addOnPricing += `\n  ⚠️ FORMULA: (base + ALL add-ons) × 1.08 = total`;
       }
     }
 
@@ -378,7 +377,7 @@ function formatMenuForAI(menuItems, restaurant) {
         // For items with multiple sizes, add explicit indicator so AI doesn't miss it
         if (item.variants && item.variants.length > 1) {
           const sizeNames = item.variants.map(v => v.size).join(' or ');
-          menuText += `- ${item.name} [${item.variants.length} SIZES - MUST ASK: ${sizeNames}]: ${item.description || 'No description'} - ${item.priceDisplay}`;
+          menuText += `- ${item.name} [SIZES: ${sizeNames}]: ${item.description || 'No description'} - ${item.priceDisplay}`;
         } else {
           menuText += `- ${item.name}: ${item.description || 'No description'} - ${item.priceDisplay}`;
         }
@@ -393,9 +392,8 @@ function formatMenuForAI(menuItems, restaurant) {
   if (restaurant) {
     // Add specials if available
     if (restaurant.specials && restaurant.specials.trim()) {
-      menuText += '\n\n🌟 CURRENT SPECIALS:\n';
+      menuText += '\n\nCURRENT SPECIALS (mention when callers ask what\'s good or about deals):\n';
       menuText += `${restaurant.specials}\n`;
-      menuText += '\nIMPORTANT: Mention these specials to customers when they ask what\'s available or if they\'re interested in deals!\n';
     }
 
     // Add operating hours if available

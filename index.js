@@ -8,7 +8,7 @@ const routes = require('./routes');
 const twilioService = require('./services/twilio');
 const database = require('./services/database');
 const stateManager = require('./services/stateManager');
-const { shouldCreateCustomerMessage, generateAIInstructions } = require('./services/aiInstructions');
+const { shouldCreateCustomerMessage, generateAIInstructions, getCapabilities } = require('./services/aiInstructions');
 const { formatMenuForAI, createOrderTicket, calculateOrderReadyTime, validateAndRecalculatePrices } = require('./utils/orderHelpers');
 
 // Initialize Express app
@@ -314,19 +314,32 @@ wss.on('connection', (ws, _req) => {
     });
   }
 
-  // Get AI function tools configuration
+  // Get AI function tools configuration - only tools this restaurant can actually use
   function getAITools() {
+    const caps = getCapabilities(restaurant);
+    const enabledTools = {
+      validate_delivery_address: caps.delivery,
+      transfer_call_for_catering: caps.transferCatering,
+      transfer_call_for_manager: caps.transferManager,
+      transfer_call_for_complaint: caps.transferComplaint,
+      transfer_call_for_credit_card: caps.transferCreditCard
+    };
+
+    return getAllAITools().filter(tool => enabledTools[tool.name] !== false);
+  }
+
+  function getAllAITools() {
     return [
       {
         type: "function",
         name: "search_recent_orders",
-        description: "Search for recent orders when customer wants to check, modify, or cancel orders. AUTOMATICALLY uses caller ID - NO PARAMETERS NEEDED.",
+        description: "Look up the caller's recent orders so they can check, change, or cancel one. Uses caller ID automatically - call with no arguments.",
         parameters: {
           type: "object",
           properties: {
             phone_number: {
               type: "string",
-              description: "ONLY use if customer explicitly says they used a different number than their caller ID"
+              description: "Only set if the caller says they ordered from a different phone number"
             }
           },
           required: []
@@ -335,7 +348,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "validate_delivery_address",
-        description: "🚨 DELIVERY ORDERS ONLY - NEVER use for pickup orders! Validate delivery address for feasibility. Only call this when customer has explicitly chosen DELIVERY (not pickup).",
+        description: "Check that a delivery address is within the delivery area. Only for delivery orders. Returns status APPROVED, RETRY_ALLOWED, or MAX_RETRIES_EXCEEDED.",
         parameters: {
           type: "object",
           properties: {
@@ -354,7 +367,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "cancel_order",
-        description: "Cancel a PENDING order",
+        description: "Cancel a pending order found with search_recent_orders. Confirm with the caller first.",
         parameters: {
           type: "object",
           properties: {
@@ -367,7 +380,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "update_order",
-        description: "Update a PENDING order",
+        description: "Change a pending order found with search_recent_orders. Confirm the changes with the caller first.",
         parameters: {
           type: "object",
           properties: {
@@ -381,7 +394,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "create_customer_message",
-        description: "Save customer messages, complaints, questions, or callback requests",
+        description: "Save a message for restaurant staff to follow up on (feedback, questions you can't answer, callback requests, or requests that can't be transferred).",
         parameters: {
           type: "object",
           properties: {
@@ -390,9 +403,9 @@ wss.on('connection', (ws, _req) => {
             priority: {
               type: "string",
               enum: ["high", "medium", "normal"],
-              description: "Priority level"
+              description: "high for complaints or urgent issues, otherwise normal"
             },
-            subject: { type: "string", description: "Brief subject" }
+            subject: { type: "string", description: "A few words summarizing the message" }
           },
           required: ["customer_name", "message_content", "priority", "subject"]
         }
@@ -427,7 +440,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "transfer_call_for_credit_card",
-        description: "Transfer call to restaurant staff to process credit card payment for delivery order.",
+        description: "Transfer the caller to staff to take credit card payment. Only after submit_order succeeds for a delivery order paid by card.",
         parameters: {
           type: "object",
           properties: {}
@@ -436,7 +449,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "submit_order",
-        description: "Submit the customer's order after confirming all details and payment method. Call this function SILENTLY without speaking - then speak only the brief closing message.",
+        description: "Place the order once the caller has confirmed the review (and, for delivery, chosen a payment method). Returns the server-calculated total_with_tax and ready_time_minutes to say in the closing line.",
         parameters: {
           type: "object",
           properties: {
@@ -451,7 +464,7 @@ wss.on('connection', (ws, _req) => {
             },
             delivery_address: {
               type: "string",
-              description: "Delivery address (or 'N/A' for pickup orders)"
+              description: "Validated delivery address. Omit for pickup."
             },
             items: {
               type: "array",
@@ -470,7 +483,7 @@ wss.on('connection', (ws, _req) => {
             payment_method: {
               type: "string",
               enum: ["cash", "credit card"],
-              description: "Payment method - ONLY required for DELIVERY orders. Do NOT include for pickup orders."
+              description: "Delivery orders only. Omit for pickup (they pay at the store)."
             },
             allergies: {
               type: "string",
@@ -487,7 +500,7 @@ wss.on('connection', (ws, _req) => {
       {
         type: "function",
         name: "end_call",
-        description: "End the call gracefully. Use ONLY after saying goodbye when: (1) customer confirms they have no more questions after a message was taken, or (2) customer explicitly wants to end the call without ordering.",
+        description: "Hang up after you've said goodbye, when the caller is done and no order was placed. Not needed after submit_order - those calls end automatically.",
         parameters: {
           type: "object",
           properties: {
@@ -832,6 +845,12 @@ wss.on('connection', (ws, _req) => {
 
           // Return message for AI to speak, then transfer after delay
           console.log(`✅ Preparing transfer to ${restaurant.call_forwarding_number} - Reason: ${reason}`);
+
+          // Cancel the post-order auto-hangup so it doesn't cut off the transfer
+          if (hangupTimer) {
+            clearTimeout(hangupTimer);
+            hangupTimer = null;
+          }
 
           const transferMessages = {
             'transfer_call_for_catering': 'Let me transfer you to our catering specialist. Please hold.',
