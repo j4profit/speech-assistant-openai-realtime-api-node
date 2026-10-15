@@ -203,8 +203,7 @@ wss.on('connection', (ws, _req) => {
     try {
       openaiWs = new WebSocket(`${config.openai.websocketUrl}?model=${currentModel}`, {
         headers: {
-          'Authorization': `Bearer ${config.openai.apiKey}`,
-          'OpenAI-Beta': 'realtime=v1'
+          'Authorization': `Bearer ${config.openai.apiKey}`
         },
         perMessageDeflate: false,
         handshakeTimeout: 5000,
@@ -252,19 +251,26 @@ wss.on('connection', (ws, _req) => {
       const sessionUpdate = {
         type: 'session.update',
         session: {
-          modalities: ['text', 'audio'],
+          type: 'realtime',
+          output_modalities: ['audio'],
           instructions: instructions,
-          voice: restaurant.ai_voice || 'coral',
-          input_audio_format: 'g711_ulaw',
-          output_audio_format: 'g711_ulaw',
-          turn_detection: {
-            type: 'semantic_vad',
-            eagerness: 'high',
-            create_response: true,
-            interrupt_response: true
+          audio: {
+            input: {
+              format: { type: 'audio/pcmu' },
+              turn_detection: {
+                type: 'semantic_vad',
+                eagerness: 'high',
+                create_response: true,
+                interrupt_response: true
+              }
+            },
+            output: {
+              format: { type: 'audio/pcmu' },
+              voice: restaurant.ai_voice || 'coral'
+            }
           },
-          temperature: 0.8,
-          max_response_output_tokens: 500,
+          reasoning: { effort: config.openai.reasoningEffort },
+          max_output_tokens: 1000, // includes reasoning tokens
           tools: tools,
           tool_choice: 'auto'
         }
@@ -500,7 +506,7 @@ wss.on('connection', (ws, _req) => {
       }
 
       switch (response.type) {
-        case 'response.audio.delta':
+        case 'response.output_audio.delta':
           if (streamSid && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
               event: 'media',
@@ -510,7 +516,7 @@ wss.on('connection', (ws, _req) => {
           }
           break;
 
-        case 'response.audio_transcript.done':
+        case 'response.output_audio_transcript.done':
           console.log('AI said:', response.transcript);
           conversationTranscript.push({
             timestamp: new Date().toISOString(),
@@ -542,11 +548,16 @@ wss.on('connection', (ws, _req) => {
                 openaiWs.send(JSON.stringify({
                   type: 'session.update',
                   session: {
-                    turn_detection: {
-                      type: 'semantic_vad',
-                      eagerness: 'medium',
-                      create_response: true,
-                      interrupt_response: true
+                    type: 'realtime',
+                    audio: {
+                      input: {
+                        turn_detection: {
+                          type: 'semantic_vad',
+                          eagerness: 'medium',
+                          create_response: true,
+                          interrupt_response: true
+                        }
+                      }
                     }
                   }
                 }));

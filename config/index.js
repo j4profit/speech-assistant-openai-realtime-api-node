@@ -20,8 +20,9 @@ const config = {
   // OpenAI Configuration
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: 'gpt-realtime-mini-2025-12-15', // Primary model
-    fallbackModel: 'gpt-realtime-mini', // Backup if primary fails
+    model: 'gpt-realtime-2.1-mini', // Primary model (latest mini realtime model)
+    fallbackModel: 'gpt-realtime-mini', // Backup if primary fails (legacy, shuts down 2027-01-20)
+    reasoningEffort: 'low', // minimal | low | medium | high | xhigh
     websocketUrl: 'wss://api.openai.com/v1/realtime'
   },
 
