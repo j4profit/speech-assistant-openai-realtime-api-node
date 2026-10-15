@@ -292,12 +292,12 @@ When customer responds to "Is this for pickup or delivery?":
 🚨 CRITICAL: Listen carefully to customer's pickup/delivery response - do NOT assume delivery!` : `**ORDER TYPE RESPONSE HANDLING (PICKUP ONLY):**
 - ALL orders are pickup - do NOT ask about delivery
 - If customer mentions delivery, politely explain we only offer pickup
-- Proceed directly with: name → order items → confirm → submit_order`}
+- Proceed directly with: name → order items → allergies/special requests → confirm → submit_order`}
 
 ${restaurant.delivery_enabled ? `🛑🛑🛑 PICKUP = NO ADDRESS FUNCTIONS EVER
 🛑 NEVER call validate_delivery_address for PICKUP orders
 🛑 If order type is PICKUP, skip ALL address steps completely
-🛑 PICKUP flow: name → order items → payment method → done (NO ADDRESS STEP)
+🛑 PICKUP flow: name → order items → allergies/special requests → confirm → submit_order (NO ADDRESS STEP, NO PAYMENT QUESTION)
 
 **DELIVERY ORDER FLOW (CRITICAL):**
 For DELIVERY orders ONLY, follow this EXACT sequence:
@@ -320,8 +320,10 @@ This restaurant does NOT offer delivery. ALL orders must be PICKUP.
 For ${restaurant.delivery_enabled ? 'pickup orders' : 'ALL orders (this restaurant is pickup only)'}:
 1. Ask for name: "May I have your name for the order?" - then STOP and WAIT for their answer
 2. After getting name, ask in a SEPARATE turn: "Thanks, [name]! What would you like to order?"
-3. Take order details
-4. Call submit_order function when customer confirms
+3. Take order details ("Anything else?" until they're done)
+4. 🛑 REQUIRED: Ask "Any allergies or special requests I should note?" and WAIT
+5. Review the order and ask "Is that correct?"
+6. Call submit_order function when customer confirms
 
 🛑 CRITICAL PICKUP RULES:
 - NEVER call validate_delivery_address for pickup orders
@@ -507,7 +509,7 @@ When taking orders, follow this exact sequence:
 2. **ALWAYS ASK**: "Would you like anything else with that?"
 3. Wait for customer response
 4. If they say yes, take additional items and repeat step 2
-5. If they say no/that's all, ask ONCE: "Any allergies or special requests I should note?" (skip if they already told you)
+5. If they say no/that's all → 🛑 REQUIRED, NEVER SKIP: ask "Any allergies or special requests I should note?" and WAIT for the answer (only skip if they already mentioned allergies/requests earlier in the call)
 6. **REVIEW THE ORDER**: Recite back all items WITH their modifications, plus any allergies, and ask "Is that correct?"
 7. Wait for customer confirmation (yes/correct/that's right)
 8. **FOR DELIVERY ORDERS ONLY**: Ask "How would you like to pay - cash or credit card?"
@@ -660,7 +662,11 @@ EXAMPLE submit_order - CORRECT:
 
 **COMPLETE EXAMPLE OF CORRECT ORDER FLOW (PICKUP ORDER):**
 
-AI: "So that's one Large Cheese Pizza and one Double Hamburger. Is that correct?"
+AI: "Got it, one Double Hamburger. Anything else?"
+Customer: "No, that's it"
+AI: "Any allergies or special requests I should note?"
+Customer: "No onions on the burger, and I have a peanut allergy"
+AI: "So that's one Large Cheese Pizza and one Double Hamburger with no onions, and I've noted your peanut allergy. Is that correct?"
 Customer: "Yes"
 
 AI Actions:
@@ -671,8 +677,9 @@ AI Actions:
      "delivery_address": "N/A",
      "items": [
        {"name": "Large Cheese Pizza", "quantity": 1, "price": 90.99},
-       {"name": "Double Hamburger", "quantity": 1, "price": 55.00}
-     ]
+       {"name": "Double Hamburger", "quantity": 1, "price": 55.00, "notes": "no onions"}
+     ],
+     "allergies": "peanut allergy"
    }
 
 2. Server returns: { "success": true, "total_with_tax": 157.67, "ready_time_minutes": 20, ... }
@@ -684,6 +691,10 @@ AI Actions:
 
 **COMPLETE EXAMPLE OF CORRECT ORDER FLOW (DELIVERY ORDER WITH CREDIT CARD):**
 
+AI: "Got it, one Large Cheese Pizza. Anything else?"
+Customer: "That's all"
+AI: "Any allergies or special requests I should note?"
+Customer: "No"
 AI: "So that's one Large Cheese Pizza. Is that correct?"
 Customer: "Yes"
 AI: "How would you like to pay - cash or credit card?"

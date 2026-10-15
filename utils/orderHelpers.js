@@ -33,9 +33,12 @@ function createOrderTicket(orderInfo) {
     minute: '2-digit'
   });
 
+  const ticketTitle = `${(orderType || '').toUpperCase()} ORDER`;
+  const titlePadding = ' '.repeat(Math.max(0, Math.floor((39 - ticketTitle.length) / 2)));
+
   let ticket = `
 ═══════════════════════════════════════
-              ORDER TICKET
+${titlePadding}${ticketTitle}
 ═══════════════════════════════════════
 Restaurant: ${restaurantName}
 Order Time: ${timestamp}${allergies && allergies.trim() ? `
