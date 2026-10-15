@@ -458,9 +458,10 @@ wss.on('connection', (ws, _req) => {
               items: {
                 type: "object",
                 properties: {
-                  name: { type: "string", description: "Item name" },
+                  name: { type: "string", description: "Item name (include size and PRICED add-ons, e.g. 'Large Burger with bacon')" },
                   quantity: { type: "number", description: "Quantity" },
-                  price: { type: "number", description: "Price per item" }
+                  price: { type: "number", description: "Price per item" },
+                  notes: { type: "string", description: "Non-priced modifications for THIS item only, e.g. 'no onions, well done, sauce on side'. Omit if none." }
                 },
                 required: ["name", "quantity", "price"]
               },
@@ -471,9 +472,13 @@ wss.on('connection', (ws, _req) => {
               enum: ["cash", "credit card"],
               description: "Payment method - ONLY required for DELIVERY orders. Do NOT include for pickup orders."
             },
+            allergies: {
+              type: "string",
+              description: "ANY food allergy or dietary restriction the customer mentioned at any point in the call (e.g. 'peanut allergy', 'gluten free', 'shellfish'). Omit only if none were mentioned."
+            },
             special_instructions: {
               type: "string",
-              description: "Any special instructions from customer"
+              description: "Order-level requests not tied to one item (e.g. 'extra napkins', 'ring doorbell', 'cut pizza in squares'). Omit if none."
             }
           },
           required: ["customer_name", "order_type", "items"]
@@ -956,10 +961,24 @@ wss.on('connection', (ws, _req) => {
 
       const readyTimeInfo = calculateOrderReadyTime(restaurant, isDelivery);
 
-      // Format items for ticket
-      const itemsText = orderData.items.map(item =>
-        `${item.quantity}x ${item.name} - $${item.price.toFixed(2)}`
-      ).join('\n');
+      // Format items for ticket (item-level notes printed under each item)
+      const itemsText = orderData.items.map(item => {
+        let line = `${item.quantity}x ${item.name} - $${item.price.toFixed(2)}`;
+        if (item.notes && item.notes.trim()) line += `\n   -> ${item.notes.trim()}`;
+        return line;
+      }).join('\n');
+
+      // Combined notes for the special_instructions DB field so allergies and
+      // item modifications show up anywhere that field is displayed
+      const allergies = (orderData.allergies || '').trim();
+      const itemNotes = orderData.items
+        .filter(item => item.notes && item.notes.trim())
+        .map(item => `${item.name}: ${item.notes.trim()}`);
+      const combinedInstructions = [
+        allergies ? `ALLERGY: ${allergies}` : '',
+        ...itemNotes,
+        (orderData.special_instructions || '').trim()
+      ].filter(Boolean).join(' | ');
 
       // Create the full formatted ticket
       const ticket = createOrderTicket({
@@ -968,6 +987,7 @@ wss.on('connection', (ws, _req) => {
         orderType: orderData.order_type,
         deliveryAddress: orderData.delivery_address || 'N/A',
         items: itemsText,
+        allergies,
         specialInstructions: orderData.special_instructions || '',
         paymentMethod: orderData.payment_method,
         subtotal: roundedSubtotal,
@@ -987,7 +1007,7 @@ wss.on('connection', (ws, _req) => {
         delivery_address: orderData.delivery_address || 'N/A',
         order_details: ticket,
         total_amount: roundedTotal,
-        special_instructions: orderData.special_instructions || '',
+        special_instructions: combinedInstructions,
         payment_method: orderData.payment_method,
         call_sid: callSid,
         ready_time: readyTimeInfo.readyTimeString,

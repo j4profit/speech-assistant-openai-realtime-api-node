@@ -51,7 +51,7 @@ const config = {
   // Voice Configuration
   voice: {
     model: 'Google.en-US-Chirp3-HD-Aoede',
-    vadEagerness: 'low', // semantic_vad eagerness: low | medium | high | auto (low = waits for caller to finish)
+    vadEagerness: 'medium', // semantic_vad eagerness: low | medium | high | auto (low waits up to ~8s on short answers like names)
     noiseReduction: 'near_field', // near_field (phone handset) | far_field | null to disable
     greetingDelayMs: 2500 // AI greets first if caller is silent this long after connecting
   },

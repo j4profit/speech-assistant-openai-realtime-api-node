@@ -12,6 +12,7 @@ function createOrderTicket(orderInfo) {
     orderType,
     deliveryAddress,
     items,
+    allergies,
     specialInstructions,
     subtotal,
     deliveryFee,
@@ -37,7 +38,11 @@ function createOrderTicket(orderInfo) {
               ORDER TICKET
 ═══════════════════════════════════════
 Restaurant: ${restaurantName}
-Order Time: ${timestamp}
+Order Time: ${timestamp}${allergies && allergies.trim() ? `
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ⚠️  ALLERGY ALERT: ${allergies.trim().toUpperCase()}
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!` : ''}
 
 CUSTOMER INFORMATION:
 • Name: ${customerName}
@@ -53,7 +58,16 @@ ORDER TYPE: ${orderType.toUpperCase()}`;
   ticket += `
 
 ORDER ITEMS:
-${formatOrderItems(items, null)}
+${formatOrderItems(items, null)}`;
+
+  if (specialInstructions && specialInstructions.trim()) {
+    ticket += `
+
+SPECIAL INSTRUCTIONS:
+${specialInstructions}`;
+  }
+
+  ticket += `
 
 PRICING BREAKDOWN:
 • Subtotal: $${(subtotal || 0).toFixed(2)}`;
@@ -83,13 +97,6 @@ PAYMENT METHOD:
 TIMING:
 • Order should be ready: ${readyTime}`;
 
-  if (specialInstructions && specialInstructions.trim()) {
-    ticket += `
-
-SPECIAL INSTRUCTIONS:
-${specialInstructions}`;
-  }
-
   ticket += `
 
 ═══════════════════════════════════════
@@ -115,9 +122,15 @@ function formatOrderItems(items, totalAmount) {
   let formattedItems = '';
 
   itemLines.forEach((item) => {
+    // Item notes (indented "->" lines) stay attached under their item
+    if (/^\s*->/.test(item)) {
+      formattedItems += `${item}\n`;
+      return;
+    }
+
     const cleanItem = item.trim()
       .replace(/^[-•*]\s*/, '')  // Remove leading bullets/dashes
-      .replace(/^\d+\.?\s*/, ''); // Remove leading numbers
+      .replace(/^\d+\.\s+/, ''); // Remove list numbering ("1. "), keep quantities ("2x")
 
     if (cleanItem) {
       formattedItems += `• ${cleanItem}\n`;

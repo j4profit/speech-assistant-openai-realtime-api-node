@@ -180,7 +180,7 @@ The system uses µ-law (G.711) audio format:
 ### Voice Activity Detection (VAD)
 
 OpenAI Realtime API uses `semantic_vad` (configured in `config/index.js` → `voice`):
-- `vadEagerness: 'low'` - Waits for the caller to finish their thought before responding
+- `vadEagerness: 'medium'` - Balances waiting for the caller vs. response speed (`low` can wait up to ~8s after short answers like names)
 - `noiseReduction: 'near_field'` - Filters background noise for phone handset audio
 - `greetingDelayMs: 2500` - AI greets first if the caller is silent this long
 
