@@ -57,10 +57,11 @@ wss.on('connection', (ws, _req) => {
   let currentModel = config.openai.model; // Track which model is being used
   let modelRetryAttempted = false; // Prevent infinite retry loops
 
-  // Adaptive VAD: Track AI responses to detect background noise issues
-  let aiResponseTimestamps = []; // Timestamps of recent AI responses
-  let vadEagerness = 'high'; // Current VAD eagerness setting
-  let vadAdjusted = false; // Whether we've already adjusted VAD (only do once per call)
+  // Barge-in: track AI audio queued in Twilio so it can be cleared when the caller interrupts
+  let latestMediaTimestamp = 0; // Latest Twilio media timestamp (ms since stream start)
+  let lastAssistantItem = null; // Item ID of the AI response currently playing
+  let responseStartTimestamp = null; // Twilio timestamp when that response started playing
+  let markQueue = []; // Marks sent to Twilio that haven't played yet
 
   // Unified hangup handler - single source of truth for all hangup scenarios
   async function initiateHangup(reason, options = {}) {
@@ -257,9 +258,10 @@ wss.on('connection', (ws, _req) => {
           audio: {
             input: {
               format: { type: 'audio/pcmu' },
+              noise_reduction: config.voice.noiseReduction ? { type: config.voice.noiseReduction } : null,
               turn_detection: {
                 type: 'semantic_vad',
-                eagerness: 'high',
+                eagerness: config.voice.vadEagerness,
                 create_response: true,
                 interrupt_response: true
               }
@@ -508,11 +510,25 @@ wss.on('connection', (ws, _req) => {
       switch (response.type) {
         case 'response.output_audio.delta':
           if (streamSid && ws.readyState === WebSocket.OPEN) {
+            // New AI response started playing - remember where it began
+            if (response.item_id && response.item_id !== lastAssistantItem) {
+              lastAssistantItem = response.item_id;
+              responseStartTimestamp = latestMediaTimestamp;
+            }
+
             ws.send(JSON.stringify({
               event: 'media',
               streamSid: streamSid,
               media: { payload: response.delta }
             }));
+
+            // Mark lets us know when Twilio has actually played this chunk
+            ws.send(JSON.stringify({
+              event: 'mark',
+              streamSid: streamSid,
+              mark: { name: 'responsePart' }
+            }));
+            markQueue.push('responsePart');
           }
           break;
 
@@ -524,47 +540,6 @@ wss.on('connection', (ws, _req) => {
             text: response.transcript
           });
 
-          // Adaptive VAD: Track response timestamps and detect rapid-fire responses
-          // If AI responds 3+ times within 10 seconds, background noise may be triggering
-          if (!vadAdjusted && vadEagerness === 'high') {
-            const now = Date.now();
-            aiResponseTimestamps.push(now);
-
-            // Keep only timestamps from last 10 seconds
-            const tenSecondsAgo = now - 10000;
-            aiResponseTimestamps = aiResponseTimestamps.filter(t => t > tenSecondsAgo);
-
-            // If 3+ responses in 10 seconds, switch to medium eagerness
-            if (aiResponseTimestamps.length >= 3) {
-              console.log('🔊 ADAPTIVE VAD: Detected rapid AI responses - likely background noise');
-              console.log(`   ${aiResponseTimestamps.length} responses in last 10 seconds`);
-              console.log('   Switching semantic_vad eagerness from "high" to "medium"');
-
-              vadEagerness = 'medium';
-              vadAdjusted = true;
-
-              // Send session update to change VAD eagerness
-              if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                openaiWs.send(JSON.stringify({
-                  type: 'session.update',
-                  session: {
-                    type: 'realtime',
-                    audio: {
-                      input: {
-                        turn_detection: {
-                          type: 'semantic_vad',
-                          eagerness: 'medium',
-                          create_response: true,
-                          interrupt_response: true
-                        }
-                      }
-                    }
-                  }
-                }));
-                console.log('   ✅ Session updated with medium eagerness');
-              }
-            }
-          }
           break;
 
         case 'input_audio_buffer.speech_started':
@@ -574,6 +549,7 @@ wss.on('connection', (ws, _req) => {
             greetingTimeout = null;
             customerHasSpoken = true;
           }
+          handleBargeIn();
           break;
 
         case 'conversation.item.created':
@@ -611,6 +587,32 @@ wss.on('connection', (ws, _req) => {
     } catch (error) {
       console.error('Error handling OpenAI message:', error);
     }
+  }
+
+  // Caller interrupted: stop AI audio already queued in Twilio and trim OpenAI's
+  // copy of the response to what the caller actually heard
+  function handleBargeIn() {
+    if (markQueue.length === 0 || responseStartTimestamp === null) return;
+
+    const audioEndMs = Math.max(0, latestMediaTimestamp - responseStartTimestamp);
+    console.log(`✋ Caller interrupted AI after ${audioEndMs}ms - clearing queued audio`);
+
+    if (lastAssistantItem && openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+      openaiWs.send(JSON.stringify({
+        type: 'conversation.item.truncate',
+        item_id: lastAssistantItem,
+        content_index: 0,
+        audio_end_ms: audioEndMs
+      }));
+    }
+
+    if (streamSid && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ event: 'clear', streamSid: streamSid }));
+    }
+
+    markQueue = [];
+    lastAssistantItem = null;
+    responseStartTimestamp = null;
   }
 
   // Handle function calls from AI
@@ -1073,10 +1075,11 @@ wss.on('connection', (ws, _req) => {
               }));
               openaiWs.send(JSON.stringify({ type: 'response.create' }));
             }
-          }, 1000);
+          }, config.voice.greetingDelayMs);
           break;
 
         case 'media':
+          latestMediaTimestamp = Number(msg.media.timestamp) || latestMediaTimestamp;
           if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
             const audioAppend = {
               type: 'input_audio_buffer.append',
@@ -1084,6 +1087,11 @@ wss.on('connection', (ws, _req) => {
             };
             openaiWs.send(JSON.stringify(audioAppend));
           }
+          break;
+
+        case 'mark':
+          // Twilio finished playing a chunk of AI audio
+          if (markQueue.length > 0) markQueue.shift();
           break;
 
         case 'stop':

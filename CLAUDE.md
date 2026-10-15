@@ -179,10 +179,12 @@ The system uses µ-law (G.711) audio format:
 
 ### Voice Activity Detection (VAD)
 
-OpenAI Realtime API uses server-side VAD:
-- `vadThreshold: 0.8` - Sensitivity for detecting speech
-- `silenceDurationMs: 500` - Silence duration before considering turn complete
-- Configured in `config/index.js` and applied in session setup
+OpenAI Realtime API uses `semantic_vad` (configured in `config/index.js` → `voice`):
+- `vadEagerness: 'low'` - Waits for the caller to finish their thought before responding
+- `noiseReduction: 'near_field'` - Filters background noise for phone handset audio
+- `greetingDelayMs: 2500` - AI greets first if the caller is silent this long
+
+**Barge-in**: When the caller starts speaking (`input_audio_buffer.speech_started`), `handleBargeIn()` sends Twilio a `clear` event to drop queued AI audio and sends OpenAI `conversation.item.truncate` so its transcript matches what the caller heard. Twilio `mark` events track which audio has actually played.
 
 ## Common Development Tasks
 

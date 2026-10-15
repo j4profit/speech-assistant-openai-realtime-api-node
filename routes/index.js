@@ -292,8 +292,8 @@ router.get('/health', (_req, res) => {
     caller_id_usage: 'automatic_no_manual_entry_required',
     ring_two_tech_branding: true,
     google_chirp3_hd_voice: true,
-    vad_threshold: config.voice.vadThreshold,
-    silence_duration_ms: config.voice.silenceDurationMs,
+    vad_eagerness: config.voice.vadEagerness,
+    noise_reduction: config.voice.noiseReduction,
     last_health_check: new Date().toISOString(),
     pending_calls: stateManager.getStats()
   };
