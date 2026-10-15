@@ -44,7 +44,7 @@ const config = {
   // Server Configuration
   server: {
     port: process.env.PORT || 3000,
-    baseUrl: process.env.BASE_URL || 'https://ring2tech.com',
+    baseUrl: process.env.BASE_URL || 'https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com',
     environment: process.env.NODE_ENV || 'development'
   },
 

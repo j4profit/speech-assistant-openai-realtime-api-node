@@ -29,7 +29,7 @@ npm start               # Run in production mode
    - `SUPABASE_ANON_KEY` - Supabase anonymous key
    - `TWILIO_ACCOUNT_SID` - Twilio account SID
    - `TWILIO_AUTH_TOKEN` - Twilio auth token
-   - `BASE_URL` - Public base URL for webhooks (e.g., `https://ring2tech.com`)
+   - `BASE_URL` - Public base URL for webhooks (e.g., `https://speech-assistant-openai-realtime-api-node-ddc4.onrender.com`)
    - `PORT` - Server port (default: 3000)
 
 ## Architecture Overview
