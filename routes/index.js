@@ -12,7 +12,7 @@ const router = express.Router();
 const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 
 /**
- * Hangup TwiML endpoint with Ring Two Tech branding
+ * Hangup TwiML endpoint with Ring 2 Order branding
  */
 router.post('/hangup-twiml', (req, res) => {
   const callSid = req.query.call_sid || req.body.CallSid;

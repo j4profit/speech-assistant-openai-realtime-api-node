@@ -95,7 +95,7 @@ wss.on('connection', (ws, _req) => {
     }
 
     try {
-      // Attempt graceful hangup with Ring Two Tech branding
+      // Attempt graceful hangup with Ring 2 Order branding
       const hangupResult = await twilioService.hangup(callSid, {
         method: 'graceful',
         reason: reason,

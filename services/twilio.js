@@ -29,7 +29,7 @@ function escapeXML(text) {
 }
 
 /**
- * Generate TwiML for hangup with Ring Two Tech branding
+ * Generate TwiML for hangup with Ring 2 Order branding
  * @param {string} callSid - Call SID
  * @param {string} restaurantName - Restaurant name (optional)
  * @returns {string} TwiML XML
@@ -43,8 +43,8 @@ function generateHangupTwiML(callSid, restaurantName = '') {
   }
 
   const message = restaurantName
-    ? `Your call was processed by Ring two tech. Thank you for calling ${restaurantName}.`
-    : 'Your call was processed by Ring two tech. Thank you for calling.';
+    ? `Your call was processed by Ring two Order, where we never miss an order! Thank you for calling ${restaurantName}.`
+    : 'Your call was processed by Ring two Order, where we never miss an order! Thank you for calling.';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
